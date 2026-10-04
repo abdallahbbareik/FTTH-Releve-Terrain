@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -57,6 +58,7 @@ fun PiquetageTopBar(
     onOpenFilters: () -> Unit,
     onOpenSyncLogs: () -> Unit,
     onOpenExport: () -> Unit,
+    onOpenWorkflowGuide: () -> Unit,
     onResetDemo: () -> Unit
 ) {
     var isSearchActive by remember { mutableStateOf(false) }
@@ -170,6 +172,14 @@ fun PiquetageTopBar(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Guide du Workflow Piquetage") },
+                            leadingIcon = { Icon(Icons.Default.Route, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenWorkflowGuide()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Rapport & Statistiques") },
                             leadingIcon = { Icon(Icons.Default.Assessment, contentDescription = null) },

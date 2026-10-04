@@ -34,7 +34,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +54,7 @@ import com.example.ui.components.NodeDetailSheet
 import com.example.ui.components.PiquetageTopBar
 import com.example.ui.components.SyncLogSheet
 import com.example.ui.components.SyncStatusBanner
+import com.example.ui.components.WorkflowGuideDialog
 import com.example.ui.map.InteractiveFtthMap
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.FtthViewModel
@@ -98,14 +101,18 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val technicianLocation by viewModel.technicianLocation.collectAsStateWithLifecycle()
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
 
+    var showWorkflowGuide by remember { mutableStateOf(false) }
+
     // Handle back button for any open sheets or selection
     BackHandler(
-        enabled = selectedNode != null || isCableDrawingMode || showFilterSheet || showSyncLogSheet || showExportDialog
+        enabled = selectedNode != null || isCableDrawingMode || showFilterSheet || showSyncLogSheet || showExportDialog || showWorkflowGuide
     ) {
         if (selectedNode != null) {
             viewModel.selectNode(null)
         } else if (isCableDrawingMode) {
             viewModel.toggleCableDrawingMode()
+        } else if (showWorkflowGuide) {
+            showWorkflowGuide = false
         } else if (showFilterSheet) {
             viewModel.dismissFilterSheet()
         } else if (showSyncLogSheet) {
@@ -126,6 +133,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onOpenFilters = { viewModel.openFilterSheet() },
                     onOpenSyncLogs = { viewModel.openSyncLogSheet() },
                     onOpenExport = { viewModel.openExportDialog() },
+                    onOpenWorkflowGuide = { showWorkflowGuide = true },
                     onResetDemo = { viewModel.resetDemoData() }
                 )
                 SyncStatusBanner(
@@ -291,6 +299,12 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             nodes = rawNodes,
             links = rawLinks,
             onDismiss = { viewModel.dismissExportDialog() }
+        )
+    }
+
+    if (showWorkflowGuide) {
+        WorkflowGuideDialog(
+            onDismiss = { showWorkflowGuide = false }
         )
     }
 }
