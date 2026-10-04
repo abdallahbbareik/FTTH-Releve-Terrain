@@ -17,7 +17,7 @@ env:
 jobs:
   build:
     name: Build & Test OptiFTTH
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
@@ -28,22 +28,22 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Create Mock .env File
         run: |
           cp .env.example .env || touch .env
 
       - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew || true
+        run: chmod +x gradlew
 
       - name: Run Unit & Robolectric Tests
-        run: |
-          ./gradlew testDebugUnitTest --no-daemon -Dksp.incremental=false --stacktrace || gradle :app:testDebugUnitTest --no-daemon -Dksp.incremental=false
+        run: ./gradlew testDebugUnitTest --no-daemon -Dksp.incremental=false --stacktrace
 
       - name: Build Debug APK
-        run: |
-          ./gradlew assembleDebug --no-daemon -Dksp.incremental=false --stacktrace || gradle :app:assembleDebug --no-daemon -Dksp.incremental=false
+        run: ./gradlew assembleDebug --no-daemon -Dksp.incremental=false --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
