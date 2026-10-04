@@ -67,14 +67,14 @@ fun WorkflowGuideDialog(onDismiss: () -> Unit) {
         WorkflowStep(
             stepNumber = 2,
             title = "Piquetage des Nœuds d'Infrastructure",
-            description = "Appui long sur la carte pour piqueter poteaux, chambres de tirage, BPE, PBO, immeubles ou villas.",
+            description = "Appui long sur la carte pour piqueter poteaux, chambres de tirage, boîtiers (BPE/PBO/PB), SRO, immeubles ou villas.",
             icon = Icons.Default.TouchApp,
             color = Color(0xFFEA580C)
         ),
         WorkflowStep(
             stepNumber = 3,
-            title = "Audit Technique & Mesures Optiques",
-            description = "Remplissez la fiche : conformité des appuis, saturation des chambres, mesure photométrique (dBm) et photos.",
+            title = "Audit Technique & Relevé Terrain",
+            description = "Renseignez les champs : statut, état conforme, adresse automatique, boîtier FTTH, spécifications métier et photos.",
             icon = Icons.Default.CheckCircle,
             color = Color(0xFF16A34A)
         ),

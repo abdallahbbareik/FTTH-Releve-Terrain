@@ -400,11 +400,11 @@ fun NodeDetailSheet(
                         Text(text = "Nature de l'appui :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois", "métal", "béton", "façade").forEach { nat ->
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "façade" to "Façade").forEach { (nat, lbl) ->
                                 FilterChip(
                                     selected = poleNature.equals(nat, ignoreCase = true),
                                     onClick = { poleNature = nat },
-                                    label = { Text(nat.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -501,11 +501,11 @@ fun NodeDetailSheet(
                         Text(text = "Type de SRO :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("armoire de rue", "local").forEach { st ->
+                            listOf("armoire de rue" to "Armoire de rue", "local" to "Local technique").forEach { (st, lbl) ->
                                 FilterChip(
                                     selected = sroType.equals(st, ignoreCase = true),
                                     onClick = { sroType = st },
-                                    label = { Text(st.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -595,11 +595,11 @@ fun NodeDetailSheet(
                         Text(text = "Mode de raccordement :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("façade", "souterrain", "aérien").forEach { md ->
+                            listOf("façade" to "Façade", "souterrain" to "Souterrain", "aérien" to "Aérien").forEach { (md, lbl) ->
                                 FilterChip(
                                     selected = buildingConnectionMode.equals(md, ignoreCase = true),
                                     onClick = { buildingConnectionMode = md },
-                                    label = { Text(md.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -610,11 +610,11 @@ fun NodeDetailSheet(
                         Text(text = "Mode de raccordement :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("aérien", "souterrain", "façade").forEach { vm ->
+                            listOf("aérien" to "Aérien", "souterrain" to "Souterrain", "façade" to "Façade").forEach { (vm, lbl) ->
                                 FilterChip(
                                     selected = villaConnectionMode.equals(vm, ignoreCase = true),
                                     onClick = { villaConnectionMode = vm },
-                                    label = { Text(vm.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }

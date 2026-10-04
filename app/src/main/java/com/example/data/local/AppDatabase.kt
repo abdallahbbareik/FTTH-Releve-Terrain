@@ -12,7 +12,7 @@ import androidx.room.TypeConverters
         FtthLinkEntity::class,
         SyncLogEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(FtthTypeConverters::class)

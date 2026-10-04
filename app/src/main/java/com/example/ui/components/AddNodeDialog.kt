@@ -352,11 +352,11 @@ fun AddNodeDialog(
                     FtthNodeType.POTEAU -> {
                         Text(text = "Nature :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois", "métal", "béton", "façade").forEach { nat ->
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "façade" to "Façade").forEach { (nat, lbl) ->
                                 FilterChip(
-                                    selected = poleNature == nat,
+                                    selected = poleNature.equals(nat, ignoreCase = true),
                                     onClick = { poleNature = nat },
-                                    label = { Text(nat.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -378,12 +378,20 @@ fun AddNodeDialog(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf("L0T", "L1T", "L2T", "K1C", "K2C").forEach { ch ->
                                 FilterChip(
-                                    selected = chamberType == ch,
+                                    selected = chamberType.equals(ch, ignoreCase = true),
                                     onClick = { chamberType = ch },
                                     label = { Text(ch) }
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = chamberType,
+                            onValueChange = { chamberType = it },
+                            label = { Text("Désignation format chambre") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
                     }
 
                     FtthNodeType.BOITIER -> {
@@ -420,11 +428,11 @@ fun AddNodeDialog(
                     FtthNodeType.SRO -> {
                         Text(text = "Type SRO :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("armoire de rue", "local").forEach { st ->
+                            listOf("armoire de rue" to "Armoire de rue", "local" to "Local technique").forEach { (st, lbl) ->
                                 FilterChip(
-                                    selected = sroType == st,
+                                    selected = sroType.equals(st, ignoreCase = true),
                                     onClick = { sroType = st },
-                                    label = { Text(st.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -465,11 +473,11 @@ fun AddNodeDialog(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(text = "Mode raccordement :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("façade", "souterrain", "aérien").forEach { md ->
+                            listOf("façade" to "Façade", "souterrain" to "Souterrain", "aérien" to "Aérien").forEach { (md, lbl) ->
                                 FilterChip(
-                                    selected = buildingConnectionMode == md,
+                                    selected = buildingConnectionMode.equals(md, ignoreCase = true),
                                     onClick = { buildingConnectionMode = md },
-                                    label = { Text(md.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
@@ -478,11 +486,11 @@ fun AddNodeDialog(
                     FtthNodeType.VILLA -> {
                         Text(text = "Raccordement :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("aérien", "souterrain", "façade").forEach { vm ->
+                            listOf("aérien" to "Aérien", "souterrain" to "Souterrain", "façade" to "Façade").forEach { (vm, lbl) ->
                                 FilterChip(
-                                    selected = villaConnectionMode == vm,
+                                    selected = villaConnectionMode.equals(vm, ignoreCase = true),
                                     onClick = { villaConnectionMode = vm },
-                                    label = { Text(vm.capitalize(Locale.ROOT)) }
+                                    label = { Text(lbl) }
                                 )
                             }
                         }
