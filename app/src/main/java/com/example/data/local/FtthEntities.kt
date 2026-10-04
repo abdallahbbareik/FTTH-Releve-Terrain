@@ -4,19 +4,24 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 enum class FtthNodeType(val label: String, val category: String) {
-    POTEAU("Poteau", "Appui aérien"),
+    POTEAU("Poteau", "Appui aérien / Façade"),
     CHAMBRE("Chambre", "Génie civil souterrain"),
-    BOITIER_BPE("Boîtier BPE / PA", "Protection d'épissure"),
-    PBO("PBO", "Point de Branchement Optique"),
+    BOITIER("Boîtier", "BPE / PBO / PB / Autre"),
+    SRO("SRO", "Sous-Répartiteur Optique"),
     IMMEUBLE("Immeuble", "Bâtiment collectif"),
     VILLA("Villa / Pavillon", "Habitation individuelle")
 }
 
-enum class SurveyStatus(val label: String) {
-    PENDING("À auditer"),
-    VALIDATED("Conforme / Validé"),
-    NON_CONFORMANT("Non conforme / Anomalie"),
-    NEEDS_REPLACEMENT("À remplacer / Travaux")
+enum class NodeStatus(val label: String) {
+    EXISTANT("Existant"),
+    A_POSER("À poser"),
+    A_REMPLACER("À remplacer"),
+    A_DEPOSER("À déposer")
+}
+
+enum class NodeConformity(val label: String) {
+    CONFORME("Conforme"),
+    NON_CONFORME("Non conforme")
 }
 
 enum class SyncState {
@@ -33,48 +38,43 @@ data class FtthNodeEntity(
     val name: String,
     val latitude: Double,
     val longitude: Double,
-    val status: SurveyStatus = SurveyStatus.PENDING,
+    val status: NodeStatus = NodeStatus.EXISTANT,
+    val etat: NodeConformity = NodeConformity.CONFORME,
     val address: String = "",
-    val referenceCadastre: String = "",
-    val notes: String = "",
+    val hasBoitierFtth: Boolean = false, // Non, Oui (sauf Villa et SRO)
+    val notes: String = "", // Commentaire
     val technicianName: String = "Tech-01 (Moi)",
     val photoCount: Int = 0,
     val syncState: SyncState = SyncState.SYNCED,
     val updatedAt: Long = System.currentTimeMillis(),
-    
-    // Type specific technical attributes
-    // For Poteau:
-    val poleMaterial: String = "Béton", // Bois, Béton, Métal, Mixte
-    val poleHeightMeters: Double = 8.0,
-    val poleResidualLoadDan: Int = 300,
-    val poleOwner: String = "Orange", // Orange, Enedis, Privé
-    
-    // For Chambre:
-    val chamberType: String = "L2T", // L0T, L1T, L2T, K1C, K2C, Sous-sol
-    val chamberCoverState: String = "Bon", // Bon, Fissuré, Bloqué
-    val chamberSaturationPercent: Int = 35, // 0 to 100%
-    val hasWaterOrMud: Boolean = false,
-    
-    // For Boîtier BPE:
-    val bpeCapacityFO: Int = 72,
-    val bpeSplicedCount: Int = 48,
-    val bpeModel: String = "BPEO 2",
-    
-    // For PBO:
-    val pboType: String = "Aérien", // Aérien, Façade, Chambre, Intérieur
-    val pboCapacityPorts: Int = 8,
-    val pboConnectedPorts: Int = 3,
-    val opticalPowerDbm: Double = -18.4,
-    
-    // For Immeuble:
-    val buildingDwellings: Int = 16,
-    val buildingFloors: Int = 4,
-    val hasPMI: Boolean = true, // Point de Mutualisation d'Immeuble
-    val conduitAdduction: String = "Souterrain direct",
-    
-    // For Villa:
-    val dropCableType: String = "Aérien 1FO",
-    val privateConduitLengthMeters: Double = 22.0
+
+    // Spécifique Poteau
+    val poleNature: String = "béton", // bois, métal, béton, façade
+    val poleHeight: Int = 8, // 7, 8, 9, 10
+
+    // Spécifique Chambre
+    val chamberType: String = "L2T", // L0T, L1T, L2T, K1C, K2C, etc.
+
+    // Spécifique Boîtier
+    val boitierType: String = "PBO", // BPE, PBO, PB, autre
+    val isSaturated: Boolean = false, // Saturé : Non, Oui
+    val boitierSupport: String = "Poteau", // Poteau, Chambre, Façade, Sous-Sol
+
+    // Spécifique SRO
+    val sroType: String = "armoire de rue", // armoire de rue, local
+    val sroCapacity: String = "360 FO", // Capacité (ex: 144 FO, 360 FO, 720 FO, 1000 FO)
+
+    // Spécifique Immeuble
+    val buildingFloors: Int = 4, // Nombre étages
+    val buildingDwellings: Int = 16, // Nombre logement
+    val hasLocalTechnique: Boolean = true, // Local technique : Oui/Non
+    val hasGaineMontante: Boolean = true, // Gaine montante : oui/non
+    val syndicAuthorization: String = "Accord obtenu", // Accord obtenu, En attente, Refusé
+    val syndicContact: String = "", // Contact syndic (facultatif)
+    val buildingConnectionMode: String = "souterrain", // façade, souterrain, aérien
+
+    // Spécifique Villa/Pavillon
+    val villaConnectionMode: String = "aérien" // aérien, souterrain, façade
 )
 
 @Entity(tableName = "ftth_links")
@@ -87,7 +87,7 @@ data class FtthLinkEntity(
     val installationType: String = "Aérien", // Aérien, Souterrain, Façade
     val capacityFO: Int = 24, // 144, 72, 48, 24, 12, 4
     val lengthMeters: Double = 45.0,
-    val status: SurveyStatus = SurveyStatus.VALIDATED,
+    val status: NodeStatus = NodeStatus.EXISTANT,
     val updatedAt: Long = System.currentTimeMillis()
 )
 

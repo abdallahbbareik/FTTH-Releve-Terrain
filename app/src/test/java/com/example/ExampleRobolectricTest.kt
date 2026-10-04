@@ -30,8 +30,8 @@ class ExampleRobolectricTest {
 
     assertTrue(types.contains(FtthNodeType.POTEAU))
     assertTrue(types.contains(FtthNodeType.CHAMBRE))
-    assertTrue(types.contains(FtthNodeType.BOITIER_BPE))
-    assertTrue(types.contains(FtthNodeType.PBO))
+    assertTrue(types.contains(FtthNodeType.BOITIER))
+    assertTrue(types.contains(FtthNodeType.SRO))
     assertTrue(types.contains(FtthNodeType.IMMEUBLE))
     assertTrue(types.contains(FtthNodeType.VILLA))
   }

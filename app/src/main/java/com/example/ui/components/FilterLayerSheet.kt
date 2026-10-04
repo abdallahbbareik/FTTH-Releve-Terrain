@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
@@ -38,7 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.FtthNodeType
-import com.example.data.local.SurveyStatus
+import com.example.data.local.NodeConformity
+import com.example.data.local.NodeStatus
 import com.example.ui.viewmodel.MapFilterState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,11 +56,12 @@ fun FilterLayerSheet(
     var showPoteaux by remember(filterState) { mutableStateOf(filterState.showPoteaux) }
     var showChambres by remember(filterState) { mutableStateOf(filterState.showChambres) }
     var showBoitiers by remember(filterState) { mutableStateOf(filterState.showBoitiers) }
-    var showPBO by remember(filterState) { mutableStateOf(filterState.showPBO) }
+    var showSRO by remember(filterState) { mutableStateOf(filterState.showSRO) }
     var showImmeubles by remember(filterState) { mutableStateOf(filterState.showImmeubles) }
     var showVillas by remember(filterState) { mutableStateOf(filterState.showVillas) }
     var showCables by remember(filterState) { mutableStateOf(filterState.showCables) }
     var selectedStatus by remember(filterState) { mutableStateOf(filterState.selectedStatus) }
+    var selectedConformity by remember(filterState) { mutableStateOf(filterState.selectedConformity) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -69,6 +73,7 @@ fun FilterLayerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             // Header
             Row(
@@ -95,9 +100,9 @@ fun FilterLayerSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Status filter
+            // Statut Filter (Existant, À poser, À remplacer, À déposer)
             Text(
-                text = "Filtrer par statut de piquetage :",
+                text = "Filtrer par statut :",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -111,21 +116,38 @@ fun FilterLayerSheet(
                     onClick = { selectedStatus = null },
                     label = { Text("Tous", fontSize = 11.sp) }
                 )
-                SurveyStatus.values().forEach { st ->
+                NodeStatus.values().forEach { st ->
                     FilterChip(
                         selected = selectedStatus == st,
                         onClick = { selectedStatus = if (selectedStatus == st) null else st },
-                        label = {
-                            Text(
-                                text = when (st) {
-                                    SurveyStatus.VALIDATED -> "Conforme"
-                                    SurveyStatus.PENDING -> "À auditer"
-                                    SurveyStatus.NON_CONFORMANT -> "Non conf."
-                                    SurveyStatus.NEEDS_REPLACEMENT -> "Travaux"
-                                },
-                                fontSize = 11.sp
-                            )
-                        }
+                        label = { Text(st.label, fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Conformité Filter (Conforme, Non conforme)
+            Text(
+                text = "Filtrer par état :",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = selectedConformity == null,
+                    onClick = { selectedConformity = null },
+                    label = { Text("Tous", fontSize = 11.sp) }
+                )
+                NodeConformity.values().forEach { c ->
+                    FilterChip(
+                        selected = selectedConformity == c,
+                        onClick = { selectedConformity = if (selectedConformity == c) null else c },
+                        label = { Text(c.label, fontSize = 11.sp) }
                     )
                 }
             }
@@ -136,19 +158,19 @@ fun FilterLayerSheet(
 
             // Node types checkboxes
             Text(
-                text = "Nœuds visibles sur la carte :",
+                text = "Équipements visibles sur la carte :",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
 
             FilterCheckboxItem("Poteaux & Appuis aériens", showPoteaux, FtthNodeVisuals.getNodeColor(FtthNodeType.POTEAU)) { showPoteaux = it }
-            FilterCheckboxItem("Chambres de tirage sous-sol", showChambres, FtthNodeVisuals.getNodeColor(FtthNodeType.CHAMBRE)) { showChambres = it }
-            FilterCheckboxItem("Boîtiers d'épissure BPE / PA", showBoitiers, FtthNodeVisuals.getNodeColor(FtthNodeType.BOITIER_BPE)) { showBoitiers = it }
-            FilterCheckboxItem("Points de Branchement Optique (PBO)", showPBO, FtthNodeVisuals.getNodeColor(FtthNodeType.PBO)) { showPBO = it }
+            FilterCheckboxItem("Chambres de tirage", showChambres, FtthNodeVisuals.getNodeColor(FtthNodeType.CHAMBRE)) { showChambres = it }
+            FilterCheckboxItem("Boîtiers FTTH (BPE / PBO / PB)", showBoitiers, FtthNodeVisuals.getNodeColor(FtthNodeType.BOITIER)) { showBoitiers = it }
+            FilterCheckboxItem("SRO (Sous-Répartiteur Optique)", showSRO, FtthNodeVisuals.getNodeColor(FtthNodeType.SRO)) { showSRO = it }
             FilterCheckboxItem("Immeubles collectifs", showImmeubles, FtthNodeVisuals.getNodeColor(FtthNodeType.IMMEUBLE)) { showImmeubles = it }
-            FilterCheckboxItem("Villas & Pavillons individuels", showVillas, FtthNodeVisuals.getNodeColor(FtthNodeType.VILLA)) { showVillas = it }
-            FilterCheckboxItem("Tracé des câbles fibres optiques", showCables, MaterialTheme.colorScheme.primary) { showCables = it }
+            FilterCheckboxItem("Villas & Pavillons", showVillas, FtthNodeVisuals.getNodeColor(FtthNodeType.VILLA)) { showVillas = it }
+            FilterCheckboxItem("Câbles fibres optiques", showCables, MaterialTheme.colorScheme.primary) { showCables = it }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -159,15 +181,15 @@ fun FilterLayerSheet(
             ) {
                 OutlinedButton(
                     onClick = {
-                        // Reset all
                         showPoteaux = true
                         showChambres = true
                         showBoitiers = true
-                        showPBO = true
+                        showSRO = true
                         showImmeubles = true
                         showVillas = true
                         showCables = true
                         selectedStatus = null
+                        selectedConformity = null
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -181,11 +203,12 @@ fun FilterLayerSheet(
                                 showPoteaux = showPoteaux,
                                 showChambres = showChambres,
                                 showBoitiers = showBoitiers,
-                                showPBO = showPBO,
+                                showSRO = showSRO,
                                 showImmeubles = showImmeubles,
                                 showVillas = showVillas,
                                 showCables = showCables,
-                                selectedStatus = selectedStatus
+                                selectedStatus = selectedStatus,
+                                selectedConformity = selectedConformity
                             )
                         )
                         onDismiss()

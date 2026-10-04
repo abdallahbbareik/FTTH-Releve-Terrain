@@ -4,7 +4,6 @@ import com.example.data.local.FtthDao
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
-import com.example.data.local.SurveyStatus
 import com.example.data.local.SyncLogEntity
 import com.example.data.local.SyncState
 import com.example.data.local.DefaultFtthData

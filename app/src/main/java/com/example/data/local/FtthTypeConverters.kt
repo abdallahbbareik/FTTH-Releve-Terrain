@@ -10,17 +10,27 @@ class FtthTypeConverters {
     fun toNodeType(value: String): FtthNodeType = try {
         FtthNodeType.valueOf(value)
     } catch (e: Exception) {
-        FtthNodeType.PBO
+        FtthNodeType.BOITIER
     }
 
     @TypeConverter
-    fun fromSurveyStatus(status: SurveyStatus): String = status.name
+    fun fromNodeStatus(status: NodeStatus): String = status.name
 
     @TypeConverter
-    fun toSurveyStatus(value: String): SurveyStatus = try {
-        SurveyStatus.valueOf(value)
+    fun toNodeStatus(value: String): NodeStatus = try {
+        NodeStatus.valueOf(value)
     } catch (e: Exception) {
-        SurveyStatus.PENDING
+        NodeStatus.EXISTANT
+    }
+
+    @TypeConverter
+    fun fromNodeConformity(conformity: NodeConformity): String = conformity.name
+
+    @TypeConverter
+    fun toNodeConformity(value: String): NodeConformity = try {
+        NodeConformity.valueOf(value)
+    } catch (e: Exception) {
+        NodeConformity.CONFORME
     }
 
     @TypeConverter

@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
-import com.example.data.local.SurveyStatus
 import com.example.ui.components.FtthNodeVisuals
 import com.example.ui.viewmodel.MapLayerType
 import kotlin.math.cos
@@ -547,29 +546,38 @@ private fun DrawScope.drawFtthNodeMarker(
             )
         }
 
-        FtthNodeType.BOITIER_BPE -> {
-            // Splice Box: Hexagon / Diamond
-            val path = Path().apply {
-                moveTo(screenPos.x, screenPos.y - markerRadius)
-                lineTo(screenPos.x + markerRadius, screenPos.y)
-                lineTo(screenPos.x, screenPos.y + markerRadius)
-                lineTo(screenPos.x - markerRadius, screenPos.y)
-                close()
-            }
-            drawPath(path, color = nodeColor)
-            drawPath(path, color = Color.White, style = Stroke(width = 2.5f))
-        }
-
-        FtthNodeType.PBO -> {
-            // PBO: Shield terminal shape
+        FtthNodeType.BOITIER -> {
+            // Boîtier (BPE / PBO / PB): Hexagonal / Terminal badge shape
             val size = markerRadius * 2.1f
             drawRoundRect(
                 color = nodeColor,
                 topLeft = screenPos - Offset(size / 2f, size / 2f),
                 size = Size(size, size),
-                cornerRadius = CornerRadius(10f, 10f)
+                cornerRadius = CornerRadius(8f, 8f)
             )
             drawCircle(color = Color.White, radius = markerRadius * 0.4f, center = screenPos)
+        }
+
+        FtthNodeType.SRO -> {
+            // SRO: Central Optical Cabinet / Armoire de rue (dual doors)
+            val w = markerRadius * 2.5f
+            val h = markerRadius * 2.2f
+            drawRoundRect(
+                color = nodeColor,
+                topLeft = screenPos - Offset(w / 2f, h / 2f),
+                size = Size(w, h),
+                cornerRadius = CornerRadius(5f, 5f)
+            )
+            // Cabinet door divider
+            drawLine(
+                color = Color.White,
+                start = screenPos - Offset(0f, h * 0.45f),
+                end = screenPos + Offset(0f, h * 0.45f),
+                strokeWidth = 2.5f
+            )
+            // Optical rack slots
+            drawCircle(color = Color(0xFF38BDF8), radius = markerRadius * 0.25f, center = screenPos - Offset(w * 0.25f, 0f))
+            drawCircle(color = Color(0xFF38BDF8), radius = markerRadius * 0.25f, center = screenPos + Offset(w * 0.25f, 0f))
         }
 
         FtthNodeType.IMMEUBLE -> {
@@ -604,10 +612,12 @@ private fun DrawScope.drawFtthNodeMarker(
         }
     }
 
-    // Status Indicator Dot (Top Right)
+    // Status & Conformity Indicator Dot (Top Right)
     val statusPos = screenPos + Offset(markerRadius * 0.85f, -markerRadius * 0.85f)
-    drawCircle(color = Color.White, radius = 9f, center = statusPos)
-    drawCircle(color = statusColor, radius = 7f, center = statusPos)
+    val conformityColor = FtthNodeVisuals.getConformityColor(node.etat)
+    drawCircle(color = Color.White, radius = 9.5f, center = statusPos)
+    drawCircle(color = statusColor, radius = 8f, center = statusPos)
+    drawCircle(color = conformityColor, radius = 5f, center = statusPos)
 
     // Node ID Label Pill beneath marker
     drawContext.canvas.nativeCanvas.apply {

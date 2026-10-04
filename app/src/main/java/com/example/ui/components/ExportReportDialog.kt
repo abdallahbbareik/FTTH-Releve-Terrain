@@ -43,7 +43,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
-import com.example.data.local.SurveyStatus
+import com.example.data.local.NodeConformity
+import com.example.data.local.NodeStatus
 
 @Composable
 fun ExportReportDialog(
@@ -55,19 +56,21 @@ fun ExportReportDialog(
 
     // Aggregate statistics
     val totalNodes = nodes.size
-    val validatedCount = nodes.count { it.status == SurveyStatus.VALIDATED }
-    val pendingCount = nodes.count { it.status == SurveyStatus.PENDING }
-    val anomaliesCount = nodes.count { it.status == SurveyStatus.NON_CONFORMANT || it.status == SurveyStatus.NEEDS_REPLACEMENT }
+    val conformesCount = nodes.count { it.etat == NodeConformity.CONFORME }
+    val nonConformesCount = nodes.count { it.etat == NodeConformity.NON_CONFORME }
+    val aPoserCount = nodes.count { it.status == NodeStatus.A_POSER }
+    val aRemplacerCount = nodes.count { it.status == NodeStatus.A_REMPLACER }
+    val aDeposerCount = nodes.count { it.status == NodeStatus.A_DEPOSER }
+    val existantCount = nodes.count { it.status == NodeStatus.EXISTANT }
 
     val polesCount = nodes.count { it.type == FtthNodeType.POTEAU }
     val chambersCount = nodes.count { it.type == FtthNodeType.CHAMBRE }
-    val pbosCount = nodes.count { it.type == FtthNodeType.PBO }
+    val boitiersCount = nodes.count { it.type == FtthNodeType.BOITIER }
+    val sroCount = nodes.count { it.type == FtthNodeType.SRO }
     val buildingsCount = nodes.count { it.type == FtthNodeType.IMMEUBLE }
     val villasCount = nodes.count { it.type == FtthNodeType.VILLA }
 
     val totalCableMeters = links.sumOf { it.lengthMeters }.toInt()
-    val totalAvailablePorts = nodes.filter { it.type == FtthNodeType.PBO }.sumOf { it.pboCapacityPorts }
-    val totalConnectedPorts = nodes.filter { it.type == FtthNodeType.PBO }.sumOf { it.pboConnectedPorts }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -104,7 +107,7 @@ fun ExportReportDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Synthèse d'ingénierie réseau zone SRO-04",
+                            text = "Synthèse d'ingénierie réseau et inventaire",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -118,10 +121,18 @@ fun ExportReportDialog(
 
                 // Global Stats Cards
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatMetricCard("Nœuds totaux", totalNodes.toString(), MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                    StatMetricCard("Conformes", "$validatedCount", Color(0xFF16A34A), Modifier.weight(1f))
-                    StatMetricCard("À auditer", "$pendingCount", Color(0xFFCA8A04), Modifier.weight(1f))
-                    StatMetricCard("Anomalies", "$anomaliesCount", Color(0xFFDC2626), Modifier.weight(1f))
+                    StatMetricCard("Total Nœuds", totalNodes.toString(), MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                    StatMetricCard("Conformes", "$conformesCount", Color(0xFF16A34A), Modifier.weight(1f))
+                    StatMetricCard("Non conf.", "$nonConformesCount", Color(0xFFDC2626), Modifier.weight(1f))
+                    StatMetricCard("À poser", "$aPoserCount", Color(0xFF0284C7), Modifier.weight(1f))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatMetricCard("Existants", "$existantCount", Color(0xFF475569), Modifier.weight(1f))
+                    StatMetricCard("À remplacer", "$aRemplacerCount", Color(0xFFEA580C), Modifier.weight(1f))
+                    StatMetricCard("À déposer", "$aDeposerCount", Color(0xFF991B1B), Modifier.weight(1f))
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -138,13 +149,13 @@ fun ExportReportDialog(
                             fontWeight = FontWeight.Bold
                         )
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        RowTypeCount("Poteaux & appuis aériens", polesCount)
+                        RowTypeCount("Poteaux & appuis aériens / façades", polesCount)
                         RowTypeCount("Chambres de tirage", chambersCount)
-                        RowTypeCount("Points de Branchement Optique (PBO)", pbosCount)
+                        RowTypeCount("Boîtiers FTTH (BPE / PBO / PB / autre)", boitiersCount)
+                        RowTypeCount("SRO (Sous-Répartiteur Optique)", sroCount)
                         RowTypeCount("Immeubles collectifs audités", buildingsCount)
                         RowTypeCount("Villas & pavillons individuels", villasCount)
-                        RowTypeCount("Métrage total câbles fibres", "$totalCableMeters m")
-                        RowTypeCount("Ports optiques PBO (branchés / total)", "$totalConnectedPorts / $totalAvailablePorts")
+                        RowTypeCount("Métrage total câbles fibres optiques", "$totalCableMeters m")
                     }
                 }
 
@@ -178,7 +189,7 @@ fun ExportReportDialog(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = {
-                            exportSuccessMessage = "Fichier 'piquetage_ftth_export.geojson' généré avec succès dans le stockage local !"
+                            exportSuccessMessage = "Fichier 'piquetage_ftth_export.geojson' généré avec succès !"
                         },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -189,7 +200,7 @@ fun ExportReportDialog(
 
                     Button(
                         onClick = {
-                            exportSuccessMessage = "Bordereau technique CSV & synthèse PDF générés avec succès !"
+                            exportSuccessMessage = "Bordereau technique CSV et synthèse d'ingénierie générés !"
                         },
                         modifier = Modifier
                             .weight(1f)

@@ -7,7 +7,8 @@ import com.example.data.local.AppDatabase
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
-import com.example.data.local.SurveyStatus
+import com.example.data.local.NodeConformity
+import com.example.data.local.NodeStatus
 import com.example.data.local.SyncLogEntity
 import com.example.data.repository.FtthRepository
 import com.example.data.repository.RealtimeSyncStatus
@@ -29,11 +30,12 @@ data class MapFilterState(
     val showPoteaux: Boolean = true,
     val showChambres: Boolean = true,
     val showBoitiers: Boolean = true,
-    val showPBO: Boolean = true,
+    val showSRO: Boolean = true,
     val showImmeubles: Boolean = true,
     val showVillas: Boolean = true,
     val showCables: Boolean = true,
-    val selectedStatus: SurveyStatus? = null // null means all statuses
+    val selectedStatus: NodeStatus? = null,
+    val selectedConformity: NodeConformity? = null
 )
 
 class FtthViewModel(application: Application) : AndroidViewModel(application) {
@@ -112,19 +114,19 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val matchesType = when (node.type) {
                 FtthNodeType.POTEAU -> filters.showPoteaux
                 FtthNodeType.CHAMBRE -> filters.showChambres
-                FtthNodeType.BOITIER_BPE -> filters.showBoitiers
-                FtthNodeType.PBO -> filters.showPBO
+                FtthNodeType.BOITIER -> filters.showBoitiers
+                FtthNodeType.SRO -> filters.showSRO
                 FtthNodeType.IMMEUBLE -> filters.showImmeubles
                 FtthNodeType.VILLA -> filters.showVillas
             }
             val matchesStatus = filters.selectedStatus == null || node.status == filters.selectedStatus
+            val matchesConformity = filters.selectedConformity == null || node.etat == filters.selectedConformity
             val matchesQuery = query.isBlank() ||
                     node.name.contains(query, ignoreCase = true) ||
                     node.id.contains(query, ignoreCase = true) ||
-                    node.address.contains(query, ignoreCase = true) ||
-                    node.referenceCadastre.contains(query, ignoreCase = true)
+                    node.address.contains(query, ignoreCase = true)
 
-            matchesType && matchesStatus && matchesQuery
+            matchesType && matchesStatus && matchesConformity && matchesQuery
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -266,7 +268,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 installationType = installationType,
                 capacityFO = capacityFO,
                 lengthMeters = (dist * 10).toInt() / 10.0,
-                status = SurveyStatus.VALIDATED
+                status = NodeStatus.EXISTANT
             )
             repository.saveLink(link)
             _bannerMessage.value = "Liaison fibre ${link.id} créée : ${fromNode.id} ↔ ${toNode.id} (${link.lengthMeters.toInt()}m)"
