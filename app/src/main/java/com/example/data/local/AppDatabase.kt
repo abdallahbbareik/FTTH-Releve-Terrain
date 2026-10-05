@@ -10,9 +10,11 @@ import androidx.room.TypeConverters
     entities = [
         FtthNodeEntity::class,
         FtthLinkEntity::class,
-        SyncLogEntity::class
+        SyncLogEntity::class,
+        GpsTrackEntity::class,
+        GpsTrackPointEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(FtthTypeConverters::class)

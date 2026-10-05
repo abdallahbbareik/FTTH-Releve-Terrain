@@ -60,4 +60,35 @@ interface FtthDao {
 
     @Query("DELETE FROM ftth_links")
     suspend fun clearLinks()
+
+    // GPS Tracks
+    @Query("SELECT * FROM gps_tracks ORDER BY startTime DESC")
+    fun getAllTracks(): Flow<List<GpsTrackEntity>>
+
+    @Query("SELECT * FROM gps_tracks WHERE isActive = 1 LIMIT 1")
+    fun getActiveTrack(): Flow<GpsTrackEntity?>
+
+    @Query("SELECT * FROM gps_tracks WHERE id = :trackId LIMIT 1")
+    suspend fun getTrackById(trackId: String): GpsTrackEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrack(track: GpsTrackEntity)
+
+    @Update
+    suspend fun updateTrack(track: GpsTrackEntity)
+
+    @Insert
+    suspend fun insertTrackPoint(point: GpsTrackPointEntity)
+
+    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp ASC")
+    fun getTrackPoints(trackId: String): Flow<List<GpsTrackPointEntity>>
+
+    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp ASC")
+    suspend fun getTrackPointsSnapshot(trackId: String): List<GpsTrackPointEntity>
+
+    @Query("DELETE FROM gps_tracks WHERE id = :trackId")
+    suspend fun deleteTrack(trackId: String)
+
+    @Query("DELETE FROM gps_track_points WHERE trackId = :trackId")
+    suspend fun deleteTrackPoints(trackId: String)
 }

@@ -42,4 +42,12 @@ class FtthTypeConverters {
     } catch (e: Exception) {
         SyncState.SYNCED
     }
+
+    @TypeConverter
+    fun fromStringList(list: List<String>?): String =
+        list?.joinToString(";;;") ?: ""
+
+    @TypeConverter
+    fun toStringList(data: String?): List<String> =
+        if (data.isNullOrBlank()) emptyList() else data.split(";;;").filter { it.isNotBlank() }
 }

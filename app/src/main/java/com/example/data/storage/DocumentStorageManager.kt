@@ -1,0 +1,356 @@
+package com.example.data.storage
+
+import android.content.Context
+import android.os.Environment
+import com.example.data.local.DefaultFtthData
+import com.example.data.local.FtthLinkEntity
+import com.example.data.local.FtthNodeEntity
+import com.example.data.local.FtthNodeType
+import com.example.data.local.NodeConformity
+import com.example.data.local.NodeStatus
+import com.example.data.local.SyncState
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+data class TrackPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val altitude: Double = 0.0,
+    val accuracy: Float = 0.0f,
+    val speed: Float = 0.0f,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("lat", latitude)
+        put("lon", longitude)
+        put("alt", altitude)
+        put("acc", accuracy)
+        put("spd", speed)
+        put("time", timestamp)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): TrackPoint = TrackPoint(
+            latitude = json.optDouble("lat", 0.0),
+            longitude = json.optDouble("lon", 0.0),
+            altitude = json.optDouble("alt", 0.0),
+            accuracy = json.optDouble("acc", 0.0).toFloat(),
+            speed = json.optDouble("spd", 0.0).toFloat(),
+            timestamp = json.optLong("time", System.currentTimeMillis())
+        )
+    }
+}
+
+data class StoredTrack(
+    val id: String,
+    val name: String,
+    val startTime: Long = System.currentTimeMillis(),
+    val endTime: Long? = null,
+    val totalDistanceMeters: Double = 0.0,
+    val rawPoints: List<TrackPoint> = emptyList(), // Points bruts d'origine (sauvegardés pour pouvoir rétablir)
+    val points: List<TrackPoint> = emptyList(),    // Points actuels (simplifiés ou redressés)
+    val isSimplified: Boolean = false,
+    val toleranceMeters: Double? = null,
+    val isActive: Boolean = false
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("name", name)
+        put("startTime", startTime)
+        put("endTime", endTime ?: JSONObject.NULL)
+        put("totalDistanceMeters", totalDistanceMeters)
+        put("isSimplified", isSimplified)
+        put("toleranceMeters", toleranceMeters ?: JSONObject.NULL)
+        put("isActive", isActive)
+
+        val rawArr = JSONArray()
+        rawPoints.forEach { rawArr.put(it.toJson()) }
+        put("rawPoints", rawArr)
+
+        val ptsArr = JSONArray()
+        points.forEach { ptsArr.put(it.toJson()) }
+        put("points", ptsArr)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): StoredTrack {
+            val rawList = mutableListOf<TrackPoint>()
+            val rawArr = json.optJSONArray("rawPoints")
+            if (rawArr != null) {
+                for (i in 0 until rawArr.length()) {
+                    rawList.add(TrackPoint.fromJson(rawArr.getJSONObject(i)))
+                }
+            }
+
+            val ptsList = mutableListOf<TrackPoint>()
+            val ptsArr = json.optJSONArray("points")
+            if (ptsArr != null) {
+                for (i in 0 until ptsArr.length()) {
+                    ptsList.add(TrackPoint.fromJson(ptsArr.getJSONObject(i)))
+                }
+            }
+
+            return StoredTrack(
+                id = json.optString("id", "TRK-${System.currentTimeMillis()}"),
+                name = json.optString("name", "Trajet"),
+                startTime = json.optLong("startTime", System.currentTimeMillis()),
+                endTime = if (json.has("endTime") && !json.isNull("endTime")) json.optLong("endTime") else null,
+                totalDistanceMeters = json.optDouble("totalDistanceMeters", 0.0),
+                rawPoints = rawList,
+                points = if (ptsList.isNotEmpty()) ptsList else rawList,
+                isSimplified = json.optBoolean("isSimplified", false),
+                toleranceMeters = if (json.has("toleranceMeters") && !json.isNull("toleranceMeters")) json.optDouble("toleranceMeters") else null,
+                isActive = json.optBoolean("isActive", false)
+            )
+        }
+    }
+}
+
+class DocumentStorageManager(private val context: Context) {
+
+    // Dossier public ou application "Documents/Releve-Terrain"
+    val baseDir: File by lazy {
+        val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val targetDir = File(publicDocs, "Releve-Terrain")
+        if (!targetDir.exists()) {
+            val created = targetDir.mkdirs()
+            if (!created) {
+                // Fallback sur le dossier externe applicatif documents
+                val fallback = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+                if (!fallback.exists()) fallback.mkdirs()
+                return@lazy fallback
+            }
+        }
+        targetDir
+    }
+
+    val photosDir: File by lazy {
+        val dir = File(baseDir, "Photos")
+        if (!dir.exists()) dir.mkdirs()
+        dir
+    }
+
+    private val nodesFile: File get() = File(baseDir, "noeuds.json")
+    private val linksFile: File get() = File(baseDir, "liaisons.json")
+    private val tracksFile: File get() = File(baseDir, "trajets.json")
+
+    init {
+        // Initialiser avec les nœuds par défaut si vide
+        if (!nodesFile.exists()) {
+            val defaults = DefaultFtthData.getDefaultNodes()
+            saveNodes(defaults)
+        }
+        if (!linksFile.exists()) {
+            val defaultLinks = DefaultFtthData.getDefaultLinks()
+            saveLinks(defaultLinks)
+        }
+        if (!tracksFile.exists()) {
+            saveTracks(emptyList())
+        }
+    }
+
+    // --- NOEUDS ---
+
+    fun loadNodes(): List<FtthNodeEntity> {
+        return try {
+            if (!nodesFile.exists()) return emptyList()
+            val content = nodesFile.readText(Charsets.UTF_8)
+            val jsonArray = JSONArray(content)
+            val list = mutableListOf<FtthNodeEntity>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(nodeFromJson(obj))
+            }
+            list
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    fun saveNodes(nodes: List<FtthNodeEntity>) {
+        try {
+            val jsonArray = JSONArray()
+            nodes.forEach { jsonArray.put(nodeToJson(it)) }
+            nodesFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // --- LIAISONS ---
+
+    fun loadLinks(): List<FtthLinkEntity> {
+        return try {
+            if (!linksFile.exists()) return emptyList()
+            val content = linksFile.readText(Charsets.UTF_8)
+            val jsonArray = JSONArray(content)
+            val list = mutableListOf<FtthLinkEntity>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(linkFromJson(obj))
+            }
+            list
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    fun saveLinks(links: List<FtthLinkEntity>) {
+        try {
+            val jsonArray = JSONArray()
+            links.forEach { jsonArray.put(linkToJson(it)) }
+            linksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // --- TRAJETS ---
+
+    fun loadTracks(): List<StoredTrack> {
+        return try {
+            if (!tracksFile.exists()) return emptyList()
+            val content = tracksFile.readText(Charsets.UTF_8)
+            val jsonArray = JSONArray(content)
+            val list = mutableListOf<StoredTrack>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(StoredTrack.fromJson(obj))
+            }
+            list
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    fun saveTracks(tracks: List<StoredTrack>) {
+        try {
+            val jsonArray = JSONArray()
+            tracks.forEach { jsonArray.put(it.toJson()) }
+            tracksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // --- Helpers de sérialisation JSON ---
+
+    private fun nodeToJson(node: FtthNodeEntity): JSONObject = JSONObject().apply {
+        put("id", node.id)
+        put("type", node.type.name)
+        put("name", node.name)
+        put("latitude", node.latitude)
+        put("longitude", node.longitude)
+        put("status", node.status.name)
+        put("etat", node.etat.name)
+        put("address", node.address)
+        put("hasBoitierFtth", node.hasBoitierFtth)
+        put("notes", node.notes)
+        put("technicianName", node.technicianName)
+        put("photoCount", node.photos.size)
+        put("photos", JSONArray(node.photos))
+        put("updatedAt", node.updatedAt)
+
+        put("poleNature", node.poleNature)
+        put("poleHeight", node.poleHeight)
+        put("chamberType", node.chamberType)
+        put("boitierType", node.boitierType)
+        put("isSaturated", node.isSaturated)
+        put("boitierSupport", node.boitierSupport)
+        put("sroType", node.sroType)
+        put("sroCapacity", node.sroCapacity)
+        put("buildingFloors", node.buildingFloors)
+        put("buildingDwellings", node.buildingDwellings)
+        put("hasLocalTechnique", node.hasLocalTechnique)
+        put("hasGaineMontante", node.hasGaineMontante)
+        put("syndicAuthorization", node.syndicAuthorization)
+        put("syndicContact", node.syndicContact)
+        put("buildingConnectionMode", node.buildingConnectionMode)
+        put("villaConnectionMode", node.villaConnectionMode)
+    }
+
+    private fun nodeFromJson(obj: JSONObject): FtthNodeEntity {
+        val photosList = mutableListOf<String>()
+        val photosArr = obj.optJSONArray("photos")
+        if (photosArr != null) {
+            for (i in 0 until photosArr.length()) {
+                photosList.add(photosArr.getString(i))
+            }
+        }
+
+        val typeStr = obj.optString("type", FtthNodeType.POTEAU.name)
+        val type = try { FtthNodeType.valueOf(typeStr) } catch (e: Exception) { FtthNodeType.POTEAU }
+
+        val statusStr = obj.optString("status", NodeStatus.EXISTANT.name)
+        val status = try { NodeStatus.valueOf(statusStr) } catch (e: Exception) { NodeStatus.EXISTANT }
+
+        val etatStr = obj.optString("etat", NodeConformity.CONFORME.name)
+        val etat = try { NodeConformity.valueOf(etatStr) } catch (e: Exception) { NodeConformity.CONFORME }
+
+        return FtthNodeEntity(
+            id = obj.optString("id", "N-${System.currentTimeMillis() % 10000}"),
+            type = type,
+            name = obj.optString("name", "Nœud"),
+            latitude = obj.optDouble("latitude", 48.8566),
+            longitude = obj.optDouble("longitude", 2.3522),
+            status = status,
+            etat = etat,
+            address = obj.optString("address", ""),
+            hasBoitierFtth = obj.optBoolean("hasBoitierFtth", false),
+            notes = obj.optString("notes", ""),
+            technicianName = obj.optString("technicianName", "Tech-01"),
+            photoCount = photosList.size,
+            photos = photosList,
+            syncState = SyncState.SYNCED,
+            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
+            poleNature = obj.optString("poleNature", "béton"),
+            poleHeight = obj.optInt("poleHeight", 8),
+            chamberType = obj.optString("chamberType", "L2T"),
+            boitierType = obj.optString("boitierType", "PBO"),
+            isSaturated = obj.optBoolean("isSaturated", false),
+            boitierSupport = obj.optString("boitierSupport", "Poteau"),
+            sroType = obj.optString("sroType", "armoire de rue"),
+            sroCapacity = obj.optString("sroCapacity", "360 FO"),
+            buildingFloors = obj.optInt("buildingFloors", 4),
+            buildingDwellings = obj.optInt("buildingDwellings", 16),
+            hasLocalTechnique = obj.optBoolean("hasLocalTechnique", true),
+            hasGaineMontante = obj.optBoolean("hasGaineMontante", true),
+            syndicAuthorization = obj.optString("syndicAuthorization", "Accord obtenu"),
+            syndicContact = obj.optString("syndicContact", ""),
+            buildingConnectionMode = obj.optString("buildingConnectionMode", "souterrain"),
+            villaConnectionMode = obj.optString("villaConnectionMode", "aérien")
+        )
+    }
+
+    private fun linkToJson(link: FtthLinkEntity): JSONObject = JSONObject().apply {
+        put("id", link.id)
+        put("fromNodeId", link.fromNodeId)
+        put("toNodeId", link.toNodeId)
+        put("cableType", link.cableType)
+        put("installationType", link.installationType)
+        put("capacityFO", link.capacityFO)
+        put("lengthMeters", link.lengthMeters)
+        put("status", link.status.name)
+        put("updatedAt", link.updatedAt)
+    }
+
+    private fun linkFromJson(obj: JSONObject): FtthLinkEntity {
+        val statusStr = obj.optString("status", NodeStatus.EXISTANT.name)
+        val status = try { NodeStatus.valueOf(statusStr) } catch (e: Exception) { NodeStatus.EXISTANT }
+        return FtthLinkEntity(
+            id = obj.optString("id", "LNK-${System.currentTimeMillis() % 10000}"),
+            fromNodeId = obj.optString("fromNodeId", ""),
+            toNodeId = obj.optString("toNodeId", ""),
+            cableType = obj.optString("cableType", "Distribution"),
+            installationType = obj.optString("installationType", "Aérien"),
+            capacityFO = obj.optInt("capacityFO", 24),
+            lengthMeters = obj.optDouble("lengthMeters", 45.0),
+            status = status,
+            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+        )
+    }
+}

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -58,10 +59,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
+import com.example.data.photo.PhotoStorageManager
 import com.example.data.util.AddressHelper
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,6 +91,30 @@ fun NodeDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+
+    // Real Photos State & Camera Launchers
+    var photos by remember(node) { mutableStateOf(node.photos) }
+    var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
+    var tempCameraFile by remember { mutableStateOf<File?>(null) }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempCameraFile != null && tempCameraFile!!.exists()) {
+            photos = photos + tempCameraFile!!.absolutePath
+        }
+    }
+
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val savedPath = PhotoStorageManager.saveImportedPhoto(context, node.id, uri)
+            if (savedPath != null) {
+                photos = photos + savedPath
+            }
+        }
+    }
 
     // Champs communs à tous les types
     var name by remember(node) { mutableStateOf(node.name) }
@@ -636,35 +674,191 @@ fun NodeDetailSheet(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Photos & Attachments
+                // Photos & Attachments réels sur le terrain
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AddAPhoto,
-                            contentDescription = "Photos",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddAPhoto,
+                                contentDescription = "Photos",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Photos réelles du piquetage (${photos.size})",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Dossier : ftth_photos/${node.id}/",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Action Buttons: Camera & Gallery
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val file = PhotoStorageManager.createNewPhotoFile(context, node.id)
+                                    tempCameraFile = file
+                                    val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
+                                    takePictureLauncher.launch(uri)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("take_photo_camera_button"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Appareil Photo", fontSize = 11.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    pickVisualMediaLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pick_photo_gallery_button"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Galerie", fontSize = 11.sp)
+                            }
+                        }
+
+                        // Thumbnail List
+                        if (photos.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(photos) { photoPath ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(80.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .clickable { viewingPhotoPath = photoPath }
+                                    ) {
+                                        AsyncImage(
+                                            model = File(photoPath),
+                                            contentDescription = "Photo ${node.id}",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+
+                                        // Delete badge button
+                                        IconButton(
+                                            onClick = {
+                                                PhotoStorageManager.deletePhoto(photoPath)
+                                                photos = photos - photoPath
+                                            },
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(24.dp)
+                                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Supprimer photo",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Photos du relevé ($photoCount jointes)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
+                                text = "Aucune photo enregistrée sur l'appareil pour ce nœud.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        OutlinedButton(
-                            onClick = { photoCount++ },
-                            modifier = Modifier.testTag("add_photo_button")
+                    }
+                }
+
+                // Fullscreen Photo Preview Dialog
+                if (viewingPhotoPath != null) {
+                    Dialog(onDismissRequest = { viewingPhotoPath = null }) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
                         ) {
-                            Text("+ Photo")
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Photo du nœud ${node.id}",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                AsyncImage(
+                                    model = File(viewingPhotoPath!!),
+                                    contentDescription = "Photo agrandie",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(300.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            PhotoStorageManager.deletePhoto(viewingPhotoPath!!)
+                                            photos = photos - viewingPhotoPath!!
+                                            viewingPhotoPath = null
+                                        },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Supprimer")
+                                    }
+
+                                    Button(
+                                        onClick = { viewingPhotoPath = null },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Fermer")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -697,7 +891,8 @@ fun NodeDetailSheet(
                                 address = address,
                                 hasBoitierFtth = if (node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
                                 notes = notes,
-                                photoCount = photoCount,
+                                photos = photos,
+                                photoCount = photos.size,
                                 poleNature = poleNature,
                                 poleHeight = poleHeight,
                                 chamberType = chamberType,

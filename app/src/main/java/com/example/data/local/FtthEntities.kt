@@ -45,6 +45,7 @@ data class FtthNodeEntity(
     val notes: String = "", // Commentaire
     val technicianName: String = "Tech-01 (Moi)",
     val photoCount: Int = 0,
+    val photos: List<String> = emptyList(), // Chemins absolus des photos réelles stockées sur l'appareil
     val syncState: SyncState = SyncState.SYNCED,
     val updatedAt: Long = System.currentTimeMillis(),
 
@@ -101,3 +102,32 @@ data class SyncLogEntity(
     val nodeId: String,
     val details: String
 )
+
+@Entity(tableName = "gps_tracks")
+data class GpsTrackEntity(
+    @PrimaryKey
+    val id: String,
+    val name: String,
+    val startTime: Long = System.currentTimeMillis(),
+    val endTime: Long? = null,
+    val totalDistanceMeters: Double = 0.0,
+    val pointCount: Int = 0,
+    val isActive: Boolean = true
+)
+
+@Entity(
+    tableName = "gps_track_points",
+    indices = [androidx.room.Index(value = ["trackId"])]
+)
+data class GpsTrackPointEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val trackId: String,
+    val latitude: Double,
+    val longitude: Double,
+    val altitude: Double = 0.0,
+    val accuracy: Float = 0.0f,
+    val speed: Float = 0.0f,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
