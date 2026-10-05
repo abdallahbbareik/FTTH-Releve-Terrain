@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LinearScale
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
 import java.util.Locale
@@ -184,6 +186,147 @@ fun StraightenEditorBar(
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Redresser ce tronçon", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MoveNodeEditorBar(
+    node: FtthNodeEntity,
+    tempPosition: Pair<Double, Double>?,
+    onConfirmMove: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(12.dp)
+            .testTag("move_node_editor_card")
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.NearMe,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Déplacer le nœud ${node.id} (${node.name})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    val statusText = if (tempPosition == null) {
+                        "Touchez la carte au nouvel emplacement souhaité"
+                    } else {
+                        "Nouvelle position : ${String.format(Locale.FRANCE, "%.6f, %.6f", tempPosition.first, tempPosition.second)}"
+                    }
+                    Text(text = statusText, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Annuler", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onConfirmMove,
+                    enabled = tempPosition != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                    modifier = Modifier.weight(1.4f)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Valider position", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MoveVertexEditorBar(
+    trackName: String,
+    vertexIndex: Int?,
+    tempPosition: Pair<Double, Double>?,
+    onConfirmMove: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(12.dp)
+            .testTag("move_vertex_editor_card")
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.NearMe,
+                    contentDescription = null,
+                    tint = Color(0xFFEAB308),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Déplacer un sommet : $trackName",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    val statusText = if (vertexIndex == null) {
+                        "Touchez le sommet à déplacer sur la carte"
+                    } else if (tempPosition == null) {
+                        "Sommet #$vertexIndex sélectionné. Touchez le nouvel endroit sur la carte."
+                    } else {
+                        "Nouvel emplacement sélectionné pour le sommet #$vertexIndex"
+                    }
+                    Text(text = statusText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Annuler", fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onConfirmMove,
+                    enabled = vertexIndex != null && tempPosition != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                    modifier = Modifier.weight(1.4f)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Valider sommet", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
@@ -63,6 +64,7 @@ import com.example.data.gps.GpsLocationData
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.StoredTrack
+import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.MapMarkerHelper
 import org.osmdroid.config.Configuration
@@ -80,9 +82,10 @@ import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
-// Tuiles Satellite Esri World Imagery
 val ESRI_WORLD_IMAGERY = object : OnlineTileSourceBase(
     "EsriWorldImagery",
     0, 19, 256, ".jpg",
@@ -111,12 +114,23 @@ fun OsmMapView(
     pendingStakePosition: Pair<Double, Double>?,
     isStraightenMode: Boolean,
     selectedStraightenIndices: Pair<Int?, Int?>,
+    movingNode: FtthNodeEntity? = null,
+    tempMoveNodePosition: Pair<Double, Double>? = null,
+    isMoveVertexMode: Boolean = false,
+    selectedTrackToMoveVertex: StoredTrack? = null,
+    movingVertexIndex: Int? = null,
+    tempVertexPosition: Pair<Double, Double>? = null,
+    isPickOnMapMode: Boolean = false,
+    onCancelPickOnMapMode: (() -> Unit)? = null,
     onNodeClick: (FtthNodeEntity) -> Unit,
     onMapLongClick: (latitude: Double, longitude: Double) -> Unit,
     onManualTrackAddPoint: (latitude: Double, longitude: Double) -> Unit,
     onConfirmStakingPosition: (latitude: Double, longitude: Double) -> Unit,
     onCancelStakingPosition: () -> Unit,
     onStraightenVertexClicked: (index: Int) -> Unit,
+    onMapClickForMove: ((latitude: Double, longitude: Double) -> Unit)? = null,
+    onSelectVertexToMove: ((index: Int) -> Unit)? = null,
+    onTrackPhotoClick: ((TrackPhoto) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -125,7 +139,6 @@ fun OsmMapView(
     var currentLayer by remember { mutableStateOf(OsmLayerType.PLAN) }
     var mapOrientation by remember { mutableFloatStateOf(0f) }
 
-    // Initialisation configuration OsmDroid
     remember {
         Configuration.getInstance().userAgentValue = context.packageName
         Configuration.getInstance().load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
@@ -138,14 +151,22 @@ fun OsmMapView(
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(16.5)
 
-            // Centre initial
             val defaultLat = nodes.firstOrNull()?.latitude ?: 48.8580
             val defaultLon = nodes.firstOrNull()?.longitude ?: 2.3522
             controller.setCenter(GeoPoint(defaultLat, defaultLon))
+
+            addMapListener(object : org.osmdroid.events.MapListener {
+                override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                    mapOrientation = this@apply.mapOrientation
+                    return false
+                }
+                override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                    return false
+                }
+            })
         }
     }
 
-    // Gestion du cycle de vie
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -162,7 +183,6 @@ fun OsmMapView(
         }
     }
 
-    // Changement de fond de carte (Plan OSM vs Satellite Esri)
     LaunchedEffect(currentLayer) {
         when (currentLayer) {
             OsmLayerType.PLAN -> mapView.setTileSource(TileSourceFactory.MAPNIK)
@@ -171,29 +191,34 @@ fun OsmMapView(
         mapView.invalidate()
     }
 
-    // Mise à jour des calques (Overlays)
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
-        isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices
+        isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
+        movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition
     ) {
         mapView.overlays.clear()
 
-        // 1. Détection de rotation tactile (2 doigts)
         val rotationGesture = RotationGestureOverlay(mapView)
         rotationGesture.isEnabled = true
         mapView.overlays.add(rotationGesture)
 
-        // 2. Boussole & Flèche du Nord intégrée
         val compassOverlay = CompassOverlay(context, InternalCompassOrientationProvider(context), mapView)
         compassOverlay.enableCompass()
         mapView.overlays.add(compassOverlay)
 
-        // 3. Gestionnaire des clics sur la carte
         val eventsReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null) {
+                    if (movingNode != null || (isMoveVertexMode && movingVertexIndex != null)) {
+                        onMapClickForMove?.invoke(p.latitude, p.longitude)
+                        return true
+                    }
                     if (isManualTrackMode) {
                         onManualTrackAddPoint(p.latitude, p.longitude)
+                        return true
+                    }
+                    if (isPickOnMapMode) {
+                        onMapLongClick(p.latitude, p.longitude)
                         return true
                     }
                 }
@@ -201,7 +226,7 @@ fun OsmMapView(
             }
 
             override fun longPressHelper(p: GeoPoint?): Boolean {
-                if (p != null && !isManualTrackMode) {
+                if (p != null && !isManualTrackMode && movingNode == null && !isMoveVertexMode) {
                     onMapLongClick(p.latitude, p.longitude)
                     return true
                 }
@@ -212,7 +237,7 @@ fun OsmMapView(
 
         val nodesMap = nodes.associateBy { it.id }
 
-        // 4. Liaisons / Câbles Fibre Optique
+        // Liaisons Câbles
         for (link in links) {
             val from = nodesMap[link.fromNodeId]
             val to = nodesMap[link.toNodeId]
@@ -223,9 +248,9 @@ fun OsmMapView(
                     outlinePaint.strokeWidth = 6f
                     outlinePaint.isAntiAlias = true
                     outlinePaint.color = when (link.installationType.lowercase(Locale.ROOT)) {
-                        "aérien" -> android.graphics.Color.parseColor("#EA580C")   // Orange
-                        "façade" -> android.graphics.Color.parseColor("#0284C7")   // Cyan/Bleu
-                        else -> android.graphics.Color.parseColor("#16A34A")       // Souterrain : Vert
+                        "aérien" -> android.graphics.Color.parseColor("#EA580C")
+                        "façade" -> android.graphics.Color.parseColor("#0284C7")
+                        else -> android.graphics.Color.parseColor("#16A34A")
                     }
                     title = "${link.id} (${link.capacityFO} FO - ${link.cableType})"
                 }
@@ -233,7 +258,7 @@ fun OsmMapView(
             }
         }
 
-        // 5. Tracés GPS enregistrés
+        // Tracés GPS enregistrés
         for (track in allTracks) {
             val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
             if (pts.size >= 2) {
@@ -248,7 +273,7 @@ fun OsmMapView(
                 }
                 mapView.overlays.add(polyline)
 
-                // En mode redressement : afficher les sommets cliquables
+                // Sommets en mode Redressement
                 if (isStraightenMode) {
                     for ((idx, pt) in pts.withIndex()) {
                         val vertexMarker = Marker(mapView).apply {
@@ -256,8 +281,6 @@ fun OsmMapView(
                             title = "Sommet #$idx"
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                             val isSelected = idx == selectedStraightenIndices.first || idx == selectedStraightenIndices.second
-                            // Colorier en jaune vif si sélectionné, sinon bleu
-                            val dotColor = if (isSelected) "#EAB308" else "#2563EB"
                             icon = MapMarkerHelper.createVertexDrawable(context, idx, isSelected)
                             setOnMarkerClickListener { _, _ ->
                                 onStraightenVertexClicked(idx)
@@ -267,10 +290,50 @@ fun OsmMapView(
                         mapView.overlays.add(vertexMarker)
                     }
                 }
+
+                // Sommets en mode Déplacement de sommet
+                if (isMoveVertexMode && selectedTrackToMoveVertex?.id == track.id) {
+                    for ((idx, pt) in pts.withIndex()) {
+                        val isBeingMoved = idx == movingVertexIndex
+                        val ptPos = if (isBeingMoved && tempVertexPosition != null) {
+                            GeoPoint(tempVertexPosition.first, tempVertexPosition.second)
+                        } else {
+                            GeoPoint(pt.latitude, pt.longitude)
+                        }
+
+                        val vertexMarker = Marker(mapView).apply {
+                            position = ptPos
+                            title = "Sommet #$idx à déplacer"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            icon = MapMarkerHelper.createVertexDrawable(context, idx, isBeingMoved)
+                            setOnMarkerClickListener { _, _ ->
+                                onSelectVertexToMove?.invoke(idx)
+                                true
+                            }
+                        }
+                        mapView.overlays.add(vertexMarker)
+                    }
+                }
+
+                // Photos le long du trajet
+                for (pho in track.photos) {
+                    val photoMarker = Marker(mapView).apply {
+                        position = GeoPoint(pho.latitude, pho.longitude)
+                        title = "Photo sur trajet : ${track.name}"
+                        snippet = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(pho.timestamp))
+                        icon = MapMarkerHelper.createTrackPhotoDrawable(context)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        setOnMarkerClickListener { _, _ ->
+                            onTrackPhotoClick?.invoke(pho)
+                            true
+                        }
+                    }
+                    mapView.overlays.add(photoMarker)
+                }
             }
         }
 
-        // 6. Trace GPS active en cours d'enregistrement
+        // Trace active en cours
         if (activeTrackPoints.size >= 2) {
             val activePolyline = Polyline(mapView).apply {
                 for (pt in activeTrackPoints) {
@@ -278,13 +341,13 @@ fun OsmMapView(
                 }
                 outlinePaint.strokeWidth = 8f
                 outlinePaint.isAntiAlias = true
-                outlinePaint.color = android.graphics.Color.parseColor("#DC2626") // Rouge trace active
+                outlinePaint.color = android.graphics.Color.parseColor("#DC2626")
                 title = "Trace GPS en cours"
             }
             mapView.overlays.add(activePolyline)
         }
 
-        // 7. Tracé manuel en cours de dessin point par point
+        // Tracé manuel en cours
         if (isManualTrackMode && manualTrackPoints.isNotEmpty()) {
             val manualPolyline = Polyline(mapView).apply {
                 for (pt in manualTrackPoints) {
@@ -307,7 +370,7 @@ fun OsmMapView(
             }
         }
 
-        // 8. Marqueurs Nœuds FTTH
+        // Marqueurs Nœuds FTTH
         for (node in nodes) {
             val marker = Marker(mapView).apply {
                 position = GeoPoint(node.latitude, node.longitude)
@@ -323,7 +386,28 @@ fun OsmMapView(
             mapView.overlays.add(marker)
         }
 
-        // 9. Marqueur de position présélectionnée (Confirmation de piquetage)
+        // Repositionnement de Nœud sur la Carte
+        if (movingNode != null) {
+            if (tempMoveNodePosition != null) {
+                val tempMarker = Marker(mapView).apply {
+                    position = GeoPoint(tempMoveNodePosition.first, tempMoveNodePosition.second)
+                    title = "Nouvelle position pour ${movingNode.id}"
+                    icon = MapMarkerHelper.createNodeMarkerDrawable(context, movingNode.type, movingNode.etat)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                }
+                mapView.overlays.add(tempMarker)
+
+                val linkLine = Polyline(mapView).apply {
+                    addPoint(GeoPoint(movingNode.latitude, movingNode.longitude))
+                    addPoint(GeoPoint(tempMoveNodePosition.first, tempMoveNodePosition.second))
+                    outlinePaint.color = android.graphics.Color.parseColor("#EAB308")
+                    outlinePaint.strokeWidth = 5f
+                }
+                mapView.overlays.add(linkLine)
+            }
+        }
+
+        // Position présélectionnée
         if (pendingStakePosition != null) {
             val stakeMarker = Marker(mapView).apply {
                 position = GeoPoint(pendingStakePosition.first, pendingStakePosition.second)
@@ -334,7 +418,7 @@ fun OsmMapView(
             mapView.overlays.add(stakeMarker)
         }
 
-        // 10. Balise GPS Technicien
+        // Balise GPS Technicien
         if (userLocation != null) {
             val userMarker = Marker(mapView).apply {
                 position = GeoPoint(userLocation.latitude, userLocation.longitude)
@@ -355,7 +439,6 @@ fun OsmMapView(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Filigrane / Source des données
         Surface(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
             shape = RoundedCornerShape(topEnd = 8.dp),
@@ -369,7 +452,47 @@ fun OsmMapView(
             )
         }
 
-        // Boîte de dialogue flottante : Confirmation de position de piquetage
+        // Bannière flottante : Mode Sélection de point sur la carte
+        if (isPickOnMapMode) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp, start = 16.dp, end = 16.dp)
+                    .fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddLocationAlt,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Touchez la carte à l'emplacement souhaité",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(
+                        onClick = { onCancelPickOnMapMode?.invoke() },
+                        modifier = Modifier.height(30.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding
+                    ) {
+                        Text("Annuler", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // Boîte de dialogue : Confirmation de position de piquetage
         if (pendingStakePosition != null) {
             Card(
                 shape = RoundedCornerShape(14.dp),
@@ -420,14 +543,13 @@ fun OsmMapView(
             }
         }
 
-        // Boutons Flottants de Contrôle (Boussole / Flèche du Nord, Calque, Recentrage, Zoom)
+        // Boutons Flottants (Boussole / Flèche du Nord, Calque, Recentrage, Zoom)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Flèche du Nord : Tourne avec la carte et remet l'orientation au Nord quand on clique
             FloatingActionButton(
                 onClick = {
                     mapView.setMapOrientation(0f, true)
@@ -439,16 +561,17 @@ fun OsmMapView(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = Color(0xFFDC2626)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Navigation,
-                    contentDescription = "Réinitialiser au Nord",
-                    modifier = Modifier
-                        .size(22.dp)
-                        .rotate(mapView.mapOrientation)
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = "Réinitialiser au Nord",
+                        modifier = Modifier
+                            .size(24.dp)
+                            .rotate(-mapOrientation)
+                    )
+                }
             }
 
-            // Basculer fond de carte (Plan OSM vs Satellite Esri)
             FloatingActionButton(
                 onClick = {
                     currentLayer = if (currentLayer == OsmLayerType.PLAN) OsmLayerType.SATELLITE_ESRI else OsmLayerType.PLAN
@@ -466,7 +589,6 @@ fun OsmMapView(
                 )
             }
 
-            // Recentrage GPS Technicien
             FloatingActionButton(
                 onClick = {
                     if (userLocation != null) {
@@ -490,7 +612,6 @@ fun OsmMapView(
                 )
             }
 
-            // Cadrer tous les nœuds
             FloatingActionButton(
                 onClick = {
                     if (nodes.isNotEmpty()) {
@@ -515,7 +636,6 @@ fun OsmMapView(
                 )
             }
 
-            // Zoom Avant
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface,
@@ -527,7 +647,6 @@ fun OsmMapView(
                 }
             }
 
-            // Zoom Arrière
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface,

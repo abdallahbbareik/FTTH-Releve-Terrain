@@ -1,6 +1,6 @@
 {
-  "name": "OptiFTTH Piquetage",
-  "description": "Application de piquetage des nœuds d'architecture FTTH (poteaux, chambres, PBO, boîtiers BPE, immeubles, villas) avec cartographie interactive et synchronisation temps réel.",
+  "name": "OptiFTTH",
+  "description": "Application terrain de piquetage FTTH avec OpenStreetMap, satellite Esri, tracés GPS, photos géoréférencées et stockage dans Documents/Releve-Terrain.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

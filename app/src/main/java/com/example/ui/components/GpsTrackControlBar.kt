@@ -51,6 +51,7 @@ fun GpsTrackControlBar(
     onStopAutoTrack: () -> Unit,
     onStartManualTrack: () -> Unit,
     onPinAtGpsLocation: () -> Unit,
+    onPinOnMapLocation: () -> Unit,
     onOpenTracksList: () -> Unit,
     onRequestGpsPermission: () -> Unit,
     modifier: Modifier = Modifier
@@ -128,37 +129,58 @@ fun GpsTrackControlBar(
                     onClick = onPinAtGpsLocation,
                     enabled = locationData != null,
                     modifier = Modifier
-                        .weight(1.1f)
+                        .weight(1.05f)
                         .height(36.dp)
                         .testTag("pin_at_gps_button"),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
                     Icon(
                         imageVector = Icons.Default.AddLocationAlt,
                         contentDescription = null,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Piquet GPS", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(text = "Piquet GPS", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
 
-                // 2. Tracer manuellement sur la carte
+                // 2. Pointer un point sur la carte
                 OutlinedButton(
-                    onClick = onStartManualTrack,
+                    onClick = onPinOnMapLocation,
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
+                        .testTag("pin_on_map_button"),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddLocationAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(text = "Pointer Carte", fontSize = 10.sp)
+                }
+
+                // 3. Tracer manuellement sur la carte
+                OutlinedButton(
+                    onClick = onStartManualTrack,
+                    modifier = Modifier
+                        .weight(0.95f)
+                        .height(36.dp)
                         .testTag("manual_track_start_button"),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
                     Icon(
                         imageVector = Icons.Default.EditLocation,
                         contentDescription = null,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Tracé Manuel", fontSize = 11.sp)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(text = "Tracé", fontSize = 10.sp)
                 }
 
                 // 3. Trace GPS Auto (Start / Stop)

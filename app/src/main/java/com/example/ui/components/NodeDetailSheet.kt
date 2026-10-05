@@ -80,13 +80,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.example.data.gps.GpsLocationData
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.NearMe
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NodeDetailSheet(
     node: FtthNodeEntity,
+    userLocation: GpsLocationData? = null,
     onDismiss: () -> Unit,
     onSave: (FtthNodeEntity) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onStartMoveNodeOnMap: (FtthNodeEntity) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -96,6 +103,9 @@ fun NodeDetailSheet(
     var photos by remember(node) { mutableStateOf(node.photos) }
     var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
+
+    var latitude by remember(node) { mutableDoubleStateOf(node.latitude) }
+    var longitude by remember(node) { mutableDoubleStateOf(node.longitude) }
 
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
@@ -311,29 +321,75 @@ fun NodeDetailSheet(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Coordonnées GPS (WGS84)
+                // Coordonnées GPS & Déplacement manuel
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(12.dp)
                     ) {
-                        Icon(
-                            Icons.Default.LocationOn,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "GPS : %.6f, %.6f".format(node.latitude, node.longitude),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Position : %.6f, %.6f".format(latitude, longitude),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (userLocation != null) {
+                                        latitude = userLocation.latitude
+                                        longitude = userLocation.longitude
+                                    }
+                                },
+                                enabled = userLocation != null,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("À mon GPS", fontSize = 11.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    onStartMoveNodeOnMap(
+                                        node.copy(
+                                            name = name,
+                                            latitude = latitude,
+                                            longitude = longitude,
+                                            status = status,
+                                            etat = etat,
+                                            address = address,
+                                            notes = notes,
+                                            photos = photos
+                                        )
+                                    )
+                                    onDismiss()
+                                },
+                                modifier = Modifier.weight(1.2f)
+                            ) {
+                                Icon(Icons.Default.NearMe, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Déplacer sur carte", fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
 
@@ -886,6 +942,8 @@ fun NodeDetailSheet(
                         onClick = {
                             val updated = node.copy(
                                 name = name,
+                                latitude = latitude,
+                                longitude = longitude,
                                 status = status,
                                 etat = etat,
                                 address = address,

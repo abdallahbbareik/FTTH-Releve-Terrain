@@ -12,6 +12,9 @@ import com.example.data.local.SyncState
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class TrackPoint(
     val latitude: Double,
@@ -42,14 +45,41 @@ data class TrackPoint(
     }
 }
 
+data class TrackPhoto(
+    val id: String = "PHO-${System.currentTimeMillis() % 10000}",
+    val photoPath: String,
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("photoPath", photoPath)
+        put("latitude", latitude)
+        put("longitude", longitude)
+        put("timestamp", timestamp)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): TrackPhoto = TrackPhoto(
+            id = json.optString("id", "PHO-${System.currentTimeMillis() % 10000}"),
+            photoPath = json.optString("photoPath", ""),
+            latitude = json.optDouble("latitude", 0.0),
+            longitude = json.optDouble("longitude", 0.0),
+            timestamp = json.optLong("timestamp", System.currentTimeMillis())
+        )
+    }
+}
+
 data class StoredTrack(
     val id: String,
     val name: String,
     val startTime: Long = System.currentTimeMillis(),
     val endTime: Long? = null,
     val totalDistanceMeters: Double = 0.0,
-    val rawPoints: List<TrackPoint> = emptyList(), // Points bruts d'origine (sauvegardés pour pouvoir rétablir)
+    val rawPoints: List<TrackPoint> = emptyList(), // Points bruts d'origine
     val points: List<TrackPoint> = emptyList(),    // Points actuels (simplifiés ou redressés)
+    val photos: List<TrackPhoto> = emptyList(),    // Photos géoréférencées le long du trajet
     val isSimplified: Boolean = false,
     val toleranceMeters: Double? = null,
     val isActive: Boolean = false
@@ -71,6 +101,10 @@ data class StoredTrack(
         val ptsArr = JSONArray()
         points.forEach { ptsArr.put(it.toJson()) }
         put("points", ptsArr)
+
+        val phoArr = JSONArray()
+        photos.forEach { phoArr.put(it.toJson()) }
+        put("photos", phoArr)
     }
 
     companion object {
@@ -91,6 +125,14 @@ data class StoredTrack(
                 }
             }
 
+            val phoList = mutableListOf<TrackPhoto>()
+            val phoArr = json.optJSONArray("photos")
+            if (phoArr != null) {
+                for (i in 0 until phoArr.length()) {
+                    phoList.add(TrackPhoto.fromJson(phoArr.getJSONObject(i)))
+                }
+            }
+
             return StoredTrack(
                 id = json.optString("id", "TRK-${System.currentTimeMillis()}"),
                 name = json.optString("name", "Trajet"),
@@ -99,6 +141,7 @@ data class StoredTrack(
                 totalDistanceMeters = json.optDouble("totalDistanceMeters", 0.0),
                 rawPoints = rawList,
                 points = if (ptsList.isNotEmpty()) ptsList else rawList,
+                photos = phoList,
                 isSimplified = json.optBoolean("isSimplified", false),
                 toleranceMeters = if (json.has("toleranceMeters") && !json.isNull("toleranceMeters")) json.optDouble("toleranceMeters") else null,
                 isActive = json.optBoolean("isActive", false)
@@ -116,7 +159,6 @@ class DocumentStorageManager(private val context: Context) {
         if (!targetDir.exists()) {
             val created = targetDir.mkdirs()
             if (!created) {
-                // Fallback sur le dossier externe applicatif documents
                 val fallback = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
                 if (!fallback.exists()) fallback.mkdirs()
                 return@lazy fallback
@@ -131,22 +173,24 @@ class DocumentStorageManager(private val context: Context) {
         dir
     }
 
-    private val nodesFile: File get() = File(baseDir, "noeuds.json")
-    private val linksFile: File get() = File(baseDir, "liaisons.json")
-    private val tracksFile: File get() = File(baseDir, "trajets.json")
+    val nodesFile: File get() = File(baseDir, "noeuds.json")
+    val linksFile: File get() = File(baseDir, "liaisons.json")
+    val tracksFile: File get() = File(baseDir, "trajets.json")
+    val geoJsonFile: File get() = File(baseDir, "releve_terrain.geojson")
 
     init {
-        // Initialiser avec les nœuds par défaut si vide
+        // Initialiser avec les données par défaut si vide
         if (!nodesFile.exists()) {
-            val defaults = DefaultFtthData.getDefaultNodes()
-            saveNodes(defaults)
+            saveNodes(DefaultFtthData.getDefaultNodes(), updateGeoJson = false)
         }
         if (!linksFile.exists()) {
-            val defaultLinks = DefaultFtthData.getDefaultLinks()
-            saveLinks(defaultLinks)
+            saveLinks(DefaultFtthData.getDefaultLinks(), updateGeoJson = false)
         }
         if (!tracksFile.exists()) {
-            saveTracks(emptyList())
+            saveTracks(emptyList(), updateGeoJson = false)
+        }
+        if (!geoJsonFile.exists()) {
+            generateAndSaveGeoJson()
         }
     }
 
@@ -169,11 +213,12 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    fun saveNodes(nodes: List<FtthNodeEntity>) {
+    fun saveNodes(nodes: List<FtthNodeEntity>, updateGeoJson: Boolean = true) {
         try {
             val jsonArray = JSONArray()
             nodes.forEach { jsonArray.put(nodeToJson(it)) }
             nodesFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            if (updateGeoJson) generateAndSaveGeoJson()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -198,11 +243,12 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    fun saveLinks(links: List<FtthLinkEntity>) {
+    fun saveLinks(links: List<FtthLinkEntity>, updateGeoJson: Boolean = true) {
         try {
             val jsonArray = JSONArray()
             links.forEach { jsonArray.put(linkToJson(it)) }
             linksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            if (updateGeoJson) generateAndSaveGeoJson()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -227,11 +273,165 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    fun saveTracks(tracks: List<StoredTrack>) {
+    fun saveTracks(tracks: List<StoredTrack>, updateGeoJson: Boolean = true) {
         try {
             val jsonArray = JSONArray()
             tracks.forEach { jsonArray.put(it.toJson()) }
             tracksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            if (updateGeoJson) generateAndSaveGeoJson()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // --- SAUVEGARDE REELLE GEOJSON DANS DOCUMENTS/RELEVE-TERRAIN/RELEVE_TERRAIN.GEOJSON ---
+
+    fun generateAndSaveGeoJson() {
+        try {
+            val nodes = loadNodes()
+            val links = loadLinks()
+            val tracks = loadTracks()
+
+            val root = JSONObject()
+            root.put("type", "FeatureCollection")
+            val features = JSONArray()
+
+            val nodesMap = nodes.associateBy { it.id }
+
+            // 1. Points pour les nœuds (avec photos dans Photos/<id_noeud>/)
+            for (node in nodes) {
+                val feat = JSONObject()
+                feat.put("type", "Feature")
+
+                val geom = JSONObject()
+                geom.put("type", "Point")
+                val coords = JSONArray().apply {
+                    put(node.longitude)
+                    put(node.latitude)
+                }
+                geom.put("coordinates", coords)
+                feat.put("geometry", geom)
+
+                val props = JSONObject()
+                props.put("id", node.id)
+                props.put("type", node.type.name)
+                props.put("typeLabel", node.type.label)
+                props.put("name", node.name)
+                props.put("status", node.status.label)
+                props.put("etat", node.etat.label)
+                props.put("address", node.address)
+                props.put("hasBoitierFtth", node.hasBoitierFtth)
+                props.put("notes", node.notes)
+                props.put("technician", node.technicianName)
+                props.put("photosFolder", "Photos/${node.id.replace("[^a-zA-Z0-9_-]".toRegex(), "_")}")
+                props.put("photosCount", node.photos.size)
+                props.put("photos", JSONArray(node.photos))
+                props.put("poleNature", node.poleNature)
+                props.put("poleHeight", node.poleHeight)
+                props.put("chamberType", node.chamberType)
+                props.put("boitierType", node.boitierType)
+                props.put("isSaturated", node.isSaturated)
+                props.put("boitierSupport", node.boitierSupport)
+                props.put("sroType", node.sroType)
+                props.put("sroCapacity", node.sroCapacity)
+                props.put("buildingFloors", node.buildingFloors)
+                props.put("buildingDwellings", node.buildingDwellings)
+                props.put("hasLocalTechnique", node.hasLocalTechnique)
+                props.put("hasGaineMontante", node.hasGaineMontante)
+                props.put("syndicAuthorization", node.syndicAuthorization)
+                props.put("syndicContact", node.syndicContact)
+                props.put("buildingConnectionMode", node.buildingConnectionMode)
+                props.put("villaConnectionMode", node.villaConnectionMode)
+                props.put("updatedAt", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.FRANCE).format(Date(node.updatedAt)))
+
+                feat.put("properties", props)
+                features.put(feat)
+            }
+
+            // 2. Lignes pour les câbles
+            for (link in links) {
+                val from = nodesMap[link.fromNodeId]
+                val to = nodesMap[link.toNodeId]
+                if (from != null && to != null) {
+                    val feat = JSONObject()
+                    feat.put("type", "Feature")
+
+                    val geom = JSONObject()
+                    geom.put("type", "LineString")
+                    val coords = JSONArray().apply {
+                        put(JSONArray().put(from.longitude).put(from.latitude))
+                        put(JSONArray().put(to.longitude).put(to.latitude))
+                    }
+                    geom.put("coordinates", coords)
+                    feat.put("geometry", geom)
+
+                    val props = JSONObject()
+                    props.put("id", link.id)
+                    props.put("fromNodeId", link.fromNodeId)
+                    props.put("toNodeId", link.toNodeId)
+                    props.put("cableType", link.cableType)
+                    props.put("installationType", link.installationType)
+                    props.put("capacityFO", link.capacityFO)
+                    props.put("lengthMeters", link.lengthMeters)
+                    props.put("status", link.status.label)
+                    feat.put("properties", props)
+
+                    features.put(feat)
+                }
+            }
+
+            // 3. Lignes pour les trajets et Points pour les photos le long des trajets
+            for (track in tracks) {
+                val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                if (pts.size >= 2) {
+                    val feat = JSONObject()
+                    feat.put("type", "Feature")
+
+                    val geom = JSONObject()
+                    geom.put("type", "LineString")
+                    val coords = JSONArray()
+                    for (p in pts) {
+                        coords.put(JSONArray().put(p.longitude).put(p.latitude))
+                    }
+                    geom.put("coordinates", coords)
+                    feat.put("geometry", geom)
+
+                    val props = JSONObject()
+                    props.put("id", track.id)
+                    props.put("name", track.name)
+                    props.put("distanceMeters", track.totalDistanceMeters)
+                    props.put("pointCount", pts.size)
+                    props.put("isSimplified", track.isSimplified)
+                    props.put("toleranceMeters", track.toleranceMeters ?: 0.0)
+                    props.put("type", "TRAJET_GPS")
+                    feat.put("properties", props)
+
+                    features.put(feat)
+                }
+
+                // Photos le long du trajet
+                for (pho in track.photos) {
+                    val pFeat = JSONObject()
+                    pFeat.put("type", "Feature")
+                    val pGeom = JSONObject()
+                    pGeom.put("type", "Point")
+                    pGeom.put("coordinates", JSONArray().put(pho.longitude).put(pho.latitude))
+                    pFeat.put("geometry", pGeom)
+
+                    val pProps = JSONObject()
+                    pProps.put("id", pho.id)
+                    pProps.put("trackId", track.id)
+                    pProps.put("photoPath", pho.photoPath)
+                    pProps.put("timestamp", pho.timestamp)
+                    pProps.put("type", "PHOTO_TRAJET")
+                    pFeat.put("properties", pProps)
+
+                    features.put(pFeat)
+                }
+            }
+
+            root.put("features", features)
+            geoJsonFile.writeText(root.toString(2), Charsets.UTF_8)
         } catch (e: Exception) {
             e.printStackTrace()
         }

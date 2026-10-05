@@ -147,4 +147,37 @@ object MapMarkerHelper {
 
         return BitmapDrawable(context.resources, bitmap)
     }
+
+    fun createTrackPhotoDrawable(context: Context): Drawable {
+        val density = context.resources.displayMetrics.density
+        val px = (26 * density).toInt()
+
+        val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val radius = px / 2f
+
+        val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#0284C7") // Cyan/Bleu photo
+            style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f * density
+        }
+
+        canvas.drawCircle(radius, radius, radius - (2f * density), circlePaint)
+        canvas.drawCircle(radius, radius, radius - (2f * density), borderPaint)
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 12f * density
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val textY = radius - ((textPaint.descent() + textPaint.ascent()) / 2f)
+        canvas.drawText("📷", radius, textY, textPaint)
+
+        return BitmapDrawable(context.resources, bitmap)
+    }
 }

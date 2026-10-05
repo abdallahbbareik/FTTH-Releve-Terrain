@@ -2,6 +2,7 @@ package com.example.data.photo
 
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -11,18 +12,29 @@ import java.util.Locale
 
 object PhotoStorageManager {
 
-    fun getPhotosDirectory(context: Context, nodeId: String): File {
-        val baseDir = context.getExternalFilesDir("ftth_photos") ?: File(context.filesDir, "ftth_photos")
-        val sanitizedId = nodeId.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
-        val nodeDir = File(baseDir, sanitizedId)
-        if (!nodeDir.exists()) {
-            nodeDir.mkdirs()
+    /**
+     * Répertoire dédié : Documents/Releve-Terrain/Photos/<id_objet>/
+     */
+    fun getPhotosDirectory(context: Context, objectId: String): File {
+        val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val baseDir = File(publicDocs, "Releve-Terrain/Photos")
+        val fallbackBase = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain/Photos")
+
+        val targetBase = if (baseDir.exists() || baseDir.mkdirs()) baseDir else {
+            if (!fallbackBase.exists()) fallbackBase.mkdirs()
+            fallbackBase
         }
-        return nodeDir
+
+        val sanitizedId = objectId.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+        val objectDir = File(targetBase, sanitizedId)
+        if (!objectDir.exists()) {
+            objectDir.mkdirs()
+        }
+        return objectDir
     }
 
-    fun createNewPhotoFile(context: Context, nodeId: String): File {
-        val dir = getPhotosDirectory(context, nodeId)
+    fun createNewPhotoFile(context: Context, objectId: String): File {
+        val dir = getPhotosDirectory(context, objectId)
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.FRANCE).format(Date())
         return File(dir, "PHOTO_${timestamp}_${System.currentTimeMillis() % 1000}.jpg")
     }
@@ -35,9 +47,9 @@ object PhotoStorageManager {
         )
     }
 
-    fun saveImportedPhoto(context: Context, nodeId: String, sourceUri: Uri): String? {
+    fun saveImportedPhoto(context: Context, objectId: String, sourceUri: Uri): String? {
         return try {
-            val destinationFile = createNewPhotoFile(context, nodeId)
+            val destinationFile = createNewPhotoFile(context, objectId)
             context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 FileOutputStream(destinationFile).use { output ->
                     input.copyTo(output)

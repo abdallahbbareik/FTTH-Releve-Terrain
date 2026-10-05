@@ -95,6 +95,30 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingStakePosition = MutableStateFlow<Pair<Double, Double>?>(null)
     val pendingStakePosition: StateFlow<Pair<Double, Double>?> = _pendingStakePosition.asStateFlow()
 
+    // Mode Sélection d'un point sur la Carte
+    private val _isPickOnMapMode = MutableStateFlow(false)
+    val isPickOnMapMode: StateFlow<Boolean> = _isPickOnMapMode.asStateFlow()
+
+    // Mode Déplacement de Nœud sur la Carte
+    private val _movingNode = MutableStateFlow<FtthNodeEntity?>(null)
+    val movingNode: StateFlow<FtthNodeEntity?> = _movingNode.asStateFlow()
+
+    private val _tempMoveNodePosition = MutableStateFlow<Pair<Double, Double>?>(null)
+    val tempMoveNodePosition: StateFlow<Pair<Double, Double>?> = _tempMoveNodePosition.asStateFlow()
+
+    // Mode Déplacement de Sommet de Trajet sur la Carte
+    private val _isMoveVertexMode = MutableStateFlow(false)
+    val isMoveVertexMode: StateFlow<Boolean> = _isMoveVertexMode.asStateFlow()
+
+    private val _selectedTrackToMoveVertex = MutableStateFlow<StoredTrack?>(null)
+    val selectedTrackToMoveVertex: StateFlow<StoredTrack?> = _selectedTrackToMoveVertex.asStateFlow()
+
+    private val _movingVertexIndex = MutableStateFlow<Int?>(null)
+    val movingVertexIndex: StateFlow<Int?> = _movingVertexIndex.asStateFlow()
+
+    private val _tempVertexPosition = MutableStateFlow<Pair<Double, Double>?>(null)
+    val tempVertexPosition: StateFlow<Pair<Double, Double>?> = _tempVertexPosition.asStateFlow()
+
     // Dialogues
     private val _selectedNode = MutableStateFlow<FtthNodeEntity?>(null)
     val selectedNode: StateFlow<FtthNodeEntity?> = _selectedNode.asStateFlow()
@@ -190,11 +214,23 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- SÉLECTION ET CONFIRMATION DE POSITION ---
 
+    fun startPickOnMapMode() {
+        _isPickOnMapMode.value = true
+        _pendingStakePosition.value = null
+        _bannerMessage.value = "Touchez la carte à l'emplacement souhaité pour le nouveau nœud"
+    }
+
+    fun cancelPickOnMapMode() {
+        _isPickOnMapMode.value = false
+    }
+
     fun requestStakingAtMapPosition(lat: Double, lon: Double) {
+        _isPickOnMapMode.value = false
         _pendingStakePosition.value = Pair(lat, lon)
     }
 
     fun requestStakingAtGpsLocation() {
+        _isPickOnMapMode.value = false
         val loc = userLocation.value
         if (loc != null) {
             _pendingStakePosition.value = Pair(loc.latitude, loc.longitude)
@@ -204,12 +240,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun confirmStakingPosition(lat: Double, lon: Double) {
+        _isPickOnMapMode.value = false
         _pendingStakePosition.value = null
         _stakedPositionForForm.value = Pair(lat, lon)
         _showAddNodeDialog.value = true
     }
 
     fun cancelStakingPosition() {
+        _isPickOnMapMode.value = false
         _pendingStakePosition.value = null
     }
 
@@ -241,6 +279,33 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             }
             _bannerMessage.value = "Nœud $id supprimé"
         }
+    }
+
+    // --- DÉPLACEMENT MANUEL DE NŒUD SUR LA CARTE ---
+
+    fun startMoveNode(node: FtthNodeEntity) {
+        _movingNode.value = node
+        _tempMoveNodePosition.value = null
+        _selectedNode.value = null
+        _bannerMessage.value = "Touchez la carte au nouvel emplacement pour le nœud ${node.id}"
+    }
+
+    fun setTempNodeMovePosition(lat: Double, lon: Double) {
+        _tempMoveNodePosition.value = Pair(lat, lon)
+    }
+
+    fun confirmMoveNode() {
+        val node = _movingNode.value ?: return
+        val pos = _tempMoveNodePosition.value ?: return
+        saveNode(node.copy(latitude = pos.first, longitude = pos.second))
+        _movingNode.value = null
+        _tempMoveNodePosition.value = null
+        _bannerMessage.value = "Nœud ${node.id} déplacé avec succès !"
+    }
+
+    fun cancelMoveNode() {
+        _movingNode.value = null
+        _tempMoveNodePosition.value = null
     }
 
     // --- TRACÉ MANUEL DE TRAJET SUR LA CARTE ---
@@ -453,6 +518,124 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isStraightenMode.value = false
         _selectedStraightenTrack.value = null
         _selectedStraightenIndices.value = Pair(null, null)
+    }
+
+    // --- DÉPLACEMENT DE SOMMET DE TRACÉ SUR LA CARTE ---
+
+    fun startMoveVertexMode(track: StoredTrack) {
+        _isMoveVertexMode.value = true
+        _selectedTrackToMoveVertex.value = track
+        _movingVertexIndex.value = null
+        _tempVertexPosition.value = null
+        _bannerMessage.value = "Touchez le sommet à déplacer sur la carte"
+    }
+
+    fun selectVertexToMove(index: Int) {
+        _movingVertexIndex.value = index
+        _bannerMessage.value = "Sommet #$index sélectionné. Touchez le nouvel emplacement sur la carte."
+    }
+
+    fun setTempVertexPosition(lat: Double, lon: Double) {
+        _tempVertexPosition.value = Pair(lat, lon)
+    }
+
+    fun confirmMoveVertex() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val track = _selectedTrackToMoveVertex.value ?: return@launch
+            val idx = _movingVertexIndex.value ?: return@launch
+            val pos = _tempVertexPosition.value ?: return@launch
+
+            val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
+            if (idx in pts.indices) {
+                pts[idx] = pts[idx].copy(latitude = pos.first, longitude = pos.second)
+                val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+                val updated = track.copy(points = pts, totalDistanceMeters = dist)
+
+                val all = _allTracks.value.toMutableList()
+                val tIdx = all.indexOfFirst { it.id == track.id }
+                if (tIdx >= 0) {
+                    all[tIdx] = updated
+                    _allTracks.value = all
+                    docStorage.saveTracks(all)
+                    _bannerMessage.value = "Sommet #$idx déplacé avec succès !"
+                }
+            }
+            cancelMoveVertex()
+        }
+    }
+
+    fun cancelMoveVertex() {
+        _isMoveVertexMode.value = false
+        _selectedTrackToMoveVertex.value = null
+        _movingVertexIndex.value = null
+        _tempVertexPosition.value = null
+    }
+
+    // --- RENOMMAGE & PHOTOS DE TRAJET ---
+
+    fun updateTrackName(trackId: String, newName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == trackId }
+            if (idx >= 0) {
+                val updated = all[idx].copy(name = newName)
+                all[idx] = updated
+                _allTracks.value = all
+                docStorage.saveTracks(all)
+                if (_selectedTrackForDetail.value?.id == trackId) {
+                    _selectedTrackForDetail.value = updated
+                }
+                _bannerMessage.value = "Nom du trajet mis à jour : $newName"
+            }
+        }
+    }
+
+    fun addTrackPhoto(trackId: String, photoPath: String, lat: Double, lon: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == trackId }
+            if (idx >= 0) {
+                val track = all[idx]
+                val currentPhotos = track.photos.toMutableList()
+                val photo = com.example.data.storage.TrackPhoto(
+                    photoPath = photoPath,
+                    latitude = lat,
+                    longitude = lon
+                )
+                currentPhotos.add(photo)
+                val updated = track.copy(photos = currentPhotos)
+                all[idx] = updated
+                _allTracks.value = all
+                docStorage.saveTracks(all)
+                if (_selectedTrackForDetail.value?.id == trackId) {
+                    _selectedTrackForDetail.value = updated
+                }
+                _bannerMessage.value = "Photo enregistrée le long du trajet $trackId"
+            }
+        }
+    }
+
+    fun deleteTrackPhoto(trackId: String, photoId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == trackId }
+            if (idx >= 0) {
+                val track = all[idx]
+                val photo = track.photos.firstOrNull { it.id == photoId }
+                if (photo != null) {
+                    com.example.data.photo.PhotoStorageManager.deletePhoto(photo.photoPath)
+                }
+                val currentPhotos = track.photos.filter { it.id != photoId }
+                val updated = track.copy(photos = currentPhotos)
+                all[idx] = updated
+                _allTracks.value = all
+                docStorage.saveTracks(all)
+                if (_selectedTrackForDetail.value?.id == trackId) {
+                    _selectedTrackForDetail.value = updated
+                }
+                _bannerMessage.value = "Photo supprimée du trajet"
+            }
+        }
     }
 
     fun deleteTrack(trackId: String) {

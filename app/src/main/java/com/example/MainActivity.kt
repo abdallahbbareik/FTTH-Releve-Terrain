@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,20 +45,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import com.example.data.storage.TrackPhoto
 import com.example.ui.components.AddLinkDialog
 import com.example.ui.components.AddNodeDialog
 import com.example.ui.components.ExportReportDialog
 import com.example.ui.components.FilterLayerSheet
 import com.example.ui.components.GpsTrackControlBar
 import com.example.ui.components.ManualTrackEditorBar
+import com.example.ui.components.MoveNodeEditorBar
+import com.example.ui.components.MoveVertexEditorBar
 import com.example.ui.components.NodeDetailSheet
 import com.example.ui.components.PiquetageTopBar
 import com.example.ui.components.StraightenEditorBar
@@ -67,6 +77,10 @@ import com.example.ui.components.WorkflowGuideDialog
 import com.example.ui.components.map.OsmMapView
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.FtthViewModel
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,7 +99,6 @@ class MainActivity : ComponentActivity() {
 fun FtthMainScreen(viewModel: FtthViewModel) {
     val context = LocalContext.current
 
-    // Demande des permissions GPS et Caméra
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -120,12 +133,23 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val selectedStraightenTrack by viewModel.selectedStraightenTrack.collectAsStateWithLifecycle()
     val selectedStraightenIndices by viewModel.selectedStraightenIndices.collectAsStateWithLifecycle()
 
+    val movingNode by viewModel.movingNode.collectAsStateWithLifecycle()
+    val tempMoveNodePosition by viewModel.tempMoveNodePosition.collectAsStateWithLifecycle()
+
+    val isMoveVertexMode by viewModel.isMoveVertexMode.collectAsStateWithLifecycle()
+    val selectedTrackToMoveVertex by viewModel.selectedTrackToMoveVertex.collectAsStateWithLifecycle()
+    val movingVertexIndex by viewModel.movingVertexIndex.collectAsStateWithLifecycle()
+    val tempVertexPosition by viewModel.tempVertexPosition.collectAsStateWithLifecycle()
+
+    val isPickOnMapMode by viewModel.isPickOnMapMode.collectAsStateWithLifecycle()
     val pendingStakePosition by viewModel.pendingStakePosition.collectAsStateWithLifecycle()
     val stakedPositionForForm by viewModel.stakedPositionForForm.collectAsStateWithLifecycle()
 
     val selectedNode by viewModel.selectedNode.collectAsStateWithLifecycle()
     val selectedTrackForDetail by viewModel.selectedTrackForDetail.collectAsStateWithLifecycle()
     val showTracksListDialog by viewModel.showTracksListDialog.collectAsStateWithLifecycle()
+
+    var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
 
     val filterState by viewModel.filterState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -148,15 +172,21 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
 
-    // Gestion de la touche retour Android
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
-                showFilterSheet || showSyncLogSheet || showExportDialog || showWorkflowGuide ||
-                showTracksListDialog || selectedTrackForDetail != null || pendingStakePosition != null
+                movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||
+                showExportDialog || showWorkflowGuide || showTracksListDialog || selectedTrackForDetail != null ||
+                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null
     ) {
         if (selectedNode != null) {
             viewModel.selectNode(null)
-        } else if (pendingStakePosition != null) {
+        } else if (viewingTrackPhoto != null) {
+            viewingTrackPhoto = null
+        } else if (movingNode != null) {
+            viewModel.cancelMoveNode()
+        } else if (isMoveVertexMode) {
+            viewModel.cancelMoveVertex()
+        } else if (pendingStakePosition != null || isPickOnMapMode) {
             viewModel.cancelStakingPosition()
         } else if (isManualTrackMode) {
             viewModel.cancelManualTrack()
@@ -203,7 +233,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
 
                 // Barre de contrôle GPS & Tracés
-                if (!isManualTrackMode && !isStraightenMode) {
+                if (!isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode) {
                     GpsTrackControlBar(
                         gpsStatus = gpsStatus,
                         locationData = userLocation,
@@ -213,6 +243,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         onStopAutoTrack = { viewModel.stopAutoGpsTrack() },
                         onStartManualTrack = { viewModel.startManualTrack() },
                         onPinAtGpsLocation = { viewModel.requestStakingAtGpsLocation() },
+                        onPinOnMapLocation = { viewModel.startPickOnMapMode() },
                         onOpenTracksList = { viewModel.openTracksList() },
                         onRequestGpsPermission = {
                             permissionLauncher.launch(
@@ -222,6 +253,27 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                                 )
                             )
                         }
+                    )
+                }
+
+                // Barre d'outils flottante : Mode Déplacement de Nœud
+                if (movingNode != null) {
+                    MoveNodeEditorBar(
+                        node = movingNode!!,
+                        tempPosition = tempMoveNodePosition,
+                        onConfirmMove = { viewModel.confirmMoveNode() },
+                        onCancel = { viewModel.cancelMoveNode() }
+                    )
+                }
+
+                // Barre d'outils flottante : Mode Déplacement de Sommet de Trajet
+                if (isMoveVertexMode) {
+                    MoveVertexEditorBar(
+                        trackName = selectedTrackToMoveVertex?.name ?: "Trajet",
+                        vertexIndex = movingVertexIndex,
+                        tempPosition = tempVertexPosition,
+                        onConfirmMove = { viewModel.confirmMoveVertex() },
+                        onCancel = { viewModel.cancelMoveVertex() }
                     )
                 }
 
@@ -247,9 +299,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             }
         },
         floatingActionButton = {
-            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode) {
+            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Bouton Lier Fibre
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.toggleCableDrawingMode() },
                         icon = { Icon(Icons.Default.Timeline, contentDescription = null) },
@@ -259,7 +310,6 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         modifier = Modifier.testTag("toggle_cable_fab")
                     )
 
-                    // Bouton Piqueter
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.requestStakingAtGpsLocation() },
                         icon = { Icon(Icons.Default.AddLocationAlt, contentDescription = null) },
@@ -277,7 +327,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Vue Cartographique OsmDroid (Plan OSM, Satellite Esri, Rotation, Boussole)
+            // Vue Cartographique OsmDroid
             OsmMapView(
                 nodes = filteredNodes,
                 links = rawLinks,
@@ -290,16 +340,30 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 pendingStakePosition = pendingStakePosition,
                 isStraightenMode = isStraightenMode,
                 selectedStraightenIndices = selectedStraightenIndices,
+                movingNode = movingNode,
+                tempMoveNodePosition = tempMoveNodePosition,
+                isMoveVertexMode = isMoveVertexMode,
+                selectedTrackToMoveVertex = selectedTrackToMoveVertex,
+                movingVertexIndex = movingVertexIndex,
+                tempVertexPosition = tempVertexPosition,
+                isPickOnMapMode = isPickOnMapMode,
+                onCancelPickOnMapMode = { viewModel.cancelPickOnMapMode() },
                 onNodeClick = { viewModel.selectNode(it) },
                 onMapLongClick = { lat, lon -> viewModel.requestStakingAtMapPosition(lat, lon) },
                 onManualTrackAddPoint = { lat, lon -> viewModel.addManualTrackPoint(lat, lon) },
                 onConfirmStakingPosition = { lat, lon -> viewModel.confirmStakingPosition(lat, lon) },
                 onCancelStakingPosition = { viewModel.cancelStakingPosition() },
                 onStraightenVertexClicked = { idx -> viewModel.onStraightenVertexClicked(idx) },
+                onMapClickForMove = { lat, lon ->
+                    if (movingNode != null) viewModel.setTempNodeMovePosition(lat, lon)
+                    else if (isMoveVertexMode) viewModel.setTempVertexPosition(lat, lon)
+                },
+                onSelectVertexToMove = { idx -> viewModel.selectVertexToMove(idx) },
+                onTrackPhotoClick = { photo -> viewingTrackPhoto = photo },
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Bandeau de notification dynamique
+            // Notification dynamique
             AnimatedVisibility(
                 visible = bannerMessage != null,
                 modifier = Modifier
@@ -343,17 +407,19 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 }
             }
 
-            // Fiche détaillée du nœud
+            // Fiche détaillée du nœud (avec modification de position et déplacement)
             if (selectedNode != null) {
                 NodeDetailSheet(
                     node = selectedNode!!,
+                    userLocation = userLocation,
                     onDismiss = { viewModel.selectNode(null) },
                     onSave = { updated -> viewModel.saveNode(updated) },
-                    onDelete = { id -> viewModel.deleteNode(id) }
+                    onDelete = { id -> viewModel.deleteNode(id) },
+                    onStartMoveNodeOnMap = { nodeToMove -> viewModel.startMoveNode(nodeToMove) }
                 )
             }
 
-            // Dialogue de saisie de nœud
+            // Dialogue d'ajout de nœud
             if (showAddNodeDialog) {
                 val initLat = stakedPositionForForm?.first ?: userLocation?.latitude ?: 48.8566
                 val initLon = stakedPositionForForm?.second ?: userLocation?.longitude ?: 2.3522
@@ -378,16 +444,52 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
             }
 
-            // Dialogue Fiche Trajet (Simplification RDP & Redressement)
+            // Dialogue Fiche Trajet (Renommage, Photos sur trajet, Simplification RDP, Déplacement sommet)
             if (selectedTrackForDetail != null) {
                 TrackDetailDialog(
                     track = selectedTrackForDetail!!,
+                    userLocation = userLocation,
                     onDismiss = { viewModel.closeTrackDetail() },
+                    onUpdateTrackName = { id, name -> viewModel.updateTrackName(id, name) },
+                    onAddTrackPhoto = { id, path, lat, lon -> viewModel.addTrackPhoto(id, path, lat, lon) },
+                    onDeleteTrackPhoto = { id, photoId -> viewModel.deleteTrackPhoto(id, photoId) },
                     onApplySimplification = { id, pts, tol -> viewModel.applyTrackSimplification(id, pts, tol) },
                     onRestoreOriginal = { id -> viewModel.restoreOriginalTrack(id) },
                     onStartStraightenMode = { t -> viewModel.startStraightenMode(t) },
+                    onStartMoveVertexMode = { t -> viewModel.startMoveVertexMode(t) },
                     onDeleteTrack = { id -> viewModel.deleteTrack(id) }
                 )
+            }
+
+            // Aperçu d'une photo le long du tracé cliquée sur la carte
+            if (viewingTrackPhoto != null) {
+                Dialog(onDismissRequest = { viewingTrackPhoto = null }) {
+                    Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Photo le long du tracé",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE).format(Date(viewingTrackPhoto!!.timestamp)),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            AsyncImage(
+                                model = File(viewingTrackPhoto!!.photoPath),
+                                contentDescription = "Photo trajet",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(8.dp))
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(onClick = { viewingTrackPhoto = null }) {
+                                Text("Fermer")
+                            }
+                        }
+                    }
+                }
             }
 
             // Filtres
