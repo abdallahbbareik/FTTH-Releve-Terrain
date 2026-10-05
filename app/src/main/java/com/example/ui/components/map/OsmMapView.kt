@@ -122,6 +122,9 @@ fun OsmMapView(
     tempVertexPosition: Pair<Double, Double>? = null,
     isPickOnMapMode: Boolean = false,
     onCancelPickOnMapMode: (() -> Unit)? = null,
+    onUpdateStakingPosition: ((latitude: Double, longitude: Double) -> Unit)? = null,
+    onLinkClick: ((FtthLinkEntity) -> Unit)? = null,
+    onTrackClick: ((StoredTrack) -> Unit)? = null,
     onNodeClick: (FtthNodeEntity) -> Unit,
     onMapLongClick: (latitude: Double, longitude: Double) -> Unit,
     onManualTrackAddPoint: (latitude: Double, longitude: Double) -> Unit,
@@ -217,8 +220,12 @@ fun OsmMapView(
                         onManualTrackAddPoint(p.latitude, p.longitude)
                         return true
                     }
-                    if (isPickOnMapMode) {
-                        onMapLongClick(p.latitude, p.longitude)
+                    if (isPickOnMapMode || pendingStakePosition != null) {
+                        if (onUpdateStakingPosition != null) {
+                            onUpdateStakingPosition.invoke(p.latitude, p.longitude)
+                        } else {
+                            onMapLongClick(p.latitude, p.longitude)
+                        }
                         return true
                     }
                 }
@@ -245,7 +252,7 @@ fun OsmMapView(
                 val polyline = Polyline(mapView).apply {
                     addPoint(GeoPoint(from.latitude, from.longitude))
                     addPoint(GeoPoint(to.latitude, to.longitude))
-                    outlinePaint.strokeWidth = 6f
+                    outlinePaint.strokeWidth = 7f
                     outlinePaint.isAntiAlias = true
                     outlinePaint.color = when (link.installationType.lowercase(Locale.ROOT)) {
                         "aérien" -> android.graphics.Color.parseColor("#EA580C")
@@ -253,6 +260,10 @@ fun OsmMapView(
                         else -> android.graphics.Color.parseColor("#16A34A")
                     }
                     title = "${link.id} (${link.capacityFO} FO - ${link.cableType})"
+                    setOnClickListener { _, _, _ ->
+                        onLinkClick?.invoke(link)
+                        true
+                    }
                 }
                 mapView.overlays.add(polyline)
             }
@@ -266,10 +277,16 @@ fun OsmMapView(
                     for (pt in pts) {
                         addPoint(GeoPoint(pt.latitude, pt.longitude))
                     }
-                    outlinePaint.strokeWidth = 7f
+                    outlinePaint.strokeWidth = 8f
                     outlinePaint.isAntiAlias = true
                     outlinePaint.color = if (track.isSimplified) android.graphics.Color.parseColor("#059669") else android.graphics.Color.parseColor("#7C3AED")
                     title = "${track.name} (${String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)})"
+                    setOnClickListener { _, _, _ ->
+                        if (!isStraightenMode && !isMoveVertexMode) {
+                            onTrackClick?.invoke(track)
+                            true
+                        } else false
+                    }
                 }
                 mapView.overlays.add(polyline)
 
@@ -412,8 +429,22 @@ fun OsmMapView(
             val stakeMarker = Marker(mapView).apply {
                 position = GeoPoint(pendingStakePosition.first, pendingStakePosition.second)
                 title = "Position à valider"
-                snippet = "Touchez 'Confirmer et Piqueter' ci-dessous"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                snippet = "Glissez ou touchez la carte pour ajuster"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                isDraggable = true
+                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                    override fun onMarkerDrag(marker: Marker?) {}
+                    override fun onMarkerDragStart(marker: Marker?) {}
+                    override fun onMarkerDragEnd(marker: Marker?) {
+                        marker?.position?.let { gp ->
+                            if (onUpdateStakingPosition != null) {
+                                onUpdateStakingPosition.invoke(gp.latitude, gp.longitude)
+                            } else {
+                                onMapLongClick(gp.latitude, gp.longitude)
+                            }
+                        }
+                    }
+                })
             }
             mapView.overlays.add(stakeMarker)
         }

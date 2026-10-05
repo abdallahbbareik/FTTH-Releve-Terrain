@@ -136,7 +136,7 @@ fun NodeDetailSheet(
     var photoCount by remember(node) { mutableIntStateOf(node.photoCount) }
 
     // Poteau
-    var poleNature by remember(node) { mutableStateOf(node.poleNature) }
+    var poleNature by remember(node) { mutableStateOf(if (node.poleNature.isBlank()) "bois" else node.poleNature) }
     var poleHeight by remember(node) { mutableIntStateOf(node.poleHeight) }
 
     // Chambre
@@ -252,27 +252,50 @@ fun NodeDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    NodeStatus.values().forEach { st ->
-                        val isSel = status == st
-                        FilterChip(
-                            selected = isSel,
-                            onClick = { status = st },
-                            label = {
-                                Text(
-                                    text = st.label,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(NodeStatus.EXISTANT, NodeStatus.A_POSER).forEach { st ->
+                            val isSel = status == st
+                            FilterChip(
+                                selected = isSel,
+                                onClick = { status = st },
+                                label = {
+                                    Text(
+                                        text = st.label,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
+                                    selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
                                 )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
-                                selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
                             )
-                        )
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(NodeStatus.A_REMPLACER, NodeStatus.A_DEPOSER).forEach { st ->
+                            val isSel = status == st
+                            FilterChip(
+                                selected = isSel,
+                                onClick = { status = st },
+                                label = {
+                                    Text(
+                                        text = st.label,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
+                                    selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
+                                )
+                            )
+                        }
                     }
                 }
 

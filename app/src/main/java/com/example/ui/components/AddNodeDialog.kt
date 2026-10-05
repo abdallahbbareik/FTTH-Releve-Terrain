@@ -99,14 +99,14 @@ fun AddNodeDialog(
             }
         )
     }
-    var status by remember { mutableStateOf(NodeStatus.A_POSER) }
+    var status by remember { mutableStateOf(NodeStatus.EXISTANT) }
     var etat by remember { mutableStateOf(NodeConformity.CONFORME) }
     var address by remember { mutableStateOf("") }
     var hasBoitierFtth by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
 
     // Poteau
-    var poleNature by remember { mutableStateOf("béton") }
+    var poleNature by remember { mutableStateOf("bois") }
     var poleHeight by remember { mutableIntStateOf(8) }
 
     // Chambre
@@ -260,12 +260,34 @@ fun AddNodeDialog(
 
                 // STATUT (Existant, À poser, À remplacer, À déposer)
                 Text(text = "Statut :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NodeStatus.values().forEach { st ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = status == st,
-                            onClick = { status = st },
-                            label = { Text(st.label, fontSize = 11.sp) }
+                            selected = status == NodeStatus.EXISTANT,
+                            onClick = { status = NodeStatus.EXISTANT },
+                            label = { Text(NodeStatus.EXISTANT.label, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = status == NodeStatus.A_POSER,
+                            onClick = { status = NodeStatus.A_POSER },
+                            label = { Text(NodeStatus.A_POSER.label, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = status == NodeStatus.A_REMPLACER,
+                            onClick = { status = NodeStatus.A_REMPLACER },
+                            label = { Text(NodeStatus.A_REMPLACER.label, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = status == NodeStatus.A_DEPOSER,
+                            onClick = { status = NodeStatus.A_DEPOSER },
+                            label = { Text(NodeStatus.A_DEPOSER.label, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -274,12 +296,14 @@ fun AddNodeDialog(
 
                 // ETAT (Conforme, Non conforme)
                 Text(text = "État :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NodeConformity.values().forEach { c ->
                         FilterChip(
                             selected = etat == c,
                             onClick = { etat = c },
-                            label = { Text(c.label, fontSize = 11.sp) }
+                            label = { Text(c.label, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }

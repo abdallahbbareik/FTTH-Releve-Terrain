@@ -129,6 +129,12 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _showTracksListDialog = MutableStateFlow(false)
     val showTracksListDialog: StateFlow<Boolean> = _showTracksListDialog.asStateFlow()
 
+    private val _showNodesListDialog = MutableStateFlow(false)
+    val showNodesListDialog: StateFlow<Boolean> = _showNodesListDialog.asStateFlow()
+
+    private val _selectedLinkForDetail = MutableStateFlow<FtthLinkEntity?>(null)
+    val selectedLinkForDetail: StateFlow<FtthLinkEntity?> = _selectedLinkForDetail.asStateFlow()
+
     private val _showAddNodeDialog = MutableStateFlow(false)
     val showAddNodeDialog: StateFlow<Boolean> = _showAddNodeDialog.asStateFlow()
 
@@ -239,6 +245,11 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updatePendingStakePosition(lat: Double, lon: Double) {
+        _pendingStakePosition.value = Pair(lat, lon)
+        _isPickOnMapMode.value = false
+    }
+
     fun confirmStakingPosition(lat: Double, lon: Double) {
         _isPickOnMapMode.value = false
         _pendingStakePosition.value = null
@@ -264,7 +275,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             }
             _rawNodes.value = list
             docStorage.saveNodes(list)
-            _selectedNode.value = node
+            _selectedNode.value = null // Fermeture propre sans réouverture intempestive
             _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
         }
     }
@@ -718,6 +729,48 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissTracksList() {
         _showTracksListDialog.value = false
+    }
+
+    fun openNodesList() {
+        _showNodesListDialog.value = true
+    }
+
+    fun dismissNodesList() {
+        _showNodesListDialog.value = false
+    }
+
+    fun selectLinkForDetail(link: FtthLinkEntity?) {
+        _selectedLinkForDetail.value = link
+    }
+
+    fun dismissLinkDetail() {
+        _selectedLinkForDetail.value = null
+    }
+
+    fun saveLink(link: FtthLinkEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = _rawLinks.value.toMutableList()
+            val idx = list.indexOfFirst { it.id == link.id }
+            if (idx >= 0) {
+                list[idx] = link
+            } else {
+                list.add(link)
+            }
+            _rawLinks.value = list
+            docStorage.saveLinks(list)
+            _selectedLinkForDetail.value = null
+            _bannerMessage.value = "Liaison ${link.id} mise à jour"
+        }
+    }
+
+    fun deleteLink(linkId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = _rawLinks.value.filter { it.id != linkId }
+            _rawLinks.value = list
+            docStorage.saveLinks(list)
+            _selectedLinkForDetail.value = null
+            _bannerMessage.value = "Liaison $linkId supprimée"
+        }
     }
 
     fun dismissAddNodeDialog() {

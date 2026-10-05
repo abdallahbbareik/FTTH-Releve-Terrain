@@ -17,7 +17,7 @@ object MapMarkerHelper {
         context: Context,
         type: FtthNodeType,
         conformity: NodeConformity,
-        sizeDp: Int = 36
+        sizeDp: Int = 46
     ): Drawable {
         val density = context.resources.displayMetrics.density
         val px = (sizeDp * density).toInt()

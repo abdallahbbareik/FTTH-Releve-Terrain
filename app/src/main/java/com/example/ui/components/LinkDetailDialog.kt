@@ -15,7 +15,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -36,28 +39,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
-import com.example.data.repository.FtthRepository
 
 @Composable
-fun AddLinkDialog(
-    fromNode: FtthNodeEntity,
-    toNode: FtthNodeEntity,
+fun LinkDetailDialog(
+    link: FtthLinkEntity,
+    fromNode: FtthNodeEntity?,
+    toNode: FtthNodeEntity?,
     onDismiss: () -> Unit,
-    onLinkCreated: (cableType: String, installationType: String, capacityFO: Int) -> Unit
+    onSaveLink: (FtthLinkEntity) -> Unit,
+    onDeleteLink: (String) -> Unit
 ) {
-    var cableType by remember { mutableStateOf("Distribution") }
-    var installationType by remember { mutableStateOf("Aérien") }
-    var capacityFO by remember { mutableIntStateOf(24) }
-
-    val distanceMeters = remember(fromNode, toNode) {
-        FtthRepository.calculateDistanceMeters(
-            fromNode.latitude, fromNode.longitude,
-            toNode.latitude, toNode.longitude
-        )
-    }
+    var cableType by remember(link) { mutableStateOf(link.cableType) }
+    var installationType by remember(link) { mutableStateOf(link.installationType) }
+    var capacityFO by remember(link) { mutableIntStateOf(link.capacityFO) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -68,7 +68,7 @@ fun AddLinkDialog(
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .testTag("add_link_dialog")
+                .testTag("link_detail_dialog")
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 // Header
@@ -85,12 +85,12 @@ fun AddLinkDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Raccorder par câble fibre optique",
+                            text = "Liaison fibre ${link.id}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Distance calculée : ${distanceMeters.toInt()} mètres",
+                            text = "Longueur : ${link.lengthMeters.toInt()} mètres",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
@@ -103,7 +103,7 @@ fun AddLinkDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Nodes connection card
+                // Carte Origine -> Extrémité
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(12.dp)
@@ -117,23 +117,23 @@ fun AddLinkDialog(
                     ) {
                         Column {
                             Text(text = "Origine", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                            Text(text = fromNode.id, fontWeight = FontWeight.Bold, color = FtthNodeVisuals.getNodeColor(fromNode.type))
-                            Text(text = fromNode.type.label, style = MaterialTheme.typography.bodySmall)
+                            Text(text = link.fromNodeId, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(text = fromNode?.name ?: "Nœud", style = MaterialTheme.typography.bodySmall)
                         }
 
                         Text(text = "──────▶", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
 
                         Column(horizontalAlignment = Alignment.End) {
                             Text(text = "Extrémité", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                            Text(text = toNode.id, fontWeight = FontWeight.Bold, color = FtthNodeVisuals.getNodeColor(toNode.type))
-                            Text(text = toNode.type.label, style = MaterialTheme.typography.bodySmall)
+                            Text(text = link.toNodeId, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(text = toNode?.name ?: "Nœud", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Cable Type
+                // Type de réseau
                 Text(text = "Type de réseau FTTH :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier
@@ -144,13 +144,8 @@ fun AddLinkDialog(
                 ) {
                     listOf("Transport", "Distribution", "Branchement").forEach { ct ->
                         FilterChip(
-                            selected = cableType == ct,
-                            onClick = {
-                                cableType = ct
-                                if (ct == "Transport") capacityFO = 144
-                                else if (ct == "Distribution") capacityFO = 24
-                                else capacityFO = 1
-                            },
+                            selected = cableType.equals(ct, ignoreCase = true),
+                            onClick = { cableType = ct },
                             label = { Text(ct) }
                         )
                     }
@@ -169,7 +164,7 @@ fun AddLinkDialog(
                 ) {
                     listOf("Aérien", "Souterrain", "Façade").forEach { inst ->
                         FilterChip(
-                            selected = installationType == inst,
+                            selected = installationType.equals(inst, ignoreCase = true),
                             onClick = { installationType = inst },
                             label = { Text(inst) }
                         )
@@ -178,7 +173,7 @@ fun AddLinkDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Capacity FO
+                // Capacité du câble
                 Text(text = "Capacité du câble (Fibre Optique) :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier
@@ -198,18 +193,74 @@ fun AddLinkDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Buttons
+                // Boutons Supprimer & Enregistrer
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Annuler")
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Supprimer")
                     }
+
                     Button(
-                        onClick = { onLinkCreated(cableType, installationType, capacityFO) },
+                        onClick = {
+                            val updated = link.copy(
+                                cableType = cableType,
+                                installationType = installationType,
+                                capacityFO = capacityFO
+                            )
+                            onSaveLink(updated)
+                            onDismiss()
+                        },
                         modifier = Modifier
                             .weight(1.5f)
-                            .testTag("confirm_create_cable_button")
+                            .testTag("save_link_button")
                     ) {
-                        Text("Créer la liaison")
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Enregistrer")
+                    }
+                }
+
+                if (showDeleteConfirm) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Supprimer la liaison ${link.id} ?",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        onDeleteLink(link.id)
+                                        showDeleteConfirm = false
+                                        onDismiss()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Text("Confirmer", fontSize = 11.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = { showDeleteConfirm = false },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Text("Annuler", fontSize = 11.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
