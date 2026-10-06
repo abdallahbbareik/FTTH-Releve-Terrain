@@ -820,6 +820,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _selectedLinkForDetail.value = link
     }
 
+    fun openLinkDetail(link: FtthLinkEntity) {
+        _selectedLinkForDetail.value = link
+    }
+
     fun dismissLinkDetail() {
         _selectedLinkForDetail.value = null
     }

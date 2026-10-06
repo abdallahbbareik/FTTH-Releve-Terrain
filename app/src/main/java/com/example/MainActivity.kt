@@ -498,6 +498,41 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
             }
 
+            // Dossier Relevé-Terrain complet (Points, Trajets, Liaisons)
+            if (showProjectFolderDialog) {
+                ProjectFolderDialog(
+                    nodes = rawNodes,
+                    tracks = allTracks,
+                    links = rawLinks,
+                    onSelectNode = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.selectNode(it)
+                    },
+                    onDeleteNode = { viewModel.deleteNode(it) },
+                    onSelectTrack = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.openTrackDetail(it)
+                    },
+                    onDeleteTrack = { viewModel.deleteTrack(it) },
+                    onSelectLink = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.openLinkDetail(it)
+                    },
+                    onDeleteLink = { viewModel.deleteLink(it) },
+                    onExportZip = {
+                        viewModel.exportCompleteZip(context) { uri ->
+                            uri?.let { viewModel.shareExportFile(context, it, "application/zip") }
+                        }
+                    },
+                    onExportKmz = {
+                        viewModel.exportKmz(context) { uri ->
+                            uri?.let { viewModel.shareExportFile(context, it, "application/vnd.google-earth.kmz") }
+                        }
+                    },
+                    onDismiss = { viewModel.dismissProjectFolder() }
+                )
+            }
+
             // Dialogue Liste des points / nœuds
             if (showNodesListDialog) {
                 NodesListDialog(

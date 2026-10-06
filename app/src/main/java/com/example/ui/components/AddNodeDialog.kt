@@ -116,6 +116,8 @@ fun AddNodeDialog(
     var boitierType by remember { mutableStateOf("PBO") }
     var isSaturated by remember { mutableStateOf(false) }
     var boitierSupport by remember { mutableStateOf("Poteau") }
+    var hasSplitter by remember { mutableStateOf(false) }
+    var splitterType by remember { mutableStateOf("1:8") }
 
     // SRO
     var sroType by remember { mutableStateOf("armoire de rue") }
@@ -124,6 +126,7 @@ fun AddNodeDialog(
     // Immeuble
     var buildingFloors by remember { mutableIntStateOf(4) }
     var buildingDwellings by remember { mutableIntStateOf(12) }
+    var buildingBoitiersEtage by remember { mutableIntStateOf(4) }
     var hasLocalTechnique by remember { mutableStateOf(true) }
     var hasGaineMontante by remember { mutableStateOf(true) }
     var syndicAuthorization by remember { mutableStateOf("Accord obtenu") }
@@ -258,44 +261,65 @@ fun AddNodeDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // STATUT (Existant, À poser, À remplacer, À déposer)
-                Text(text = "Statut :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                // STATUT
+                Text(
+                    text = if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) "Statut du bâtiment :" else "Statut :",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(modifier = Modifier.height(4.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = status == NodeStatus.EXISTANT,
                             onClick = { status = NodeStatus.EXISTANT },
-                            label = { Text(NodeStatus.EXISTANT.label, fontSize = 11.sp, maxLines = 1) },
+                            label = { Text("Existante", fontSize = 11.sp, maxLines = 1) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
-                            selected = status == NodeStatus.A_POSER,
-                            onClick = { status = NodeStatus.A_POSER },
-                            label = { Text(NodeStatus.A_POSER.label, fontSize = 11.sp, maxLines = 1) },
+                            selected = status == NodeStatus.EN_CONSTRUCTION,
+                            onClick = { status = NodeStatus.EN_CONSTRUCTION },
+                            label = { Text("En construction", fontSize = 11.sp, maxLines = 1) },
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = status == NodeStatus.A_REMPLACER,
-                            onClick = { status = NodeStatus.A_REMPLACER },
-                            label = { Text(NodeStatus.A_REMPLACER.label, fontSize = 11.sp, maxLines = 1) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = status == NodeStatus.A_DEPOSER,
-                            onClick = { status = NodeStatus.A_DEPOSER },
-                            label = { Text(NodeStatus.A_DEPOSER.label, fontSize = 11.sp, maxLines = 1) },
-                            modifier = Modifier.weight(1f)
-                        )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = status == NodeStatus.EXISTANT,
+                                onClick = { status = NodeStatus.EXISTANT },
+                                label = { Text(NodeStatus.EXISTANT.label, fontSize = 11.sp, maxLines = 1) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = status == NodeStatus.A_POSER,
+                                onClick = { status = NodeStatus.A_POSER },
+                                label = { Text(NodeStatus.A_POSER.label, fontSize = 11.sp, maxLines = 1) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = status == NodeStatus.A_REMPLACER,
+                                onClick = { status = NodeStatus.A_REMPLACER },
+                                label = { Text(NodeStatus.A_REMPLACER.label, fontSize = 11.sp, maxLines = 1) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = status == NodeStatus.A_DEPOSER,
+                                onClick = { status = NodeStatus.A_DEPOSER },
+                                label = { Text(NodeStatus.A_DEPOSER.label, fontSize = 11.sp, maxLines = 1) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // ETAT (Conforme, Non conforme)
-                Text(text = "État :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                // ETAT TECHNIQUE (Conforme, Non conforme)
+                Text(text = "État technique :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NodeConformity.values().forEach { c ->
@@ -393,11 +417,11 @@ fun AddNodeDialog(
                     FtthNodeType.POTEAU -> {
                         Text(text = "Nature :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "façade" to "Façade").forEach { (nat, lbl) ->
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
                                 FilterChip(
                                     selected = poleNature.equals(nat, ignoreCase = true),
                                     onClick = { poleNature = nat },
-                                    label = { Text(lbl) }
+                                    label = { Text(lbl, fontSize = 11.sp) }
                                 )
                             }
                         }
@@ -416,20 +440,38 @@ fun AddNodeDialog(
 
                     FtthNodeType.CHAMBRE -> {
                         Text(text = "Type de chambre :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("L0T", "L1T", "L2T", "K1C", "K2C").forEach { ch ->
-                                FilterChip(
-                                    selected = chamberType.equals(ch, ignoreCase = true),
-                                    onClick = { chamberType = ch },
-                                    label = { Text(ch) }
-                                )
+                        val chamberOptions = listOf("L0T", "L1T", "L2T", "L3T", "L4T", "1/2 L4T", "K1C", "K2C", "Autre")
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in chamberOptions.chunked(5)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    row.forEach { ch ->
+                                        val isSel = if (ch == "Autre") {
+                                            !chamberOptions.dropLast(1).any { it.equals(chamberType, ignoreCase = true) }
+                                        } else {
+                                            chamberType.equals(ch, ignoreCase = true)
+                                        }
+                                        FilterChip(
+                                            selected = isSel,
+                                            onClick = {
+                                                if (ch == "Autre") {
+                                                    if (chamberOptions.dropLast(1).any { it.equals(chamberType, ignoreCase = true) }) {
+                                                        chamberType = ""
+                                                    }
+                                                } else {
+                                                    chamberType = ch
+                                                }
+                                            },
+                                            label = { Text(ch, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
                             value = chamberType,
                             onValueChange = { chamberType = it },
-                            label = { Text("Désignation format chambre") },
+                            label = { Text("Désignation format chambre (ex: L2T, K1C, 1/2 L4T)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -437,15 +479,90 @@ fun AddNodeDialog(
 
                     FtthNodeType.BOITIER -> {
                         Text(text = "Type boîtier :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        val boitierOptions = listOf("BPE", "PBO", "PRI", "Autre")
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("BPE", "PBO", "PB", "autre").forEach { bt ->
+                            boitierOptions.forEach { bt ->
+                                val isSel = if (bt == "Autre") {
+                                    !listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }
+                                } else {
+                                    boitierType.equals(bt, ignoreCase = true)
+                                }
                                 FilterChip(
-                                    selected = boitierType == bt,
-                                    onClick = { boitierType = bt },
-                                    label = { Text(bt) }
+                                    selected = isSel,
+                                    onClick = {
+                                        if (bt == "Autre") {
+                                            if (listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }) {
+                                                boitierType = ""
+                                            }
+                                        } else {
+                                            boitierType = bt
+                                        }
+                                    },
+                                    label = { Text(bt, fontSize = 11.sp) }
                                 )
                             }
                         }
+                        if (!listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = boitierType,
+                                onValueChange = { boitierType = it },
+                                label = { Text("Préciser le type de boîtier") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Présence Splitter (Coupleur optique)
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Présence Splitter (Coupleur) :",
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (hasSplitter) "Oui" else "Non",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (hasSplitter) Color(0xFF16A34A) else MaterialTheme.colorScheme.outline
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Switch(checked = hasSplitter, onCheckedChange = { hasSplitter = it })
+                                }
+                                if (hasSplitter) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(text = "Type de Splitter :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val splitterOptions = listOf("1:2", "1:4", "1:8", "1:16", "1:32", "1:64")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        splitterOptions.forEach { sp ->
+                                            FilterChip(
+                                                selected = splitterType.equals(sp, ignoreCase = true),
+                                                onClick = { splitterType = sp },
+                                                label = { Text(sp, fontSize = 11.sp) }
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = splitterType,
+                                        onValueChange = { splitterType = it },
+                                        label = { Text("Format splitter (ex: 1:8, 1:16, 1:32)") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "Saturé :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -502,6 +619,13 @@ fun AddNodeDialog(
                                 modifier = Modifier.weight(1f)
                             )
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = buildingBoitiersEtage.toString(),
+                            onValueChange = { buildingBoitiersEtage = it.toIntOrNull() ?: buildingBoitiersEtage },
+                            label = { Text("Boîtier(s) d'Étage") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "Local technique :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -582,10 +706,13 @@ fun AddNodeDialog(
                                 boitierType = boitierType,
                                 isSaturated = isSaturated,
                                 boitierSupport = boitierSupport,
+                                hasSplitter = hasSplitter,
+                                splitterType = splitterType,
                                 sroType = sroType,
                                 sroCapacity = sroCapacity,
                                 buildingFloors = buildingFloors,
                                 buildingDwellings = buildingDwellings,
+                                buildingBoitiersEtage = buildingBoitiersEtage,
                                 hasLocalTechnique = hasLocalTechnique,
                                 hasGaineMontante = hasGaineMontante,
                                 syndicAuthorization = syndicAuthorization,

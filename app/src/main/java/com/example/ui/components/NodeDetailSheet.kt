@@ -128,6 +128,8 @@ fun NodeDetailSheet(
     var boitierType by remember(node) { mutableStateOf(node.boitierType) }
     var isSaturated by remember(node) { mutableStateOf(node.isSaturated) }
     var boitierSupport by remember(node) { mutableStateOf(node.boitierSupport) }
+    var hasSplitter by remember(node) { mutableStateOf(node.hasSplitter) }
+    var splitterType by remember(node) { mutableStateOf(node.splitterType) }
 
     // SRO
     var sroType by remember(node) { mutableStateOf(node.sroType) }
@@ -136,6 +138,7 @@ fun NodeDetailSheet(
     // Immeuble
     var buildingFloors by remember(node) { mutableIntStateOf(node.buildingFloors) }
     var buildingDwellings by remember(node) { mutableIntStateOf(node.buildingDwellings) }
+    var buildingBoitiersEtage by remember(node) { mutableIntStateOf(node.buildingBoitiersEtage) }
     var hasLocalTechnique by remember(node) { mutableStateOf(node.hasLocalTechnique) }
     var hasGaineMontante by remember(node) { mutableStateOf(node.hasGaineMontante) }
     var syndicAuthorization by remember(node) { mutableStateOf(node.syndicAuthorization) }
@@ -166,10 +169,13 @@ fun NodeDetailSheet(
             boitierType = boitierType,
             isSaturated = isSaturated,
             boitierSupport = boitierSupport,
+            hasSplitter = hasSplitter,
+            splitterType = splitterType,
             sroType = sroType,
             sroCapacity = sroCapacity,
             buildingFloors = buildingFloors,
             buildingDwellings = buildingDwellings,
+            buildingBoitiersEtage = buildingBoitiersEtage,
             hasLocalTechnique = hasLocalTechnique,
             hasGaineMontante = hasGaineMontante,
             syndicAuthorization = syndicAuthorization,
@@ -291,24 +297,24 @@ fun NodeDetailSheet(
 
             Column(modifier = Modifier.padding(20.dp)) {
 
-                // 1. STATUT (Existant, À poser, À remplacer, À déposer)
+                // 1. STATUT
                 Text(
-                    text = "Statut :",
+                    text = if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) "Statut du bâtiment :" else "Statut :",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(NodeStatus.EXISTANT, NodeStatus.A_POSER).forEach { st ->
+                        listOf(NodeStatus.EXISTANT to "Existante", NodeStatus.EN_CONSTRUCTION to "En construction").forEach { (st, lbl) ->
                             val isSel = status == st
                             FilterChip(
                                 selected = isSel,
                                 onClick = { status = st },
                                 label = {
                                     Text(
-                                        text = st.label,
+                                        text = lbl,
                                         fontSize = 11.sp,
                                         maxLines = 1,
                                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -322,35 +328,60 @@ fun NodeDetailSheet(
                             )
                         }
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(NodeStatus.A_REMPLACER, NodeStatus.A_DEPOSER).forEach { st ->
-                            val isSel = status == st
-                            FilterChip(
-                                selected = isSel,
-                                onClick = { status = st },
-                                label = {
-                                    Text(
-                                        text = st.label,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(NodeStatus.EXISTANT, NodeStatus.A_POSER).forEach { st ->
+                                val isSel = status == st
+                                FilterChip(
+                                    selected = isSel,
+                                    onClick = { status = st },
+                                    label = {
+                                        Text(
+                                            text = st.label,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
+                                        selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
                                     )
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
-                                    selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
                                 )
-                            )
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(NodeStatus.A_REMPLACER, NodeStatus.A_DEPOSER).forEach { st ->
+                                val isSel = status == st
+                                FilterChip(
+                                    selected = isSel,
+                                    onClick = { status = st },
+                                    label = {
+                                        Text(
+                                            text = st.label,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = FtthNodeVisuals.getStatusColor(st).copy(alpha = 0.2f),
+                                        selectedLabelColor = FtthNodeVisuals.getStatusColor(st)
+                                    )
+                                )
+                            }
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 2. ETAT (Conforme, Non conforme)
+                // 2. ETAT TECHNIQUE (Conforme, Non conforme)
                 Text(
-                    text = "État :",
+                    text = "État technique :",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -569,16 +600,19 @@ fun NodeDetailSheet(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 when (node.type) {
-                    // POTEAU : Nature (bois, métal, béton, façade), Hauteur (7, 8, 9, 10)
+                    // POTEAU : Nature (bois, métal, béton, composite, façade), Hauteur (7, 8, 9, 10)
                     FtthNodeType.POTEAU -> {
                         Text(text = "Nature de l'appui :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "façade" to "Façade").forEach { (nat, lbl) ->
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
                                 FilterChip(
                                     selected = poleNature.equals(nat, ignoreCase = true),
-                                    onClick = { poleNature = nat },
-                                    label = { Text(lbl) }
+                                    onClick = {
+                                        poleNature = nat
+                                        triggerAutoSave()
+                                    },
+                                    label = { Text(lbl, fontSize = 11.sp) }
                                 )
                             }
                         }
@@ -589,51 +623,167 @@ fun NodeDetailSheet(
                             listOf(7, 8, 9, 10).forEach { h ->
                                 FilterChip(
                                     selected = poleHeight == h,
-                                    onClick = { poleHeight = h },
+                                    onClick = {
+                                        poleHeight = h
+                                        triggerAutoSave()
+                                    },
                                     label = { Text("${h}m") }
                                 )
                             }
                         }
                     }
 
-                    // CHAMBRE : Type (L0T, L1T, L2T, K1C, K2C, etc.)
+                    // CHAMBRE : Type (L0T, L1T, L2T, L3T, L4T, 1/2 L4T, K1C, K2C, Autre)
                     FtthNodeType.CHAMBRE -> {
                         Text(text = "Type de chambre :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("L0T", "L1T", "L2T", "K1C", "K2C").forEach { ch ->
-                                FilterChip(
-                                    selected = chamberType.equals(ch, ignoreCase = true),
-                                    onClick = { chamberType = ch },
-                                    label = { Text(ch) }
-                                )
+                        val chamberOptions = listOf("L0T", "L1T", "L2T", "L3T", "L4T", "1/2 L4T", "K1C", "K2C", "Autre")
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in chamberOptions.chunked(5)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    row.forEach { ch ->
+                                        val isSel = if (ch == "Autre") {
+                                            !chamberOptions.dropLast(1).any { it.equals(chamberType, ignoreCase = true) }
+                                        } else {
+                                            chamberType.equals(ch, ignoreCase = true)
+                                        }
+                                        FilterChip(
+                                            selected = isSel,
+                                            onClick = {
+                                                if (ch == "Autre") {
+                                                    if (chamberOptions.dropLast(1).any { it.equals(chamberType, ignoreCase = true) }) {
+                                                        chamberType = ""
+                                                    }
+                                                } else {
+                                                    chamberType = ch
+                                                }
+                                                triggerAutoSave()
+                                            },
+                                            label = { Text(ch, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         OutlinedTextField(
                             value = chamberType,
-                            onValueChange = { chamberType = it },
-                            label = { Text("Autre type / format chambre") },
+                            onValueChange = {
+                                chamberType = it
+                                triggerAutoSave()
+                            },
+                            label = { Text("Désignation format chambre (ex: L2T, K1C, 1/2 L4T)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
                     }
 
-                    // BOÎTIER : Type (BPE, PBO, PB, autre), Saturé (Non, Oui), Support (Poteau, Chambre, Façade, Sous-Sol)
+                    // BOÎTIER : Type (BPE, PBO, PRI, Autre), Saturé (Non, Oui), Support, Splitter
                     FtthNodeType.BOITIER -> {
                         Text(text = "Type de boîtier :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
+                        val boitierOptions = listOf("BPE", "PBO", "PRI", "Autre")
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("BPE", "PBO", "PB", "autre").forEach { bt ->
+                            boitierOptions.forEach { bt ->
+                                val isSel = if (bt == "Autre") {
+                                    !listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }
+                                } else {
+                                    boitierType.equals(bt, ignoreCase = true)
+                                }
                                 FilterChip(
-                                    selected = boitierType.equals(bt, ignoreCase = true),
-                                    onClick = { boitierType = bt },
-                                    label = { Text(bt.uppercase(Locale.ROOT)) }
+                                    selected = isSel,
+                                    onClick = {
+                                        if (bt == "Autre") {
+                                            if (listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }) {
+                                                boitierType = ""
+                                            }
+                                        } else {
+                                            boitierType = bt
+                                        }
+                                        triggerAutoSave()
+                                    },
+                                    label = { Text(bt, fontSize = 11.sp) }
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        if (!listOf("BPE", "PBO", "PRI").any { it.equals(boitierType, ignoreCase = true) }) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = boitierType,
+                                onValueChange = {
+                                    boitierType = it
+                                    triggerAutoSave()
+                                },
+                                label = { Text("Préciser le type de boîtier") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Présence Splitter (Coupleur optique)
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Présence Splitter (Coupleur) :",
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (hasSplitter) "Oui" else "Non",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (hasSplitter) Color(0xFF16A34A) else MaterialTheme.colorScheme.outline
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Switch(
+                                        checked = hasSplitter,
+                                        onCheckedChange = {
+                                            hasSplitter = it
+                                            triggerAutoSave()
+                                        }
+                                    )
+                                }
+                                if (hasSplitter) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(text = "Type de Splitter :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val splitterOptions = listOf("1:2", "1:4", "1:8", "1:16", "1:32", "1:64")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        splitterOptions.forEach { sp ->
+                                            FilterChip(
+                                                selected = splitterType.equals(sp, ignoreCase = true),
+                                                onClick = {
+                                                    splitterType = sp
+                                                    triggerAutoSave()
+                                                },
+                                                label = { Text(sp, fontSize = 11.sp) }
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedTextField(
+                                        value = splitterType,
+                                        onValueChange = {
+                                            splitterType = it
+                                            triggerAutoSave()
+                                        },
+                                        label = { Text("Format splitter (ex: 1:8, 1:16, 1:32)") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                             shape = RoundedCornerShape(10.dp)
@@ -652,7 +802,13 @@ fun NodeDetailSheet(
                                         color = if (isSaturated) Color(0xFFDC2626) else Color(0xFF16A34A)
                                     )
                                 }
-                                Switch(checked = isSaturated, onCheckedChange = { isSaturated = it })
+                                Switch(
+                                    checked = isSaturated,
+                                    onCheckedChange = {
+                                        isSaturated = it
+                                        triggerAutoSave()
+                                    }
+                                )
                             }
                         }
 
@@ -663,7 +819,10 @@ fun NodeDetailSheet(
                             listOf("Poteau", "Chambre", "Façade", "Sous-Sol").forEach { sup ->
                                 FilterChip(
                                     selected = boitierSupport.equals(sup, ignoreCase = true),
-                                    onClick = { boitierSupport = sup },
+                                    onClick = {
+                                        boitierSupport = sup
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(sup) }
                                 )
                             }
@@ -678,7 +837,10 @@ fun NodeDetailSheet(
                             listOf("armoire de rue" to "Armoire de rue", "local" to "Local technique").forEach { (st, lbl) ->
                                 FilterChip(
                                     selected = sroType.equals(st, ignoreCase = true),
-                                    onClick = { sroType = st },
+                                    onClick = {
+                                        sroType = st
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(lbl) }
                                 )
                             }
@@ -686,7 +848,10 @@ fun NodeDetailSheet(
                         Spacer(modifier = Modifier.height(12.dp))
                         OutlinedTextField(
                             value = sroCapacity,
-                            onValueChange = { sroCapacity = it },
+                            onValueChange = {
+                                sroCapacity = it
+                                triggerAutoSave()
+                            },
                             label = { Text("Capacité nominale (ex: 360 FO, 720 FO, 1000 FO)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
@@ -696,29 +861,50 @@ fun NodeDetailSheet(
                             listOf("144 FO", "360 FO", "720 FO", "1000 FO").forEach { cap ->
                                 FilterChip(
                                     selected = sroCapacity == cap,
-                                    onClick = { sroCapacity = cap },
+                                    onClick = {
+                                        sroCapacity = cap
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(cap) }
                                 )
                             }
                         }
                     }
 
-                    // IMMEUBLE : Nombre étages, Nombre logement, Local technique (Oui/Non), Gaine montante (oui/non), Autorisation syndique, Contact syndic (facultatif), Mode de raccordement (façade, souterrain, aérien)
+                    // IMMEUBLE : Nombre étages, Nombre logement, Boîtier d'Étage, Local technique, Gaine montante, Syndic
                     FtthNodeType.IMMEUBLE -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
                                 value = buildingFloors.toString(),
-                                onValueChange = { buildingFloors = it.toIntOrNull() ?: buildingFloors },
+                                onValueChange = {
+                                    buildingFloors = it.toIntOrNull() ?: buildingFloors
+                                    triggerAutoSave()
+                                },
                                 label = { Text("Nombre étages") },
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
                                 value = buildingDwellings.toString(),
-                                onValueChange = { buildingDwellings = it.toIntOrNull() ?: buildingDwellings },
+                                onValueChange = {
+                                    buildingDwellings = it.toIntOrNull() ?: buildingDwellings
+                                    triggerAutoSave()
+                                },
                                 label = { Text("Nombre logements") },
                                 modifier = Modifier.weight(1f)
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedTextField(
+                            value = buildingBoitiersEtage.toString(),
+                            onValueChange = {
+                                buildingBoitiersEtage = it.toIntOrNull() ?: buildingBoitiersEtage
+                                triggerAutoSave()
+                            },
+                            label = { Text("Boîtier(s) d'Étage") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -731,14 +917,26 @@ fun NodeDetailSheet(
                                     Text(text = "Local technique :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                     Text(text = if (hasLocalTechnique) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Switch(checked = hasLocalTechnique, onCheckedChange = { hasLocalTechnique = it })
+                                    Switch(
+                                        checked = hasLocalTechnique,
+                                        onCheckedChange = {
+                                            hasLocalTechnique = it
+                                            triggerAutoSave()
+                                        }
+                                    )
                                 }
                                 HorizontalDivider()
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(text = "Gaine montante :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                     Text(text = if (hasGaineMontante) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Switch(checked = hasGaineMontante, onCheckedChange = { hasGaineMontante = it })
+                                    Switch(
+                                        checked = hasGaineMontante,
+                                        onCheckedChange = {
+                                            hasGaineMontante = it
+                                            triggerAutoSave()
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -750,7 +948,10 @@ fun NodeDetailSheet(
                             listOf("Accord obtenu", "En attente", "Refusé").forEach { auth ->
                                 FilterChip(
                                     selected = syndicAuthorization.equals(auth, ignoreCase = true),
-                                    onClick = { syndicAuthorization = auth },
+                                    onClick = {
+                                        syndicAuthorization = auth
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(auth) }
                                 )
                             }
@@ -759,7 +960,10 @@ fun NodeDetailSheet(
                         Spacer(modifier = Modifier.height(10.dp))
                         OutlinedTextField(
                             value = syndicContact,
-                            onValueChange = { syndicContact = it },
+                            onValueChange = {
+                                syndicContact = it
+                                triggerAutoSave()
+                            },
                             label = { Text("Contact syndic (facultatif)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
@@ -772,7 +976,10 @@ fun NodeDetailSheet(
                             listOf("façade" to "Façade", "souterrain" to "Souterrain", "aérien" to "Aérien").forEach { (md, lbl) ->
                                 FilterChip(
                                     selected = buildingConnectionMode.equals(md, ignoreCase = true),
-                                    onClick = { buildingConnectionMode = md },
+                                    onClick = {
+                                        buildingConnectionMode = md
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(lbl) }
                                 )
                             }
@@ -783,11 +990,14 @@ fun NodeDetailSheet(
                     FtthNodeType.VILLA -> {
                         Text(text = "Mode de raccordement :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf("aérien" to "Aérien", "souterrain" to "Souterrain", "façade" to "Façade").forEach { (vm, lbl) ->
                                 FilterChip(
                                     selected = villaConnectionMode.equals(vm, ignoreCase = true),
-                                    onClick = { villaConnectionMode = vm },
+                                    onClick = {
+                                        villaConnectionMode = vm
+                                        triggerAutoSave()
+                                    },
                                     label = { Text(lbl) }
                                 )
                             }

@@ -14,6 +14,7 @@ enum class FtthNodeType(val label: String, val category: String) {
 
 enum class NodeStatus(val label: String) {
     EXISTANT("Existant"),
+    EN_CONSTRUCTION("En construction"),
     A_POSER("À poser"),
     A_REMPLACER("À remplacer"),
     A_DEPOSER("À déposer")
@@ -41,7 +42,7 @@ data class FtthNodeEntity(
     val status: NodeStatus = NodeStatus.EXISTANT,
     val etat: NodeConformity = NodeConformity.CONFORME,
     val address: String = "",
-    val hasBoitierFtth: Boolean = false, // Non, Oui (sauf Villa et SRO)
+    val hasBoitierFtth: Boolean = false, // Non, Oui (sauf Boîtier, Villa et SRO)
     val notes: String = "", // Commentaire
     val technicianName: String = "Tech-01 (Moi)",
     val photoCount: Int = 0,
@@ -50,16 +51,18 @@ data class FtthNodeEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 
     // Spécifique Poteau
-    val poleNature: String = "bois", // bois, métal, béton, façade
+    val poleNature: String = "bois", // bois, métal, béton, composite, façade
     val poleHeight: Int = 8, // 7, 8, 9, 10
 
     // Spécifique Chambre
-    val chamberType: String = "L2T", // L0T, L1T, L2T, K1C, K2C, etc.
+    val chamberType: String = "L2T", // L0T, L1T, L2T, L3T, L4T, 1/2 L4T, K1C, K2C, Autre
 
     // Spécifique Boîtier
-    val boitierType: String = "PBO", // BPE, PBO, PB, autre
+    val boitierType: String = "PBO", // BPE, PBO, PRI, Autre
     val isSaturated: Boolean = false, // Saturé : Non, Oui
     val boitierSupport: String = "Poteau", // Poteau, Chambre, Façade, Sous-Sol
+    val hasSplitter: Boolean = false, // Présence Splitter (Coupleur optique) : Oui/Non
+    val splitterType: String = "1:8", // Type de splitter (1:2, 1:4, 1:8, 1:16, 1:32, 1:64)
 
     // Spécifique SRO
     val sroType: String = "armoire de rue", // armoire de rue, local
@@ -67,7 +70,8 @@ data class FtthNodeEntity(
 
     // Spécifique Immeuble
     val buildingFloors: Int = 4, // Nombre étages
-    val buildingDwellings: Int = 16, // Nombre logement
+    val buildingDwellings: Int = 16, // Nombre logements
+    val buildingBoitiersEtage: Int = 4, // Nombre boîtiers d'étage
     val hasLocalTechnique: Boolean = true, // Local technique : Oui/Non
     val hasGaineMontante: Boolean = true, // Gaine montante : oui/non
     val syndicAuthorization: String = "Accord obtenu", // Accord obtenu, En attente, Refusé

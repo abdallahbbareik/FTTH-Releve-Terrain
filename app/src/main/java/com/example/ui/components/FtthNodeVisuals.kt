@@ -48,10 +48,11 @@ object FtthNodeVisuals {
     }
 
     fun getStatusColor(status: NodeStatus): Color = when (status) {
-        NodeStatus.EXISTANT -> Color(0xFF0284C7)    // Blue
-        NodeStatus.A_POSER -> Color(0xFF16A34A)     // Green
-        NodeStatus.A_REMPLACER -> Color(0xFFEA580C) // Orange
-        NodeStatus.A_DEPOSER -> Color(0xFFDC2626)   // Red
+        NodeStatus.EXISTANT -> Color(0xFF0284C7)        // Blue
+        NodeStatus.EN_CONSTRUCTION -> Color(0xFF8B5CF6)  // Purple / Violet for En construction
+        NodeStatus.A_POSER -> Color(0xFF16A34A)         // Green
+        NodeStatus.A_REMPLACER -> Color(0xFFEA580C)     // Orange
+        NodeStatus.A_DEPOSER -> Color(0xFFDC2626)       // Red
     }
 
     fun getConformityColor(etat: NodeConformity): Color = when (etat) {
