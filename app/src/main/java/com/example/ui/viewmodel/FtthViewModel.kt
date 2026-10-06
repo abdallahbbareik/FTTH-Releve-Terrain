@@ -132,6 +132,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _showNodesListDialog = MutableStateFlow(false)
     val showNodesListDialog: StateFlow<Boolean> = _showNodesListDialog.asStateFlow()
 
+    private val _showProjectFolderDialog = MutableStateFlow(false)
+    val showProjectFolderDialog: StateFlow<Boolean> = _showProjectFolderDialog.asStateFlow()
+
     private val _selectedLinkForDetail = MutableStateFlow<FtthLinkEntity?>(null)
     val selectedLinkForDetail: StateFlow<FtthLinkEntity?> = _selectedLinkForDetail.asStateFlow()
 
@@ -264,7 +267,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- GESTION DES NOEUDS (DOCUMENTS/RELEVE-TERRAIN/NOEUDS.JSON) ---
 
-    fun saveNode(node: FtthNodeEntity, isNew: Boolean = false) {
+    fun saveNode(node: FtthNodeEntity, isNew: Boolean = false, closeSheet: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) {
             val list = _rawNodes.value.toMutableList()
             val idx = list.indexOfFirst { it.id == node.id }
@@ -273,10 +276,64 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 list.add(0, node)
             }
+
+            var createdAutoBoitierName: String? = null
+
+            // Si Boîtier FTTH = Oui et le nœud parent n'est pas déjà un Boîtier :
+            if (node.hasBoitierFtth && node.type != FtthNodeType.BOITIER) {
+                val boitierId = "${node.id}-B"
+                val boitierName = if (node.name.isNotBlank()) "${node.name}-B" else boitierId
+                val support = when (node.type) {
+                    FtthNodeType.POTEAU -> "Poteau"
+                    FtthNodeType.CHAMBRE -> "Chambre"
+                    else -> "Façade"
+                }
+
+                val existingIdx = list.indexOfFirst { it.id == boitierId }
+                if (existingIdx >= 0) {
+                    val existing = list[existingIdx]
+                    list[existingIdx] = existing.copy(
+                        latitude = node.latitude,
+                        longitude = node.longitude,
+                        boitierSupport = support,
+                        address = node.address
+                    )
+                } else {
+                    val autoBoitier = FtthNodeEntity(
+                        id = boitierId,
+                        type = FtthNodeType.BOITIER,
+                        name = boitierName,
+                        latitude = node.latitude,
+                        longitude = node.longitude,
+                        status = node.status,
+                        etat = node.etat,
+                        address = node.address,
+                        hasBoitierFtth = false,
+                        boitierSupport = support,
+                        boitierType = if (node.type == FtthNodeType.POTEAU) "PBO" else "BPE",
+                        technicianName = node.technicianName,
+                        notes = "Boîtier créé automatiquement sur le support ${node.id} ($support)",
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    list.add(0, autoBoitier)
+                    createdAutoBoitierName = boitierName
+                }
+            }
+
             _rawNodes.value = list
             docStorage.saveNodes(list)
-            _selectedNode.value = null // Fermeture propre sans réouverture intempestive
-            _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
+            if (closeSheet) {
+                _selectedNode.value = null
+            } else {
+                _selectedNode.value = node
+            }
+
+            if (createdAutoBoitierName != null) {
+                val supportName = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
+                _bannerMessage.value = "Nœud ${node.id} enregistré. Boîtier $createdAutoBoitierName créé automatiquement sur son support ($supportName). Pensez à le compléter !"
+            } else {
+                _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
+            }
         }
     }
 
@@ -739,6 +796,26 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _showNodesListDialog.value = false
     }
 
+    fun openProjectFolder() {
+        reloadPersistedData()
+        _showProjectFolderDialog.value = true
+    }
+
+    fun dismissProjectFolder() {
+        _showProjectFolderDialog.value = false
+    }
+
+    fun reloadPersistedData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val loadedNodes = docStorage.loadNodes()
+            val loadedLinks = docStorage.loadLinks()
+            val loadedTracks = docStorage.loadTracks()
+            _rawNodes.value = loadedNodes
+            _rawLinks.value = loadedLinks
+            _allTracks.value = loadedTracks
+        }
+    }
+
     fun selectLinkForDetail(link: FtthLinkEntity?) {
         _selectedLinkForDetail.value = link
     }
@@ -830,10 +907,50 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun exportKmz(context: Context, onComplete: (File) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value)
+            withContext(Dispatchers.Main) { onComplete(file) }
+        }
+    }
+
     fun exportCompleteZip(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value)
             withContext(Dispatchers.Main) { onComplete(file) }
+        }
+    }
+
+    fun exportCompleteZipAndShare(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Génération du dossier ZIP complet en cours..."
+            val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value)
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "Dossier ZIP généré (${file.length() / 1024} Ko)"
+                RealExportService.shareFile(context, file, "application/zip", "Partager le dossier ZIP complet")
+            }
+        }
+    }
+
+    fun exportKmzAndShare(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Génération du fichier KMZ Google Earth..."
+            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value)
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "KMZ généré (${file.length() / 1024} Ko)"
+                RealExportService.shareFile(context, file, "application/vnd.google-earth.kmz", "Partager le fichier KMZ Google Earth")
+            }
+        }
+    }
+
+    fun exportGeoJsonAndShare(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Génération du fichier GeoJSON SIG..."
+            val file = RealExportService.exportGeoJson(context, _rawNodes.value, _rawLinks.value)
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "GeoJSON généré (${file.length() / 1024} Ko)"
+                RealExportService.shareFile(context, file, "application/geo+json", "Partager le fichier GeoJSON SIG")
+            }
         }
     }
 

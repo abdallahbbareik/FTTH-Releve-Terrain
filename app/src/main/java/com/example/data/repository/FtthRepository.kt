@@ -232,6 +232,16 @@ class FtthRepository(
         RealExportService.exportKml(context, nodes, links)
     }
 
+    suspend fun exportKmz(context: Context): File = withContext(Dispatchers.IO) {
+        val nodes = dao.getAllNodes().first()
+        val links = dao.getAllLinks().first()
+        val tracks = dao.getAllTracks().first()
+        val tracksWithPoints = tracks.map { track ->
+            track to dao.getTrackPointsSnapshot(track.id)
+        }
+        RealExportService.exportKmz(context, nodes, links, tracksWithPoints)
+    }
+
     suspend fun exportCompleteZip(context: Context): File = withContext(Dispatchers.IO) {
         val nodes = dao.getAllNodes().first()
         val links = dao.getAllLinks().first()

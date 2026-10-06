@@ -1,6 +1,6 @@
 {
-  "name": "OptiFTTH",
-  "description": "Application terrain de piquetage FTTH avec OpenStreetMap, satellite Esri, tracés GPS, photos géoréférencées et stockage dans Documents/Releve-Terrain.",
+  "name": "Releve-Terrain",
+  "description": "Application terrain de piquetage et relevé avec OpenStreetMap, satellite Esri, tracés GPS, photos géoréférencées et stockage local dans Documents/Releve-Terrain.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

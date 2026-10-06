@@ -17,14 +17,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,9 +60,12 @@ fun PiquetageTopBar(
     onSearchQueryChange: (String) -> Unit,
     onOpenFilters: () -> Unit,
     onOpenSyncLogs: () -> Unit,
+    onOpenProjectFolder: () -> Unit = onOpenSyncLogs,
     onOpenExport: () -> Unit,
     onOpenWorkflowGuide: () -> Unit,
-    onResetDemo: () -> Unit
+    onExportZip: () -> Unit,
+    onExportKmz: () -> Unit,
+    onExportGeoJson: () -> Unit
 ) {
     var isSearchActive by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -108,27 +114,12 @@ fun PiquetageTopBar(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "OptiFTTH",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = Color(0x3300E5FF)
-                                ) {
-                                    Text(
-                                        text = "SRO-04",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TelecomCyan,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
+                            Text(
+                                text = "Releve-Terrain",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
                             Text(
                                 text = "$totalNodesCount nœuds relevés",
                                 style = MaterialTheme.typography.labelSmall,
@@ -140,6 +131,16 @@ fun PiquetageTopBar(
                 }
             },
             actions = {
+                IconButton(
+                    onClick = onOpenProjectFolder,
+                    modifier = Modifier.testTag("open_project_folder_topbar_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = "Dossier Relevé-Terrain (Points, Trajets, Liaisons)"
+                    )
+                }
+
                 IconButton(
                     onClick = {
                         isSearchActive = !isSearchActive
@@ -173,6 +174,39 @@ fun PiquetageTopBar(
                         onDismissRequest = { menuExpanded = false }
                     ) {
                         DropdownMenuItem(
+                            text = { Text("Export ZIP complet (GeoJSON, KMZ, Photos)", fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = { Icon(Icons.Default.FolderZip, contentDescription = null, tint = TelecomCyan) },
+                            onClick = {
+                                menuExpanded = false
+                                onExportZip()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export KMZ seul (Google Earth)") },
+                            leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = TelecomCyan) },
+                            onClick = {
+                                menuExpanded = false
+                                onExportKmz()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export GeoJSON seul (SIG)") },
+                            leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onExportGeoJson()
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Rapport & Statistiques avancés") },
+                            leadingIcon = { Icon(Icons.Default.Assessment, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenExport()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Guide du Workflow Piquetage") },
                             leadingIcon = { Icon(Icons.Default.Route, contentDescription = null) },
                             onClick = {
@@ -181,27 +215,11 @@ fun PiquetageTopBar(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Rapport & Statistiques") },
-                            leadingIcon = { Icon(Icons.Default.Assessment, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onOpenExport()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Journal de Synchro Temps Réel") },
+                            text = { Text("Journal d'activité local") },
                             leadingIcon = { Icon(Icons.Default.CloudSync, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
                                 onOpenSyncLogs()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Réinitialiser démo terrain") },
-                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onResetDemo()
                             }
                         )
                     }

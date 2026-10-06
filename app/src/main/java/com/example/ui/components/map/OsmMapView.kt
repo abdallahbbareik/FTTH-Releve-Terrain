@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,16 +148,26 @@ fun OsmMapView(
         Configuration.getInstance().load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
     }
 
+    val TUNISIA_CENTER_LAT = 34.0
+    val TUNISIA_CENTER_LON = 9.5375
+    val TUNISIA_DEFAULT_ZOOM = 7.2
+
     val mapView = remember {
         MapView(context).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(16.5)
 
-            val defaultLat = nodes.firstOrNull()?.latitude ?: 48.8580
-            val defaultLon = nodes.firstOrNull()?.longitude ?: 2.3522
-            controller.setCenter(GeoPoint(defaultLat, defaultLon))
+            if (userLocation != null) {
+                controller.setZoom(16.5)
+                controller.setCenter(GeoPoint(userLocation.latitude, userLocation.longitude))
+            } else if (nodes.isNotEmpty()) {
+                controller.setZoom(16.5)
+                controller.setCenter(GeoPoint(nodes.first().latitude, nodes.first().longitude))
+            } else {
+                controller.setZoom(TUNISIA_DEFAULT_ZOOM)
+                controller.setCenter(GeoPoint(TUNISIA_CENTER_LAT, TUNISIA_CENTER_LON))
+            }
 
             addMapListener(object : org.osmdroid.events.MapListener {
                 override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
@@ -167,6 +178,16 @@ fun OsmMapView(
                     return false
                 }
             })
+        }
+    }
+
+    var hasAutoCenteredOnGps by remember { mutableStateOf(userLocation != null) }
+
+    LaunchedEffect(userLocation) {
+        if (userLocation != null && !hasAutoCenteredOnGps) {
+            hasAutoCenteredOnGps = true
+            mapView.controller.setZoom(16.5)
+            mapView.controller.animateTo(GeoPoint(userLocation.latitude, userLocation.longitude))
         }
     }
 
@@ -194,10 +215,22 @@ fun OsmMapView(
         mapView.invalidate()
     }
 
+    val currentIsPickOnMapMode by rememberUpdatedState(isPickOnMapMode)
+    val currentPendingStakePosition by rememberUpdatedState(pendingStakePosition)
+    val currentMovingNode by rememberUpdatedState(movingNode)
+    val currentIsMoveVertexMode by rememberUpdatedState(isMoveVertexMode)
+    val currentMovingVertexIndex by rememberUpdatedState(movingVertexIndex)
+    val currentIsManualTrackMode by rememberUpdatedState(isManualTrackMode)
+    val currentOnMapClickForMove by rememberUpdatedState(onMapClickForMove)
+    val currentOnManualTrackAddPoint by rememberUpdatedState(onManualTrackAddPoint)
+    val currentOnUpdateStakingPosition by rememberUpdatedState(onUpdateStakingPosition)
+    val currentOnMapLongClick by rememberUpdatedState(onMapLongClick)
+
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
-        movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition
+        movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
+        isPickOnMapMode
     ) {
         mapView.overlays.clear()
 
@@ -212,19 +245,19 @@ fun OsmMapView(
         val eventsReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null) {
-                    if (movingNode != null || (isMoveVertexMode && movingVertexIndex != null)) {
-                        onMapClickForMove?.invoke(p.latitude, p.longitude)
+                    if (currentMovingNode != null || (currentIsMoveVertexMode && currentMovingVertexIndex != null)) {
+                        currentOnMapClickForMove?.invoke(p.latitude, p.longitude)
                         return true
                     }
-                    if (isManualTrackMode) {
-                        onManualTrackAddPoint(p.latitude, p.longitude)
+                    if (currentIsManualTrackMode) {
+                        currentOnManualTrackAddPoint(p.latitude, p.longitude)
                         return true
                     }
-                    if (isPickOnMapMode || pendingStakePosition != null) {
-                        if (onUpdateStakingPosition != null) {
-                            onUpdateStakingPosition.invoke(p.latitude, p.longitude)
+                    if (currentIsPickOnMapMode || currentPendingStakePosition != null) {
+                        if (currentOnUpdateStakingPosition != null) {
+                            currentOnUpdateStakingPosition!!.invoke(p.latitude, p.longitude)
                         } else {
-                            onMapLongClick(p.latitude, p.longitude)
+                            currentOnMapLongClick(p.latitude, p.longitude)
                         }
                         return true
                     }
@@ -233,8 +266,8 @@ fun OsmMapView(
             }
 
             override fun longPressHelper(p: GeoPoint?): Boolean {
-                if (p != null && !isManualTrackMode && movingNode == null && !isMoveVertexMode) {
-                    onMapLongClick(p.latitude, p.longitude)
+                if (p != null && !currentIsManualTrackMode && currentMovingNode == null && !currentIsMoveVertexMode) {
+                    currentOnMapLongClick(p.latitude, p.longitude)
                     return true
                 }
                 return false
@@ -537,9 +570,15 @@ fun OsmMapView(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "Confirmer la position du nœud :",
+                        text = "Position de piquetage sélectionnée :",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Touchez un autre endroit sur la carte pour corriger la position, ou validez :",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

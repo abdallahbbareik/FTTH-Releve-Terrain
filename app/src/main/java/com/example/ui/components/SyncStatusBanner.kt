@@ -31,6 +31,7 @@ fun SyncStatusBanner(
     linksCount: Int,
     tracksCount: Int,
     onOpenLogs: () -> Unit,
+    onOpenProjectFolder: () -> Unit = onOpenLogs,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -56,7 +57,7 @@ fun SyncStatusBanner(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onOpenLogs() }
+                    .clickable { onOpenProjectFolder() }
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -84,14 +85,14 @@ fun SyncStatusBanner(
             }
 
             IconButton(
-                onClick = onOpenLogs,
+                onClick = onOpenProjectFolder,
                 modifier = Modifier
                     .size(32.dp)
                     .testTag("open_history_logs_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Folder,
-                    contentDescription = "Dossier Releve-Terrain",
+                    contentDescription = "Dossier Releve-Terrain (Points, Trajets, Liaisons)",
                     tint = Color(0xFFE2E8F0),
                     modifier = Modifier.size(18.dp)
                 )

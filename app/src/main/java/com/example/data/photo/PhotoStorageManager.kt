@@ -16,27 +16,32 @@ object PhotoStorageManager {
      * Répertoire dédié : Documents/Releve-Terrain/Photos/<id_objet>/
      */
     fun getPhotosDirectory(context: Context, objectId: String): File {
-        val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val baseDir = File(publicDocs, "Releve-Terrain/Photos")
-        val fallbackBase = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain/Photos")
-
-        val targetBase = if (baseDir.exists() || baseDir.mkdirs()) baseDir else {
-            if (!fallbackBase.exists()) fallbackBase.mkdirs()
-            fallbackBase
-        }
-
         val sanitizedId = objectId.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
-        val objectDir = File(targetBase, sanitizedId)
-        if (!objectDir.exists()) {
-            objectDir.mkdirs()
+        // Création du dossier Documents/Releve-Terrain public si possible
+        try {
+            val pubDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain/Photos/$sanitizedId")
+            if (!pubDir.exists()) pubDir.mkdirs()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return objectDir
+        // Utilise getExternalFilesDir garanti accessible et compatible FileProvider sans restriction
+        val targetDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain/Photos/$sanitizedId")
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+        return targetDir
     }
 
     fun createNewPhotoFile(context: Context, objectId: String): File {
         val dir = getPhotosDirectory(context, objectId)
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.FRANCE).format(Date())
-        return File(dir, "PHOTO_${timestamp}_${System.currentTimeMillis() % 1000}.jpg")
+        val file = File(dir, "PHOTO_${timestamp}_${System.currentTimeMillis() % 1000}.jpg")
+        try {
+            if (!file.exists()) file.createNewFile()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return file
     }
 
     fun getUriForPhotoFile(context: Context, file: File): Uri {

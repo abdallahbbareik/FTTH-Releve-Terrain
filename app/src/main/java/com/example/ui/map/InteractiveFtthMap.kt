@@ -81,9 +81,9 @@ fun InteractiveFtthMap(
     onCycleMapLayer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Reference center of survey area
-    val centerLat = 48.8566
-    val centerLon = 2.3522
+    // Reference center of survey area (Tunisia)
+    val centerLat = 34.0
+    val centerLon = 9.5375
 
     // Meters per pixel at zoom 1.0 (approx 2 pixels per meter in field view)
     val basePixelsPerMeter = 2.4f

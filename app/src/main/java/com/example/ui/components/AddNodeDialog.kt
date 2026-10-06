@@ -356,14 +356,31 @@ fun AddNodeDialog(
                     Text(text = if (isGeocoding) "Recherche..." else "Récupérer automatiquement", fontSize = 11.sp)
                 }
 
-                // BOITIER FTTH (Non, Oui - sauf Villa et SRO)
-                if (selectedType != FtthNodeType.VILLA && selectedType != FtthNodeType.SRO) {
+                // BOITIER FTTH (Non, Oui - uniquement pour Poteau, Chambre, Immeuble - MASQUÉ pour Boîtier, Villa et SRO)
+                if (selectedType != FtthNodeType.BOITIER && selectedType != FtthNodeType.VILLA && selectedType != FtthNodeType.SRO) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "Boîtier FTTH présent :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        Text(text = if (hasBoitierFtth) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(checked = hasBoitierFtth, onCheckedChange = { hasBoitierFtth = it })
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "Boîtier FTTH présent :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(text = if (hasBoitierFtth) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(checked = hasBoitierFtth, onCheckedChange = { hasBoitierFtth = it })
+                            }
+                            if (hasBoitierFtth) {
+                                val supportLabel = if (selectedType == FtthNodeType.POTEAU) "Poteau" else if (selectedType == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
+                                val previewId = (if (nodeId.isNotBlank()) nodeId.trim() else generatedId) + "-B"
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "ℹ️ Un boîtier ($previewId) sera créé automatiquement à la même position avec Support = $supportLabel.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF0284C7)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -557,7 +574,7 @@ fun AddNodeDialog(
                                 status = status,
                                 etat = etat,
                                 address = address,
-                                hasBoitierFtth = if (selectedType == FtthNodeType.VILLA || selectedType == FtthNodeType.SRO) false else hasBoitierFtth,
+                                hasBoitierFtth = if (selectedType == FtthNodeType.BOITIER || selectedType == FtthNodeType.VILLA || selectedType == FtthNodeType.SRO) false else hasBoitierFtth,
                                 notes = notes,
                                 poleNature = poleNature,
                                 poleHeight = poleHeight,

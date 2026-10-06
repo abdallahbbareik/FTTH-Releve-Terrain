@@ -1,8 +1,8 @@
 package com.example.data.local
 
 object DefaultFtthData {
-    const val CENTER_LAT = 48.8566
-    const val CENTER_LON = 2.3522
+    const val CENTER_LAT = 34.0
+    const val CENTER_LON = 9.5375
 
     fun getDefaultNodes(): List<FtthNodeEntity> {
         val now = System.currentTimeMillis()

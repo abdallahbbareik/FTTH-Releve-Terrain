@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -104,10 +105,25 @@ fun TrackDetailDialog(
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success && tempCameraFile != null && tempCameraFile!!.exists()) {
+        if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
             val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 48.8566
             val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 2.3522
             onAddTrackPhoto(track.id, tempCameraFile!!.absolutePath, photoLat, photoLon)
+        } else {
+            tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
+        }
+    }
+
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val saved = PhotoStorageManager.saveImportedPhoto(context, track.id, uri)
+            if (saved != null) {
+                val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 48.8566
+                val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 2.3522
+                onAddTrackPhoto(track.id, saved, photoLat, photoLon)
+            }
         }
     }
 
@@ -241,19 +257,42 @@ fun TrackDetailDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Button(
-                                onClick = {
-                                    val file = PhotoStorageManager.createNewPhotoFile(context, track.id)
-                                    tempCameraFile = file
-                                    val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
-                                    takePictureLauncher.launch(uri)
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = ButtonDefaults.TextButtonContentPadding
-                            ) {
-                                Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Prendre photo", fontSize = 11.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val file = PhotoStorageManager.createNewPhotoFile(context, track.id)
+                                            tempCameraFile = file
+                                            val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
+                                            takePictureLauncher.launch(uri)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                            try {
+                                                pickVisualMediaLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            } catch (ignored: Exception) {}
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Photo", fontSize = 11.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        pickVisualMediaLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Text("Galerie", fontSize = 11.sp)
+                                }
                             }
                         }
 

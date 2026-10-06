@@ -50,7 +50,7 @@ data class FtthNodeEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 
     // Spécifique Poteau
-    val poleNature: String = "béton", // bois, métal, béton, façade
+    val poleNature: String = "bois", // bois, métal, béton, façade
     val poleHeight: Int = 8, // 7, 8, 9, 10
 
     // Spécifique Chambre

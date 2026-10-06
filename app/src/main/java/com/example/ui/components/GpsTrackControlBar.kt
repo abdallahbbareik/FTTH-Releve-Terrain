@@ -47,12 +47,14 @@ fun GpsTrackControlBar(
     locationData: GpsLocationData?,
     activeTrack: StoredTrack?,
     totalTracksCount: Int,
+    totalNodesCount: Int,
     onStartAutoTrack: () -> Unit,
     onStopAutoTrack: () -> Unit,
     onStartManualTrack: () -> Unit,
     onPinAtGpsLocation: () -> Unit,
     onPinOnMapLocation: () -> Unit,
     onOpenTracksList: () -> Unit,
+    onOpenNodesList: () -> Unit,
     onRequestGpsPermission: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -229,20 +231,35 @@ fun GpsTrackControlBar(
                     }
                 }
 
-                // 4. Liste des trajets & Simplification
-                if (totalTracksCount > 0) {
-                    IconButton(
-                        onClick = onOpenTracksList,
+                // 4. Listes Points & Trajets
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenNodesList,
                         modifier = Modifier
-                            .size(36.dp)
-                            .testTag("open_tracks_list_button")
+                            .height(36.dp)
+                            .testTag("open_nodes_list_button"),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.List,
-                            contentDescription = "Trajets",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Text(text = "Pts($totalNodesCount)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (totalTracksCount > 0) {
+                        IconButton(
+                            onClick = onOpenTracksList,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("open_tracks_list_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.List,
+                                contentDescription = "Trajets",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

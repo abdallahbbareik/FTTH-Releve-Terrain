@@ -2,13 +2,16 @@ package com.example.data.storage
 
 import android.content.Context
 import android.os.Environment
-import com.example.data.local.DefaultFtthData
+import com.example.data.local.AppDatabase
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.data.local.SyncState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -77,9 +80,9 @@ data class StoredTrack(
     val startTime: Long = System.currentTimeMillis(),
     val endTime: Long? = null,
     val totalDistanceMeters: Double = 0.0,
-    val rawPoints: List<TrackPoint> = emptyList(), // Points bruts d'origine
-    val points: List<TrackPoint> = emptyList(),    // Points actuels (simplifiés ou redressés)
-    val photos: List<TrackPhoto> = emptyList(),    // Photos géoréférencées le long du trajet
+    val rawPoints: List<TrackPoint> = emptyList(),
+    val points: List<TrackPoint> = emptyList(),
+    val photos: List<TrackPhoto> = emptyList(),
     val isSimplified: Boolean = false,
     val toleranceMeters: Double? = null,
     val isActive: Boolean = false
@@ -152,26 +155,37 @@ data class StoredTrack(
 
 class DocumentStorageManager(private val context: Context) {
 
-    // Dossier public ou application "Documents/Releve-Terrain"
-    val baseDir: File by lazy {
-        val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val targetDir = File(publicDocs, "Releve-Terrain")
-        if (!targetDir.exists()) {
-            val created = targetDir.mkdirs()
-            if (!created) {
-                val fallback = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
-                if (!fallback.exists()) fallback.mkdirs()
-                return@lazy fallback
-            }
-        }
-        targetDir
-    }
+    private val prefs = context.getSharedPreferences("ReleveTerrainStoragePrefs", Context.MODE_PRIVATE)
+    private val scope = CoroutineScope(Dispatchers.IO)
+    private val database = AppDatabase.getDatabase(context)
 
-    val photosDir: File by lazy {
-        val dir = File(baseDir, "Photos")
-        if (!dir.exists()) dir.mkdirs()
-        dir
-    }
+    // Dossiers cibles sous Documents/Releve-Terrain
+    val publicBaseDir: File
+        get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+
+    val appExtBaseDir: File
+        get() = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+
+    val internalBaseDir: File
+        get() = File(context.filesDir, "Releve-Terrain")
+
+    // Répertoire principal préféré
+    val baseDir: File
+        get() {
+            ensureDirectoriesExist()
+            // Si le dossier public est accessible en écriture, on le privilégie
+            if (isWritable(publicBaseDir)) return publicBaseDir
+            // Sinon le dossier Documents dédié à l'application
+            if (isWritable(appExtBaseDir)) return appExtBaseDir
+            return internalBaseDir
+        }
+
+    val photosDir: File
+        get() {
+            val dir = File(baseDir, "Photos")
+            if (!dir.exists()) dir.mkdirs()
+            return dir
+        }
 
     val nodesFile: File get() = File(baseDir, "noeuds.json")
     val linksFile: File get() = File(baseDir, "liaisons.json")
@@ -179,45 +193,167 @@ class DocumentStorageManager(private val context: Context) {
     val geoJsonFile: File get() = File(baseDir, "releve_terrain.geojson")
 
     init {
-        // Initialiser avec les données par défaut si vide
-        if (!nodesFile.exists()) {
-            saveNodes(DefaultFtthData.getDefaultNodes(), updateGeoJson = false)
+        ensureDirectoriesExist()
+        // Vérifier si des données existent déjà dans un des magasins pour éviter toute perte
+        val initialNodes = loadNodes()
+        val initialLinks = loadLinks()
+        val initialTracks = loadTracks()
+        // Synchroniser tous les fichiers
+        saveNodes(initialNodes, updateGeoJson = false)
+        saveLinks(initialLinks, updateGeoJson = false)
+        saveTracks(initialTracks, updateGeoJson = false)
+        generateAndSaveGeoJson()
+    }
+
+    /**
+     * Crée systématiquement l'arborescence "Documents/Releve-Terrain" si elle n'existe pas
+     */
+    fun ensureDirectoriesExist() {
+        try {
+            // 1. Dossier public Documents/Releve-Terrain
+            if (!publicBaseDir.exists()) publicBaseDir.mkdirs()
+            File(publicBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
+            File(publicBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        if (!linksFile.exists()) {
-            saveLinks(DefaultFtthData.getDefaultLinks(), updateGeoJson = false)
+
+        try {
+            // 2. Dossier application Documents/Releve-Terrain
+            if (!appExtBaseDir.exists()) appExtBaseDir.mkdirs()
+            File(appExtBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
+            File(appExtBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        if (!tracksFile.exists()) {
-            saveTracks(emptyList(), updateGeoJson = false)
+
+        try {
+            // 3. Dossier de secours interne permanent
+            if (!internalBaseDir.exists()) internalBaseDir.mkdirs()
+            File(internalBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
+            File(internalBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        if (!geoJsonFile.exists()) {
-            generateAndSaveGeoJson()
+    }
+
+    private fun isWritable(dir: File): Boolean {
+        return try {
+            if (!dir.exists()) dir.mkdirs()
+            val testFile = File(dir, ".test_write")
+            testFile.writeText("ok")
+            val canRead = testFile.readText() == "ok"
+            testFile.delete()
+            canRead
+        } catch (e: Exception) {
+            false
         }
+    }
+
+    private fun getWritableDirectories(): List<File> {
+        val list = mutableListOf<File>()
+        if (isWritable(publicBaseDir)) list.add(publicBaseDir)
+        if (isWritable(appExtBaseDir)) list.add(appExtBaseDir)
+        if (isWritable(internalBaseDir)) list.add(internalBaseDir)
+        return if (list.isNotEmpty()) list else listOf(context.filesDir)
     }
 
     // --- NOEUDS ---
 
     fun loadNodes(): List<FtthNodeEntity> {
-        return try {
-            if (!nodesFile.exists()) return emptyList()
-            val content = nodesFile.readText(Charsets.UTF_8)
-            val jsonArray = JSONArray(content)
-            val list = mutableListOf<FtthNodeEntity>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                list.add(nodeFromJson(obj))
+        // 1. Tente de charger depuis le stockage public partagé (persiste après réinstallation !)
+        val publicContent = PublicStorageHelper.loadPublicDocument(context, "noeuds.json")
+        if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            try {
+                val jsonArray = JSONArray(publicContent)
+                val list = mutableListOf<FtthNodeEntity>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(nodeFromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            list
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList()
         }
+
+        // 2. Tente successivement de charger depuis les différents emplacements de fichiers
+        val searchFiles = listOf(
+            File(publicBaseDir, "noeuds.json"),
+            File(appExtBaseDir, "noeuds.json"),
+            File(internalBaseDir, "noeuds.json")
+        )
+
+        for (file in searchFiles) {
+            if (file.exists()) {
+                try {
+                    val content = file.readText(Charsets.UTF_8).trim()
+                    if (content.isNotEmpty() && content != "[]") {
+                        val jsonArray = JSONArray(content)
+                        val list = mutableListOf<FtthNodeEntity>()
+                        for (i in 0 until jsonArray.length()) {
+                            list.add(nodeFromJson(jsonArray.getJSONObject(i)))
+                        }
+                        if (list.isNotEmpty()) return list
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        // Si aucun fichier n'a de contenu, vérifie SharedPreferences
+        val prefsJson = prefs.getString("backup_nodes_json", null)
+        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+            try {
+                val jsonArray = JSONArray(prefsJson)
+                val list = mutableListOf<FtthNodeEntity>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(nodeFromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return emptyList()
     }
 
     fun saveNodes(nodes: List<FtthNodeEntity>, updateGeoJson: Boolean = true) {
+        ensureDirectoriesExist()
         try {
             val jsonArray = JSONArray()
             nodes.forEach { jsonArray.put(nodeToJson(it)) }
-            nodesFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            val jsonString = jsonArray.toString(2)
+
+            // Sauvegarde publique persistante (survit à la désinstallation/réinstallation)
+            PublicStorageHelper.savePublicDocument(context, "noeuds.json", jsonString)
+
+            // Écrire dans tous les répertoires disponibles
+            for (dir in getWritableDirectories()) {
+                try {
+                    val f = File(dir, "noeuds.json")
+                    f.writeText(jsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            // Sauvegarde SharedPreferences de sécurité
+            prefs.edit().putString("backup_nodes_json", jsonString).apply()
+
+            // Sauvegarde asynchrone dans Room DB
+            scope.launch {
+                try {
+                    database.ftthDao().clearNodes()
+                    if (nodes.isNotEmpty()) {
+                        database.ftthDao().insertNodes(nodes)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
             if (updateGeoJson) generateAndSaveGeoJson()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -227,27 +363,93 @@ class DocumentStorageManager(private val context: Context) {
     // --- LIAISONS ---
 
     fun loadLinks(): List<FtthLinkEntity> {
-        return try {
-            if (!linksFile.exists()) return emptyList()
-            val content = linksFile.readText(Charsets.UTF_8)
-            val jsonArray = JSONArray(content)
-            val list = mutableListOf<FtthLinkEntity>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                list.add(linkFromJson(obj))
+        // 1. Tente de charger depuis le stockage public partagé (persiste après réinstallation !)
+        val publicContent = PublicStorageHelper.loadPublicDocument(context, "liaisons.json")
+        if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            try {
+                val jsonArray = JSONArray(publicContent)
+                val list = mutableListOf<FtthLinkEntity>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(linkFromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            list
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList()
         }
+
+        val searchFiles = listOf(
+            File(publicBaseDir, "liaisons.json"),
+            File(appExtBaseDir, "liaisons.json"),
+            File(internalBaseDir, "liaisons.json")
+        )
+
+        for (file in searchFiles) {
+            if (file.exists()) {
+                try {
+                    val content = file.readText(Charsets.UTF_8).trim()
+                    if (content.isNotEmpty() && content != "[]") {
+                        val jsonArray = JSONArray(content)
+                        val list = mutableListOf<FtthLinkEntity>()
+                        for (i in 0 until jsonArray.length()) {
+                            list.add(linkFromJson(jsonArray.getJSONObject(i)))
+                        }
+                        if (list.isNotEmpty()) return list
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        val prefsJson = prefs.getString("backup_links_json", null)
+        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+            try {
+                val jsonArray = JSONArray(prefsJson)
+                val list = mutableListOf<FtthLinkEntity>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(linkFromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return emptyList()
     }
 
     fun saveLinks(links: List<FtthLinkEntity>, updateGeoJson: Boolean = true) {
+        ensureDirectoriesExist()
         try {
             val jsonArray = JSONArray()
             links.forEach { jsonArray.put(linkToJson(it)) }
-            linksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            val jsonString = jsonArray.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "liaisons.json", jsonString)
+
+            for (dir in getWritableDirectories()) {
+                try {
+                    val f = File(dir, "liaisons.json")
+                    f.writeText(jsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            prefs.edit().putString("backup_links_json", jsonString).apply()
+
+            scope.launch {
+                try {
+                    database.ftthDao().clearLinks()
+                    if (links.isNotEmpty()) {
+                        database.ftthDao().insertLinks(links)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
             if (updateGeoJson) generateAndSaveGeoJson()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -257,27 +459,81 @@ class DocumentStorageManager(private val context: Context) {
     // --- TRAJETS ---
 
     fun loadTracks(): List<StoredTrack> {
-        return try {
-            if (!tracksFile.exists()) return emptyList()
-            val content = tracksFile.readText(Charsets.UTF_8)
-            val jsonArray = JSONArray(content)
-            val list = mutableListOf<StoredTrack>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                list.add(StoredTrack.fromJson(obj))
+        val publicContent = PublicStorageHelper.loadPublicDocument(context, "trajets.json")
+        if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            try {
+                val jsonArray = JSONArray(publicContent)
+                val list = mutableListOf<StoredTrack>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            list
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList()
         }
+
+        val searchFiles = listOf(
+            File(publicBaseDir, "trajets.json"),
+            File(appExtBaseDir, "trajets.json"),
+            File(internalBaseDir, "trajets.json")
+        )
+
+        for (file in searchFiles) {
+            if (file.exists()) {
+                try {
+                    val content = file.readText(Charsets.UTF_8).trim()
+                    if (content.isNotEmpty() && content != "[]") {
+                        val jsonArray = JSONArray(content)
+                        val list = mutableListOf<StoredTrack>()
+                        for (i in 0 until jsonArray.length()) {
+                            list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
+                        }
+                        if (list.isNotEmpty()) return list
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        val prefsJson = prefs.getString("backup_tracks_json", null)
+        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+            try {
+                val jsonArray = JSONArray(prefsJson)
+                val list = mutableListOf<StoredTrack>()
+                for (i in 0 until jsonArray.length()) {
+                    list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
+                }
+                if (list.isNotEmpty()) return list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return emptyList()
     }
 
     fun saveTracks(tracks: List<StoredTrack>, updateGeoJson: Boolean = true) {
+        ensureDirectoriesExist()
         try {
             val jsonArray = JSONArray()
             tracks.forEach { jsonArray.put(it.toJson()) }
-            tracksFile.writeText(jsonArray.toString(2), Charsets.UTF_8)
+            val jsonString = jsonArray.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "trajets.json", jsonString)
+
+            for (dir in getWritableDirectories()) {
+                try {
+                    val f = File(dir, "trajets.json")
+                    f.writeText(jsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            prefs.edit().putString("backup_tracks_json", jsonString).apply()
+
             if (updateGeoJson) generateAndSaveGeoJson()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -431,7 +687,18 @@ class DocumentStorageManager(private val context: Context) {
             }
 
             root.put("features", features)
-            geoJsonFile.writeText(root.toString(2), Charsets.UTF_8)
+            val geoJsonString = root.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "releve_terrain.geojson", geoJsonString)
+
+            for (dir in getWritableDirectories()) {
+                try {
+                    val f = File(dir, "releve_terrain.geojson")
+                    f.writeText(geoJsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -507,7 +774,7 @@ class DocumentStorageManager(private val context: Context) {
             photos = photosList,
             syncState = SyncState.SYNCED,
             updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
-            poleNature = obj.optString("poleNature", "béton"),
+            poleNature = obj.optString("poleNature", "bois"),
             poleHeight = obj.optInt("poleHeight", 8),
             chamberType = obj.optString("chamberType", "L2T"),
             boitierType = obj.optString("boitierType", "PBO"),

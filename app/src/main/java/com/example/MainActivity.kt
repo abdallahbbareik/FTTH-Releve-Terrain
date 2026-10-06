@@ -67,7 +67,10 @@ import com.example.ui.components.ManualTrackEditorBar
 import com.example.ui.components.MoveNodeEditorBar
 import com.example.ui.components.MoveVertexEditorBar
 import com.example.ui.components.NodeDetailSheet
+import com.example.ui.components.NodesListDialog
+import com.example.ui.components.LinkDetailDialog
 import com.example.ui.components.PiquetageTopBar
+import com.example.ui.components.ProjectFolderDialog
 import com.example.ui.components.StraightenEditorBar
 import com.example.ui.components.SyncLogSheet
 import com.example.ui.components.SyncStatusBanner
@@ -110,6 +113,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     }
 
     LaunchedEffect(Unit) {
+        viewModel.reloadPersistedData()
         permissionLauncher.launch(
             arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -148,6 +152,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val selectedNode by viewModel.selectedNode.collectAsStateWithLifecycle()
     val selectedTrackForDetail by viewModel.selectedTrackForDetail.collectAsStateWithLifecycle()
     val showTracksListDialog by viewModel.showTracksListDialog.collectAsStateWithLifecycle()
+    val showNodesListDialog by viewModel.showNodesListDialog.collectAsStateWithLifecycle()
+    val showProjectFolderDialog by viewModel.showProjectFolderDialog.collectAsStateWithLifecycle()
+    val selectedLinkForDetail by viewModel.selectedLinkForDetail.collectAsStateWithLifecycle()
 
     var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
 
@@ -175,7 +182,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
                 movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||
-                showExportDialog || showWorkflowGuide || showTracksListDialog || selectedTrackForDetail != null ||
+                showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
+                showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
                 pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null
     ) {
         if (selectedNode != null) {
@@ -192,10 +200,16 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             viewModel.cancelManualTrack()
         } else if (isStraightenMode) {
             viewModel.cancelStraightenMode()
+        } else if (showProjectFolderDialog) {
+            viewModel.dismissProjectFolder()
         } else if (selectedTrackForDetail != null) {
             viewModel.closeTrackDetail()
+        } else if (selectedLinkForDetail != null) {
+            viewModel.dismissLinkDetail()
         } else if (showTracksListDialog) {
             viewModel.dismissTracksList()
+        } else if (showNodesListDialog) {
+            viewModel.dismissNodesList()
         } else if (isCableDrawingMode) {
             viewModel.toggleCableDrawingMode()
         } else if (showWorkflowGuide) {
@@ -219,9 +233,12 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                     onOpenFilters = { viewModel.openFilterSheet() },
                     onOpenSyncLogs = { viewModel.openSyncLogSheet() },
+                    onOpenProjectFolder = { viewModel.openProjectFolder() },
                     onOpenExport = { viewModel.openExportDialog() },
                     onOpenWorkflowGuide = { showWorkflowGuide = true },
-                    onResetDemo = { viewModel.resetDemoData() }
+                    onExportZip = { viewModel.exportCompleteZipAndShare(context) },
+                    onExportKmz = { viewModel.exportKmzAndShare(context) },
+                    onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) }
                 )
 
                 // Bandeau d'état : Stockage Local Documents/Releve-Terrain
@@ -229,7 +246,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     nodesCount = rawNodes.size,
                     linksCount = rawLinks.size,
                     tracksCount = allTracks.size,
-                    onOpenLogs = { viewModel.openSyncLogSheet() }
+                    onOpenLogs = { viewModel.openSyncLogSheet() },
+                    onOpenProjectFolder = { viewModel.openProjectFolder() }
                 )
 
                 // Barre de contrôle GPS & Tracés
@@ -239,12 +257,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         locationData = userLocation,
                         activeTrack = activeTrack,
                         totalTracksCount = allTracks.size,
+                        totalNodesCount = rawNodes.size,
                         onStartAutoTrack = { viewModel.startAutoGpsTrack() },
                         onStopAutoTrack = { viewModel.stopAutoGpsTrack() },
                         onStartManualTrack = { viewModel.startManualTrack() },
                         onPinAtGpsLocation = { viewModel.requestStakingAtGpsLocation() },
                         onPinOnMapLocation = { viewModel.startPickOnMapMode() },
                         onOpenTracksList = { viewModel.openTracksList() },
+                        onOpenNodesList = { viewModel.openNodesList() },
                         onRequestGpsPermission = {
                             permissionLauncher.launch(
                                 arrayOf(
@@ -348,6 +368,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 tempVertexPosition = tempVertexPosition,
                 isPickOnMapMode = isPickOnMapMode,
                 onCancelPickOnMapMode = { viewModel.cancelPickOnMapMode() },
+                onUpdateStakingPosition = { lat, lon -> viewModel.updatePendingStakePosition(lat, lon) },
+                onLinkClick = { link -> viewModel.selectLinkForDetail(link) },
+                onTrackClick = { track -> viewModel.openTrackDetail(track) },
                 onNodeClick = { viewModel.selectNode(it) },
                 onMapLongClick = { lat, lon -> viewModel.requestStakingAtMapPosition(lat, lon) },
                 onManualTrackAddPoint = { lat, lon -> viewModel.addManualTrackPoint(lat, lon) },
@@ -413,7 +436,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     node = selectedNode!!,
                     userLocation = userLocation,
                     onDismiss = { viewModel.selectNode(null) },
-                    onSave = { updated -> viewModel.saveNode(updated) },
+                    onSave = { updated -> viewModel.saveNode(updated, closeSheet = true) },
+                    onAutoSave = { updated -> viewModel.saveNode(updated, closeSheet = false) },
                     onDelete = { id -> viewModel.deleteNode(id) },
                     onStartMoveNodeOnMap = { nodeToMove -> viewModel.startMoveNode(nodeToMove) }
                 )
@@ -421,8 +445,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
             // Dialogue d'ajout de nœud
             if (showAddNodeDialog) {
-                val initLat = stakedPositionForForm?.first ?: userLocation?.latitude ?: 48.8566
-                val initLon = stakedPositionForForm?.second ?: userLocation?.longitude ?: 2.3522
+                val initLat = stakedPositionForForm?.first ?: userLocation?.latitude ?: 36.8065
+                val initLon = stakedPositionForForm?.second ?: userLocation?.longitude ?: 10.1815
                 AddNodeDialog(
                     latitude = initLat,
                     longitude = initLon,
@@ -439,8 +463,65 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             if (showTracksListDialog) {
                 TracksListDialog(
                     tracks = allTracks,
-                    onSelectTrack = { viewModel.openTrackDetail(it) },
+                    onSelectTrack = {
+                        viewModel.dismissTracksList()
+                        viewModel.openTrackDetail(it)
+                    },
                     onDismiss = { viewModel.dismissTracksList() }
+                )
+            }
+
+            // Dialogue Dossier Relevé-Terrain (Liste des Points, Trajets, Liaisons)
+            if (showProjectFolderDialog) {
+                ProjectFolderDialog(
+                    nodes = rawNodes,
+                    tracks = allTracks,
+                    links = rawLinks,
+                    onSelectNode = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.selectNode(it)
+                    },
+                    onDeleteNode = { viewModel.deleteNode(it) },
+                    onSelectTrack = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.openTrackDetail(it)
+                    },
+                    onDeleteTrack = { viewModel.deleteTrack(it) },
+                    onSelectLink = {
+                        viewModel.dismissProjectFolder()
+                        viewModel.selectLinkForDetail(it)
+                    },
+                    onDeleteLink = { viewModel.deleteLink(it) },
+                    onExportZip = { viewModel.exportCompleteZipAndShare(context) },
+                    onExportKmz = { viewModel.exportKmzAndShare(context) },
+                    onDismiss = { viewModel.dismissProjectFolder() }
+                )
+            }
+
+            // Dialogue Liste des points / nœuds
+            if (showNodesListDialog) {
+                NodesListDialog(
+                    nodes = rawNodes,
+                    onSelectNode = {
+                        viewModel.dismissNodesList()
+                        viewModel.selectNode(it)
+                    },
+                    onDeleteNode = { viewModel.deleteNode(it) },
+                    onDismiss = { viewModel.dismissNodesList() }
+                )
+            }
+
+            // Dialogue Fiche Liaison Câble
+            if (selectedLinkForDetail != null) {
+                val link = selectedLinkForDetail!!
+                val nodesMap = rawNodes.associateBy { it.id }
+                LinkDetailDialog(
+                    link = link,
+                    fromNode = nodesMap[link.fromNodeId],
+                    toNode = nodesMap[link.toNodeId],
+                    onDismiss = { viewModel.dismissLinkDetail() },
+                    onSaveLink = { updated -> viewModel.saveLink(updated) },
+                    onDeleteLink = { id -> viewModel.deleteLink(id) }
                 )
             }
 

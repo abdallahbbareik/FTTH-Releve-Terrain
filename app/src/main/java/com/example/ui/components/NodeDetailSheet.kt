@@ -92,6 +92,7 @@ fun NodeDetailSheet(
     userLocation: GpsLocationData? = null,
     onDismiss: () -> Unit,
     onSave: (FtthNodeEntity) -> Unit,
+    onAutoSave: ((FtthNodeEntity) -> Unit)? = null,
     onDelete: (String) -> Unit,
     onStartMoveNodeOnMap: (FtthNodeEntity) -> Unit = {}
 ) {
@@ -106,25 +107,6 @@ fun NodeDetailSheet(
 
     var latitude by remember(node) { mutableDoubleStateOf(node.latitude) }
     var longitude by remember(node) { mutableDoubleStateOf(node.longitude) }
-
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && tempCameraFile != null && tempCameraFile!!.exists()) {
-            photos = photos + tempCameraFile!!.absolutePath
-        }
-    }
-
-    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            val savedPath = PhotoStorageManager.saveImportedPhoto(context, node.id, uri)
-            if (savedPath != null) {
-                photos = photos + savedPath
-            }
-        }
-    }
 
     // Champs communs à tous les types
     var name by remember(node) { mutableStateOf(node.name) }
@@ -166,8 +148,73 @@ fun NodeDetailSheet(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var isGeocoding by remember { mutableStateOf(false) }
 
+    fun buildCurrentNode(currentPhotos: List<String> = photos): FtthNodeEntity {
+        return node.copy(
+            name = name,
+            latitude = latitude,
+            longitude = longitude,
+            status = status,
+            etat = etat,
+            address = address,
+            hasBoitierFtth = if (node.type == FtthNodeType.BOITIER || node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
+            notes = notes,
+            photos = currentPhotos,
+            photoCount = currentPhotos.size,
+            poleNature = poleNature,
+            poleHeight = poleHeight,
+            chamberType = chamberType,
+            boitierType = boitierType,
+            isSaturated = isSaturated,
+            boitierSupport = boitierSupport,
+            sroType = sroType,
+            sroCapacity = sroCapacity,
+            buildingFloors = buildingFloors,
+            buildingDwellings = buildingDwellings,
+            hasLocalTechnique = hasLocalTechnique,
+            hasGaineMontante = hasGaineMontante,
+            syndicAuthorization = syndicAuthorization,
+            syndicContact = syndicContact,
+            buildingConnectionMode = buildingConnectionMode,
+            villaConnectionMode = villaConnectionMode,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    fun triggerAutoSave(currentPhotos: List<String> = photos) {
+        val updated = buildCurrentNode(currentPhotos)
+        onAutoSave?.invoke(updated)
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
+            val updated = photos + tempCameraFile!!.absolutePath
+            photos = updated
+            triggerAutoSave(updated)
+        } else {
+            tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
+        }
+    }
+
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val savedPath = PhotoStorageManager.saveImportedPhoto(context, node.id, uri)
+            if (savedPath != null) {
+                val updated = photos + savedPath
+                photos = updated
+                triggerAutoSave(updated)
+            }
+        }
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            triggerAutoSave()
+            onDismiss()
+        },
         sheetState = sheetState,
         dragHandle = null,
         modifier = Modifier.testTag("node_detail_bottom_sheet")
@@ -380,6 +427,7 @@ fun NodeDetailSheet(
                                     if (userLocation != null) {
                                         latitude = userLocation.latitude
                                         longitude = userLocation.longitude
+                                        triggerAutoSave()
                                     }
                                 },
                                 enabled = userLocation != null,
@@ -465,35 +513,44 @@ fun NodeDetailSheet(
                     )
                 }
 
-                // 5. BOITIER FTTH (NON, OUI - SAUF VILLA ET SRO)
-                if (node.type != FtthNodeType.VILLA && node.type != FtthNodeType.SRO) {
+                // 5. BOITIER FTTH (NON, OUI - SAUF BOITIER, VILLA ET SRO)
+                if (node.type != FtthNodeType.BOITIER && node.type != FtthNodeType.VILLA && node.type != FtthNodeType.SRO) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Boîtier FTTH présent :",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (hasBoitierFtth) "Oui" else "Non",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (hasBoitierFtth) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Boîtier FTTH présent :",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (hasBoitierFtth) "Oui" else "Non",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (hasBoitierFtth) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                                Switch(
+                                    checked = hasBoitierFtth,
+                                    onCheckedChange = { hasBoitierFtth = it }
                                 )
                             }
-                            Switch(
-                                checked = hasBoitierFtth,
-                                onCheckedChange = { hasBoitierFtth = it }
-                            )
+                            if (hasBoitierFtth) {
+                                val supportLabel = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "ℹ️ Un boîtier (${node.id}-B) est associé à cette position avec Support = $supportLabel.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF0284C7)
+                                )
+                            }
                         }
                     }
                 }
@@ -796,10 +853,19 @@ fun NodeDetailSheet(
                         ) {
                             Button(
                                 onClick = {
-                                    val file = PhotoStorageManager.createNewPhotoFile(context, node.id)
-                                    tempCameraFile = file
-                                    val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
-                                    takePictureLauncher.launch(uri)
+                                    try {
+                                        val file = PhotoStorageManager.createNewPhotoFile(context, node.id)
+                                        tempCameraFile = file
+                                        val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
+                                        takePictureLauncher.launch(uri)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        try {
+                                            pickVisualMediaLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        } catch (ignored: Exception) {}
+                                    }
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -854,7 +920,9 @@ fun NodeDetailSheet(
                                         IconButton(
                                             onClick = {
                                                 PhotoStorageManager.deletePhoto(photoPath)
-                                                photos = photos - photoPath
+                                                val updated = photos - photoPath
+                                                photos = updated
+                                                triggerAutoSave(updated)
                                             },
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
@@ -970,7 +1038,7 @@ fun NodeDetailSheet(
                                 status = status,
                                 etat = etat,
                                 address = address,
-                                hasBoitierFtth = if (node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
+                                hasBoitierFtth = if (node.type == FtthNodeType.BOITIER || node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
                                 notes = notes,
                                 photos = photos,
                                 photoCount = photos.size,

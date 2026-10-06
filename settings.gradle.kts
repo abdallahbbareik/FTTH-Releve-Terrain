@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "OptiFTTH"
+rootProject.name = "Releve-Terrain"
 
 include(":app")

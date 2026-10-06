@@ -279,24 +279,42 @@ object RealExportService {
     private fun escapeXml(text: String): String =
         text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
+    fun exportKmz(
+        context: Context,
+        nodes: List<FtthNodeEntity>,
+        links: List<FtthLinkEntity>,
+        tracksWithPoints: List<Pair<GpsTrackEntity, List<GpsTrackPointEntity>>> = emptyList()
+    ): File {
+        val kmzFile = File(getExportDir(context), "releve_terrain_${getTimestamp()}.kmz")
+        val kmlFile = exportKml(context, nodes, links)
+
+        ZipOutputStream(FileOutputStream(kmzFile)).use { zos ->
+            addFileToZip(zos, kmlFile, "doc.kml")
+        }
+        return kmzFile
+    }
+
     fun exportCompleteZip(
         context: Context,
         nodes: List<FtthNodeEntity>,
         links: List<FtthLinkEntity>,
         tracksWithPoints: List<Pair<GpsTrackEntity, List<GpsTrackPointEntity>>> = emptyList()
     ): File {
-        val zipFile = File(getExportDir(context), "dossier_piquetage_complet_${getTimestamp()}.zip")
+        val zipFile = File(getExportDir(context), "dossier_releve_terrain_${getTimestamp()}.zip")
         val geoJsonFile = exportGeoJson(context, nodes, links, tracksWithPoints)
+        val kmzFile = exportKmz(context, nodes, links, tracksWithPoints)
         val csvFile = exportCsv(context, nodes)
         val kmlFile = exportKml(context, nodes, links)
 
         ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
             // Add GeoJSON
-            addFileToZip(zos, geoJsonFile, "export_ftth.geojson")
-            // Add CSV
-            addFileToZip(zos, csvFile, "releve_terrain.csv")
+            addFileToZip(zos, geoJsonFile, "releve_terrain.geojson")
+            // Add KMZ Google Earth
+            addFileToZip(zos, kmzFile, "releve_terrain.kmz")
             // Add KML
             addFileToZip(zos, kmlFile, "reseau_ftth.kml")
+            // Add CSV
+            addFileToZip(zos, csvFile, "bordereau_releve.csv")
 
             // Add all photos
             for (node in nodes) {
