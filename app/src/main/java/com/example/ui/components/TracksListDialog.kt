@@ -71,7 +71,7 @@ fun TracksListDialog(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Trajets & Traces GPS (${tracks.size})",
+                        text = "Infra linéaire & Traces GPS (${tracks.size})",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
@@ -82,7 +82,7 @@ fun TracksListDialog(
                 }
 
                 Text(
-                    text = "Dossier : Documents/Releve-Terrain/trajets.json",
+                    text = "Fichiers : .infra_lineaire / infra_lineaire.json",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 12.dp)
@@ -90,7 +90,7 @@ fun TracksListDialog(
 
                 if (tracks.isEmpty()) {
                     Text(
-                        text = "Aucun trajet enregistré pour le moment. Utilisez 'Auto GPS' ou 'Tracé Manuel' pour créer un cheminement.",
+                        text = "Aucune infra linéaire enregistrée pour le moment. Utilisez 'Auto GPS' ou 'Infra Lin.' pour créer un cheminement.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)

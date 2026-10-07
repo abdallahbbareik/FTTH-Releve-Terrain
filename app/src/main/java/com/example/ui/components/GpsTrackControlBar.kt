@@ -118,7 +118,7 @@ fun GpsTrackControlBar(
                     ) {}
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Enregistrement tracé :",
+                        text = "Enregistrement infra_lineaire :",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFDC2626)
@@ -322,7 +322,7 @@ fun GpsTrackControlBar(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text(text = "Tracé", fontSize = 10.sp)
+                        Text(text = "Infra Lin.", fontSize = 10.sp)
                     }
 
                     // 4. Trace GPS Auto
@@ -342,10 +342,10 @@ fun GpsTrackControlBar(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text(text = "Auto GPS", fontSize = 10.sp)
+                        Text(text = "GPS Auto", fontSize = 10.sp)
                     }
 
-                    // 5. Listes Points & Trajets
+                    // 5. Listes Nœuds & Infra_lineaire
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -358,7 +358,7 @@ fun GpsTrackControlBar(
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = ButtonDefaults.TextButtonContentPadding
                         ) {
-                            Text(text = "Pts($totalNodesCount)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "Nœuds($totalNodesCount)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         if (totalTracksCount > 0) {
                             IconButton(
@@ -369,7 +369,7 @@ fun GpsTrackControlBar(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.List,
-                                    contentDescription = "Trajets",
+                                    contentDescription = "Infra_lineaire",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )

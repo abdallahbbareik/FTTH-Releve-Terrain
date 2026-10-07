@@ -230,6 +230,23 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        // Restauration et synchronisation automatique des projets et entités depuis Documents/Releve-Terrain
+        viewModelScope.launch(Dispatchers.IO) {
+            val projects = docStorage.listAllProjects()
+            _allProjects.value = projects
+            val curProj = docStorage.currentProject
+            _currentProject.value = curProj
+            val nodes = docStorage.loadNodes(curProj)
+            val links = docStorage.loadLinks(curProj)
+            val tracks = docStorage.loadTracks(curProj)
+            _rawNodes.value = nodes
+            _rawLinks.value = links
+            _allTracks.value = tracks
+            if (nodes.isNotEmpty() || tracks.isNotEmpty() || links.isNotEmpty()) {
+                _bannerMessage.value = "Données chargées : ${nodes.size} nœuds, ${tracks.size} infra_lineaire, ${links.size} câbles ($curProj)"
+            }
+        }
     }
 
     fun startGpsService() {
@@ -467,7 +484,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _manualTrackPoints.value = emptyList()
             _manualTrackPhotos.value = emptyList()
             _selectedTrackForDetail.value = track
-            _bannerMessage.value = "Trajet '$name' (${pts.size} sommets, ${photos.size} photos) enregistré. Fiche ouverte pour configuration."
+            _bannerMessage.value = "Infra linéaire '$name' (${pts.size} sommets, ${photos.size} photos) enregistrée. Fiche ouverte pour configuration."
         }
     }
 
@@ -479,9 +496,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- TRACE GPS AUTOMATIQUE ---
 
-    fun startAutoGpsTrack(name: String = "Cheminement GPS ${System.currentTimeMillis() % 10000}") {
+    fun startAutoGpsTrack(name: String = "Infra linéaire GPS ${System.currentTimeMillis() % 10000}") {
         val track = StoredTrack(
-            id = "TRK-${System.currentTimeMillis()}",
+            id = "INF-${System.currentTimeMillis()}",
             name = name,
             type = "GC",
             etat = "Conforme",
@@ -494,7 +511,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         )
         _activeTrack.value = track
         _activeTrackPoints.value = emptyList()
-        _bannerMessage.value = "Enregistrement de la trace GPS démarré"
+        _bannerMessage.value = "Enregistrement de l'infra linéaire GPS démarré"
     }
 
     fun addActiveTrackPhoto(photoPath: String) {
@@ -1013,7 +1030,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 val first = nodes.first()
                 _mapFocusTarget.value = Pair(first.latitude, first.longitude)
             }
-            _bannerMessage.value = "Projet '$projectName' ouvert (${nodes.size} points, ${tracks.size} trajets, ${links.size} liaisons)"
+            _bannerMessage.value = "Projet '$projectName' ouvert (${nodes.size} nœuds, ${tracks.size} infra_lineaire, ${links.size} câbles)"
         }
     }
 
@@ -1022,7 +1039,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val success = docStorage.createProject(projectName, copyCurrent)
             if (success) {
                 switchProject(projectName)
-                _bannerMessage.value = "Nouveau projet '$projectName' créé !"
+                _bannerMessage.value = "Nouveau projet '$projectName' créé avec succès !"
             }
         }
     }
@@ -1030,7 +1047,16 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteProject(projectName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             docStorage.deleteProject(projectName)
-            switchProject(docStorage.currentProject)
+            val nextProject = docStorage.currentProject
+            _currentProject.value = nextProject
+            val nodes = docStorage.loadNodes(nextProject)
+            val links = docStorage.loadLinks(nextProject)
+            val tracks = docStorage.loadTracks(nextProject)
+
+            _rawNodes.value = nodes
+            _rawLinks.value = links
+            _allTracks.value = tracks
+            _allProjects.value = docStorage.listAllProjects()
             _bannerMessage.value = "Projet '$projectName' supprimé"
         }
     }

@@ -267,7 +267,7 @@ fun TrackDetailDialog(
                                 }
                             }
                             Text(
-                                text = "Trajet FTTH • " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(track.startTime)),
+                                text = "Infra linéaire FTTH • " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(track.startTime)),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

@@ -21,18 +21,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cable
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderZip
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Timeline
@@ -43,7 +38,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,8 +72,6 @@ import com.example.data.storage.ProjectInfo
 import com.example.data.storage.StoredTrack
 import com.example.ui.theme.TelecomCyan
 import com.example.ui.theme.TelecomNavy
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -103,10 +95,10 @@ fun ProjectFolderDialog(
     onExportKmz: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Points, 2: Trajets, 3: Liaisons
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Nœuds, 2: Infra_lineaire, 3: Câbles
     var searchQuery by remember { mutableStateOf("") }
     var selectedTypeFilter by remember { mutableStateOf<FtthNodeType?>(null) }
-    
+
     // Dialogues de gestion projet
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     var newProjectNameInput by remember { mutableStateOf("") }
@@ -178,7 +170,7 @@ fun ProjectFolderDialog(
                             }
                         }
                         Text(
-                            text = "Documents/Releve-Terrain/$currentProject (${nodes.size} pts • ${tracks.size} traj • ${links.size} liais)",
+                            text = "Documents/Releve-Terrain/$currentProject (${nodes.size} nœuds • ${tracks.size} infra_lineaire • ${links.size} câbles)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -224,7 +216,7 @@ fun ProjectFolderDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Onglets de navigation : Projets / Points / Trajets / Liaisons
+                // Onglets de navigation : Projets / Nœuds / Infra_lineaire / Câbles
                 TabRow(selectedTabIndex = selectedTab) {
                     Tab(
                         selected = selectedTab == 0,
@@ -244,7 +236,7 @@ fun ProjectFolderDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(".points (${nodes.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                                Text("Nœuds (${nodes.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )
@@ -255,7 +247,7 @@ fun ProjectFolderDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Timeline, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(".trajets (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                                Text("Infra_lineaire (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
                             }
                         }
                     )
@@ -266,7 +258,7 @@ fun ProjectFolderDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Cable, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(".liaisons (${links.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                                Text("Câbles (${links.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )
@@ -291,17 +283,11 @@ fun ProjectFolderDialog(
                                 },
                                 onDeleteProject = { projName ->
                                     projectToDelete = projName
-                                },
-                                onCreateProjectClick = {
-                                    val nextNum = (allProjects.size + 1).toString().padStart(2, '0')
-                                    newProjectNameInput = "projet$nextNum"
-                                    copyCurrentDataCheck = false
-                                    showCreateProjectDialog = true
                                 }
                             )
                         }
                         1 -> {
-                            // ONGLET 1 : POINTS (.points / noeuds.json)
+                            // ONGLET 1 : NOEUDS (.noeuds / noeuds.json)
                             NodesListContent(
                                 nodes = nodes,
                                 searchQuery = searchQuery,
@@ -313,7 +299,7 @@ fun ProjectFolderDialog(
                             )
                         }
                         2 -> {
-                            // ONGLET 2 : TRAJETS (.trajets / trajets.json)
+                            // ONGLET 2 : INFRA_LINEAIRE (.infra_lineaire / infra_lineaire.json)
                             TracksListContent(
                                 tracks = tracks,
                                 onSelectTrack = onSelectTrack,
@@ -321,7 +307,7 @@ fun ProjectFolderDialog(
                             )
                         }
                         3 -> {
-                            // ONGLET 3 : LIAISONS (.liaisons / liaisons.json)
+                            // ONGLET 3 : CÂBLES (.cables / cables.json)
                             LinksListContent(
                                 links = links,
                                 onSelectLink = onSelectLink,
@@ -386,7 +372,7 @@ fun ProjectFolderDialog(
             text = {
                 Column {
                     Text(
-                        text = "Le projet sera créé en tant que sous-dossier dans Documents/Releve-Terrain/ contenant ses propres .points, .trajets et .liaisons.",
+                        text = "Le projet sera créé en tant que sous-dossier dans Documents/Releve-Terrain/ contenant ses propres .noeuds, .infra_lineaire et .cables.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -476,16 +462,17 @@ fun ProjectFolderDialog(
 
     // Modal Confirmation Suppression Projet
     if (projectToDelete != null) {
+        val targetProj = projectToDelete!!
         AlertDialog(
             onDismissRequest = { projectToDelete = null },
-            title = { Text("Supprimer le projet ?") },
+            title = { Text("Supprimer le dossier du projet ?") },
             text = {
-                Text("Voulez-vous vraiment supprimer le projet '$projectToDelete' et tous ses fichiers (.points, .trajets, .liaisons) ? Cette action est irréversible.")
+                Text("Voulez-vous vraiment supprimer le projet '$targetProj' et tous ses fichiers (.noeuds, .infra_lineaire, .cables) ? Cette action supprimera définitivement le dossier.")
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        onDeleteProject(projectToDelete!!)
+                        onDeleteProject(targetProj)
                         projectToDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
@@ -505,9 +492,9 @@ fun ProjectFolderDialog(
     if (itemToDelete != null) {
         val (type, id) = itemToDelete!!
         val typeLabel = when (type) {
-            "node" -> "le point $id"
-            "track" -> "le trajet"
-            "link" -> "la liaison"
+            "node" -> "le nœud $id"
+            "track" -> "l'infra linéaire"
+            "link" -> "le câble"
             else -> "cet élément"
         }
         AlertDialog(
@@ -547,8 +534,7 @@ private fun ProjectsListContent(
     projects: List<ProjectInfo>,
     onSelectProject: (String) -> Unit,
     onRenameProject: (String) -> Unit,
-    onDeleteProject: (String) -> Unit,
-    onCreateProjectClick: () -> Unit
+    onDeleteProject: (String) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.padding(top = 4.dp),
@@ -574,7 +560,7 @@ private fun ProjectsListContent(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "Chaque projet dispose de ses sous-dossiers et fichiers (.points, .trajets, .liaisons). Les données sont automatiquement conservées après réinstallation.",
+                            text = "Chaque projet dispose de son sous-dossier et de ses fichiers (.noeuds, .infra_lineaire, .cables).",
                             fontSize = 11.sp,
                             color = Color(0xFF475569)
                         )
@@ -631,7 +617,7 @@ private fun ProjectsListContent(
                                 }
                             }
                             Text(
-                                text = "📁 ${proj.name}  •  ${proj.nodesCount} points • ${proj.tracksCount} trajets • ${proj.linksCount} liaisons",
+                                text = "📁 ${proj.name}  •  ${proj.nodesCount} nœuds • ${proj.tracksCount} infra_lineaire • ${proj.linksCount} câbles",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -645,13 +631,11 @@ private fun ProjectsListContent(
                             ) {
                                 Icon(Icons.Default.DriveFileRenameOutline, contentDescription = "Renommer", modifier = Modifier.size(18.dp))
                             }
-                            if (projects.size > 1) {
-                                IconButton(
-                                    onClick = { onDeleteProject(proj.name) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
-                                }
+                            IconButton(
+                                onClick = { onDeleteProject(proj.name) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -674,7 +658,7 @@ private fun ProjectsListContent(
 }
 
 /**
- * Onglet Liste des Points Piquetés (.points / noeuds.json)
+ * Onglet Liste des Nœuds (.noeuds / noeuds.json)
  */
 @Composable
 private fun NodesListContent(
@@ -699,7 +683,7 @@ private fun NodesListContent(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = { Text("Rechercher un point dans .points...", fontSize = 12.sp) },
+            placeholder = { Text("Rechercher un nœud dans .noeuds...", fontSize = 12.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
             modifier = Modifier.fillMaxWidth().height(48.dp),
             singleLine = true,
@@ -735,7 +719,7 @@ private fun NodesListContent(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (nodes.isEmpty()) "Aucun point dans ce projet" else "Aucun résultat trouvé",
+                    text = if (nodes.isEmpty()) "Aucun nœud dans ce projet" else "Aucun résultat trouvé",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -797,7 +781,7 @@ private fun NodesListContent(
 }
 
 /**
- * Onglet Liste des Trajets (.trajets / trajets.json)
+ * Onglet Liste des Infra Linéaires (.infra_lineaire / infra_lineaire.json)
  */
 @Composable
 private fun TracksListContent(
@@ -811,7 +795,7 @@ private fun TracksListContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Aucun trajet enregistré dans ce projet.\nUtilisez le bouton 'Démarrer Tracé GPS' ou 'Tracé Manuel' sur la carte.",
+                text = "Aucune infra linéaire enregistrée dans ce projet.\nUtilisez 'Démarrer Infra_lineaire GPS' ou 'Infra_lineaire Manuel' sur la carte.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -890,7 +874,7 @@ private fun TracksListContent(
 }
 
 /**
- * Onglet Liste des Liaisons (.liaisons / liaisons.json)
+ * Onglet Liste des Câbles (.cables / cables.json)
  */
 @Composable
 private fun LinksListContent(
@@ -904,7 +888,7 @@ private fun LinksListContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Aucune liaison câble dans ce projet.\nUtilisez 'Relier par câble' depuis la fiche d'un nœud.",
+                text = "Aucun câble dans ce projet.\nUtilisez 'Relier par câble' depuis la fiche d'un nœud.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -933,7 +917,7 @@ private fun LinksListContent(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Liaison ${link.cableType} (${link.id})",
+                                text = "Câble ${link.cableType} (${link.id})",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold
                             )

@@ -165,8 +165,8 @@ data class StoredTrack(
             }
 
             return StoredTrack(
-                id = json.optString("id", "TRK-${System.currentTimeMillis()}"),
-                name = json.optString("name", "Trajet"),
+                id = json.optString("id", "INF-${System.currentTimeMillis()}"),
+                name = json.optString("name", "Infra_lineaire"),
                 type = json.optString("type", "GC"),
                 etat = json.optString("etat", "Conforme"),
                 conduitAudit = json.optString("conduitAudit", "Libres"),
@@ -209,9 +209,12 @@ class DocumentStorageManager(private val context: Context) {
     private var _currentProject: String = prefs.getString("active_project_name", "projet01") ?: "projet01"
     val currentProject: String get() = _currentProject
 
-    // Dossiers cibles sous Documents/Releve-Terrain
+    // Dossiers cibles sous Documents/Releve-Terrain et Download/Releve-Terrain
     val publicBaseDir: File
         get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+
+    val publicDownloadsDir: File
+        get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain")
 
     val appExtBaseDir: File
         get() = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
@@ -224,11 +227,11 @@ class DocumentStorageManager(private val context: Context) {
         get() {
             ensureDirectoriesExist()
             if (isWritable(publicBaseDir)) return publicBaseDir
+            if (isWritable(publicDownloadsDir)) return publicDownloadsDir
             if (isWritable(appExtBaseDir)) return appExtBaseDir
             return internalBaseDir
         }
 
-    // Répertoire du projet actuel
     fun getProjectDir(projectName: String = currentProject): File {
         val sanitized = sanitizeProjectName(projectName)
         val dir = File(baseDir, sanitized)
@@ -248,7 +251,7 @@ class DocumentStorageManager(private val context: Context) {
         ensureDefaultProjectExists()
     }
 
-    private fun sanitizeProjectName(name: String): String {
+    fun sanitizeProjectName(name: String): String {
         val cleaned = name.trim().replace("[\\\\/:*?\"<>|]".toRegex(), "_")
         return cleaned.ifBlank { "projet01" }
     }
@@ -261,81 +264,89 @@ class DocumentStorageManager(private val context: Context) {
     }
 
     /**
-     * Migration transparente des fichiers racines créés par les anciennes versions
-     * vers le dossier du premier projet "projet01"
+     * Migration automatique à l'installation / démarrage des fichiers situés directement dans la racine Releve-Terrain/ vers projet01
      */
     private fun migrateLegacyRootFilesIfNeeded() {
         try {
             val rootNodesFile = File(publicBaseDir, "noeuds.json")
-            val rootTracksFile = File(publicBaseDir, "trajets.json")
-            val rootLinksFile = File(publicBaseDir, "liaisons.json")
+            val rootLegacyPoints = File(publicBaseDir, "points.json")
+            val rootTracksFile = File(publicBaseDir, "infra_lineaire.json")
+            val rootLegacyTracks = File(publicBaseDir, "trajets.json")
+            val rootLinksFile = File(publicBaseDir, "cables.json")
+            val rootLegacyLinks = File(publicBaseDir, "liaisons.json")
 
             val project01Dir = File(publicBaseDir, "projet01")
             val projNodesFile = File(project01Dir, "noeuds.json")
 
-            if (rootNodesFile.exists() && rootNodesFile.length() > 2 && !projNodesFile.exists()) {
+            val sourceNodes = when {
+                rootNodesFile.exists() && rootNodesFile.length() > 2 -> rootNodesFile
+                rootLegacyPoints.exists() && rootLegacyPoints.length() > 2 -> rootLegacyPoints
+                else -> null
+            }
+
+            if (sourceNodes != null && (!projNodesFile.exists() || projNodesFile.length() <= 2)) {
                 project01Dir.mkdirs()
-                rootNodesFile.copyTo(File(project01Dir, "noeuds.json"), overwrite = true)
-                rootNodesFile.copyTo(File(project01Dir, ".points"), overwrite = true)
-                if (rootTracksFile.exists()) {
-                    rootTracksFile.copyTo(File(project01Dir, "trajets.json"), overwrite = true)
-                    rootTracksFile.copyTo(File(project01Dir, ".trajets"), overwrite = true)
+                sourceNodes.copyTo(projNodesFile, overwrite = true)
+                sourceNodes.copyTo(File(project01Dir, ".noeuds"), overwrite = true)
+
+                val sourceTracks = when {
+                    rootTracksFile.exists() -> rootTracksFile
+                    rootLegacyTracks.exists() -> rootLegacyTracks
+                    else -> null
                 }
-                if (rootLinksFile.exists()) {
-                    rootLinksFile.copyTo(File(project01Dir, "liaisons.json"), overwrite = true)
-                    rootLinksFile.copyTo(File(project01Dir, ".liaisons"), overwrite = true)
+                sourceTracks?.copyTo(File(project01Dir, "infra_lineaire.json"), overwrite = true)
+                sourceTracks?.copyTo(File(project01Dir, ".infra_lineaire"), overwrite = true)
+
+                val sourceLinks = when {
+                    rootLinksFile.exists() -> rootLinksFile
+                    rootLegacyLinks.exists() -> rootLegacyLinks
+                    else -> null
                 }
+                sourceLinks?.copyTo(File(project01Dir, "cables.json"), overwrite = true)
+                sourceLinks?.copyTo(File(project01Dir, ".cables"), overwrite = true)
             }
         } catch (e: Exception) {
             e.printStackTrace()
-        }
-    }
-
-    private fun ensureDefaultProjectExists() {
-        val projects = listAllProjects()
-        if (projects.isEmpty()) {
-            createProject("projet01", copyCurrent = false)
-        } else {
-            // S'assurer que le projet actif est valide
-            if (projects.none { it.name == _currentProject }) {
-                _currentProject = projects.first().name
-                prefs.edit().putString("active_project_name", _currentProject).apply()
-            }
         }
     }
 
     /**
-     * Crée l'arborescence Documents/Releve-Terrain
+     * Vérifie et restaure le projet par défaut ou existant lors d'un lancement ou après réinstallation
      */
+    private fun ensureDefaultProjectExists() {
+        val projects = listAllProjects()
+        if (projects.isNotEmpty()) {
+            val existing = projects.firstOrNull { it.name == _currentProject }
+            if (existing == null) {
+                // Trouver le premier projet qui possède des données, sinon le premier de la liste
+                val projectWithData = projects.firstOrNull { it.nodesCount > 0 || it.tracksCount > 0 || it.linksCount > 0 }
+                    ?: projects.first()
+                _currentProject = projectWithData.name
+                prefs.edit().putString("active_project_name", _currentProject).apply()
+            }
+        } else {
+            // Aucun projet sur le disque : préparer projet01 sans écraser de fichiers
+            _currentProject = "projet01"
+            prefs.edit().putString("active_project_name", "projet01").apply()
+            ensureProjectDirectoriesExist("projet01")
+        }
+    }
+
     fun ensureDirectoriesExist() {
-        try {
-            if (!publicBaseDir.exists()) publicBaseDir.mkdirs()
-            File(publicBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
-            File(publicBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        try {
-            if (!appExtBaseDir.exists()) appExtBaseDir.mkdirs()
-            File(appExtBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
-            File(appExtBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        try {
-            if (!internalBaseDir.exists()) internalBaseDir.mkdirs()
-            File(internalBaseDir, "Photos").let { if (!it.exists()) it.mkdirs() }
-            File(internalBaseDir, "Exports").let { if (!it.exists()) it.mkdirs() }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+            try {
+                if (!base.exists()) base.mkdirs()
+                File(base, "Photos").let { if (!it.exists()) it.mkdirs() }
+                File(base, "Exports").let { if (!it.exists()) it.mkdirs() }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun ensureProjectDirectoriesExist(projectName: String) {
         val sanitized = sanitizeProjectName(projectName)
-        listOf(publicBaseDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val projDir = File(base, sanitized)
                 if (!projDir.exists()) projDir.mkdirs()
@@ -362,6 +373,7 @@ class DocumentStorageManager(private val context: Context) {
     private fun getWritableDirectories(): List<File> {
         val list = mutableListOf<File>()
         if (isWritable(publicBaseDir)) list.add(publicBaseDir)
+        if (isWritable(publicDownloadsDir)) list.add(publicDownloadsDir)
         if (isWritable(appExtBaseDir)) list.add(appExtBaseDir)
         if (isWritable(internalBaseDir)) list.add(internalBaseDir)
         return if (list.isNotEmpty()) list else listOf(context.filesDir)
@@ -372,7 +384,7 @@ class DocumentStorageManager(private val context: Context) {
     fun listAllProjects(): List<ProjectInfo> {
         val projectMap = mutableMapOf<String, Long>()
 
-        // 1. Scanner les dossiers physiques sur le stockage public
+        // 1. Scanner Documents/Releve-Terrain
         try {
             if (publicBaseDir.exists() && publicBaseDir.isDirectory) {
                 publicBaseDir.listFiles()?.forEach { file ->
@@ -385,7 +397,20 @@ class DocumentStorageManager(private val context: Context) {
             e.printStackTrace()
         }
 
-        // 2. Scanner le stockage externe privé de l'app
+        // 2. Scanner Download/Releve-Terrain
+        try {
+            if (publicDownloadsDir.exists() && publicDownloadsDir.isDirectory) {
+                publicDownloadsDir.listFiles()?.forEach { file ->
+                    if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
+                        projectMap.putIfAbsent(file.name, file.lastModified())
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. Scanner le stockage externe privé de l'app
         try {
             if (appExtBaseDir.exists() && appExtBaseDir.isDirectory) {
                 appExtBaseDir.listFiles()?.forEach { file ->
@@ -398,25 +423,21 @@ class DocumentStorageManager(private val context: Context) {
             e.printStackTrace()
         }
 
-        // 3. Scanner via MediaStore (recherche après réinstallation)
+        // 4. Scanner via MediaStore (secours persistant après réinstallation)
         val mediaStoreProjects = PublicStorageHelper.listPublicProjects(context)
         for (p in mediaStoreProjects) {
             projectMap.putIfAbsent(p, System.currentTimeMillis())
         }
 
-        // Si aucun projet trouvé mais des fichiers racines existent
         if (projectMap.isEmpty()) {
-            val rootNodes = File(publicBaseDir, "noeuds.json")
-            if (rootNodes.exists()) {
-                projectMap["projet01"] = rootNodes.lastModified()
-            }
+            projectMap["projet01"] = System.currentTimeMillis()
         }
 
         val result = mutableListOf<ProjectInfo>()
         for ((name, lastMod) in projectMap) {
-            val nodes = loadNodes(name)
-            val tracks = loadTracks(name)
-            val links = loadLinks(name)
+            val nodes = loadNodesForProject(name)
+            val tracks = loadTracksForProject(name)
+            val links = loadLinksForProject(name)
             result.add(
                 ProjectInfo(
                     name = name,
@@ -435,14 +456,22 @@ class DocumentStorageManager(private val context: Context) {
     fun createProject(projectName: String, copyCurrent: Boolean = false): Boolean {
         val sanitized = sanitizeProjectName(projectName)
         ensureProjectDirectoriesExist(sanitized)
+        PublicStorageHelper.unmarkProjectDeleted(context, sanitized)
 
         val currentNodes = if (copyCurrent) loadNodes() else emptyList()
         val currentLinks = if (copyCurrent) loadLinks() else emptyList()
         val currentTracks = if (copyCurrent) loadTracks() else emptyList()
 
-        saveNodes(currentNodes, project = sanitized, updateGeoJson = false)
-        saveLinks(currentLinks, project = sanitized, updateGeoJson = false)
-        saveTracks(currentTracks, project = sanitized, updateGeoJson = false)
+        if (copyCurrent) {
+            saveNodes(currentNodes, project = sanitized, updateGeoJson = false)
+            saveLinks(currentLinks, project = sanitized, updateGeoJson = false)
+            saveTracks(currentTracks, project = sanitized, updateGeoJson = false)
+        } else {
+            // Créer fichiers vides initiaux pour ce nouveau sous-projet
+            saveNodes(emptyList(), project = sanitized, updateGeoJson = false)
+            saveLinks(emptyList(), project = sanitized, updateGeoJson = false)
+            saveTracks(emptyList(), project = sanitized, updateGeoJson = false)
+        }
         generateAndSaveGeoJson(project = sanitized)
 
         setCurrentProject(sanitized)
@@ -451,21 +480,37 @@ class DocumentStorageManager(private val context: Context) {
 
     fun deleteProject(projectName: String): Boolean {
         val sanitized = sanitizeProjectName(projectName)
-        listOf(publicBaseDir, appExtBaseDir, internalBaseDir).forEach { base ->
+
+        // 1. Supprimer sur tous les dossiers physiques
+        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val dir = File(base, sanitized)
-                if (dir.exists()) dir.deleteRecursively()
+                if (dir.exists()) {
+                    dir.deleteRecursively()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
+
+        // 2. Supprimer via MediaStore et marquer tombstone
         PublicStorageHelper.deletePublicProject(context, sanitized)
 
+        // 3. Nettoyer les clés SharedPreferences pour ce projet
+        prefs.edit()
+            .remove("backup_nodes_json_$sanitized")
+            .remove("backup_tracks_json_$sanitized")
+            .remove("backup_links_json_$sanitized")
+            .apply()
+
+        // 4. Si c'était le projet courant, basculer sur un autre projet existant
         if (_currentProject == sanitized) {
-            val remaining = listAllProjects()
+            val remaining = listAllProjects().filter { it.name != sanitized }
             if (remaining.isNotEmpty()) {
                 setCurrentProject(remaining.first().name)
             } else {
+                _currentProject = "projet01"
+                prefs.edit().putString("active_project_name", "projet01").apply()
                 createProject("projet01", copyCurrent = false)
             }
         }
@@ -479,7 +524,7 @@ class DocumentStorageManager(private val context: Context) {
 
         ensureProjectDirectoriesExist(newSanitized)
 
-        listOf(publicBaseDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val oldDir = File(base, oldSanitized)
                 val newDir = File(base, newSanitized)
@@ -500,16 +545,30 @@ class DocumentStorageManager(private val context: Context) {
         return true
     }
 
-    // --- CHARGEMENT & SAUVEGARDE DES NOEUDS (.points / noeuds.json) ---
+    // --- CHARGEMENT & SAUVEGARDE DES NOEUDS (.noeuds / noeuds.json) ---
 
     fun loadNodes(project: String = currentProject): List<FtthNodeEntity> {
+        return loadNodesForProject(project)
+    }
+
+    private fun loadNodesForProject(project: String): List<FtthNodeEntity> {
         val sanitized = sanitizeProjectName(project)
-        val targetFiles = listOf("$sanitized/noeuds.json", "$sanitized/.points", "$sanitized/points.json", "noeuds.json")
+        val targetFiles = mutableListOf(
+            "$sanitized/noeuds.json",
+            "$sanitized/.noeuds",
+            "$sanitized/points.json",
+            "$sanitized/.points"
+        )
+        if (sanitized == "projet01") {
+            targetFiles.add("noeuds.json")
+            targetFiles.add("points.json")
+            targetFiles.add(".noeuds")
+            targetFiles.add(".points")
+        }
 
         for (relPath in targetFiles) {
-            // 1. Tente de charger depuis le stockage public partagé (persiste après réinstallation)
             val publicContent = PublicStorageHelper.loadPublicDocument(context, relPath)
-            if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            if (!publicContent.isNullOrBlank() && publicContent.trim() != "[]") {
                 try {
                     val jsonArray = JSONArray(publicContent)
                     val list = mutableListOf<FtthNodeEntity>()
@@ -522,9 +581,9 @@ class DocumentStorageManager(private val context: Context) {
                 }
             }
 
-            // 2. Tente depuis les dossiers physiques
             val searchFiles = listOf(
                 File(publicBaseDir, relPath),
+                File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
             )
@@ -548,9 +607,8 @@ class DocumentStorageManager(private val context: Context) {
             }
         }
 
-        // Vérifier SharedPreferences de secours
         val prefsJson = prefs.getString("backup_nodes_json_$sanitized", null)
-        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+        if (!prefsJson.isNullOrBlank() && prefsJson.trim() != "[]") {
             try {
                 val jsonArray = JSONArray(prefsJson)
                 val list = mutableListOf<FtthNodeEntity>()
@@ -574,18 +632,17 @@ class DocumentStorageManager(private val context: Context) {
             nodes.forEach { jsonArray.put(nodeToJson(it)) }
             val jsonString = jsonArray.toString(2)
 
-            // Sauvegarde publique persistante sous Documents/Releve-Terrain/<projet>/noeuds.json et .points
             PublicStorageHelper.savePublicDocument(context, "$sanitized/noeuds.json", jsonString)
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/.points", jsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/.noeuds", jsonString)
 
-            // Écrire dans tous les répertoires disponibles
             for (dir in getWritableDirectories()) {
                 try {
                     val projDir = File(dir, sanitized)
                     if (!projDir.exists()) projDir.mkdirs()
                     File(projDir, "noeuds.json").writeText(jsonString, Charsets.UTF_8)
-                    File(projDir, ".points").writeText(jsonString, Charsets.UTF_8)
+                    File(projDir, ".noeuds").writeText(jsonString, Charsets.UTF_8)
                     File(projDir, "points.json").writeText(jsonString, Charsets.UTF_8)
+                    File(projDir, ".points").writeText(jsonString, Charsets.UTF_8)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -612,15 +669,30 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    // --- CHARGEMENT & SAUVEGARDE DES LIAISONS (.liaisons / liaisons.json) ---
+    // --- CHARGEMENT & SAUVEGARDE DES CÂBLES (.cables / cables.json) ---
 
     fun loadLinks(project: String = currentProject): List<FtthLinkEntity> {
+        return loadLinksForProject(project)
+    }
+
+    private fun loadLinksForProject(project: String): List<FtthLinkEntity> {
         val sanitized = sanitizeProjectName(project)
-        val targetFiles = listOf("$sanitized/liaisons.json", "$sanitized/.liaisons", "liaisons.json")
+        val targetFiles = mutableListOf(
+            "$sanitized/cables.json",
+            "$sanitized/.cables",
+            "$sanitized/liaisons.json",
+            "$sanitized/.liaisons"
+        )
+        if (sanitized == "projet01") {
+            targetFiles.add("cables.json")
+            targetFiles.add("liaisons.json")
+            targetFiles.add(".cables")
+            targetFiles.add(".liaisons")
+        }
 
         for (relPath in targetFiles) {
             val publicContent = PublicStorageHelper.loadPublicDocument(context, relPath)
-            if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            if (!publicContent.isNullOrBlank() && publicContent.trim() != "[]") {
                 try {
                     val jsonArray = JSONArray(publicContent)
                     val list = mutableListOf<FtthLinkEntity>()
@@ -635,6 +707,7 @@ class DocumentStorageManager(private val context: Context) {
 
             val searchFiles = listOf(
                 File(publicBaseDir, relPath),
+                File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
             )
@@ -659,7 +732,7 @@ class DocumentStorageManager(private val context: Context) {
         }
 
         val prefsJson = prefs.getString("backup_links_json_$sanitized", null)
-        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+        if (!prefsJson.isNullOrBlank() && prefsJson.trim() != "[]") {
             try {
                 val jsonArray = JSONArray(prefsJson)
                 val list = mutableListOf<FtthLinkEntity>()
@@ -683,13 +756,15 @@ class DocumentStorageManager(private val context: Context) {
             links.forEach { jsonArray.put(linkToJson(it)) }
             val jsonString = jsonArray.toString(2)
 
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/liaisons.json", jsonString)
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/.liaisons", jsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/cables.json", jsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/.cables", jsonString)
 
             for (dir in getWritableDirectories()) {
                 try {
                     val projDir = File(dir, sanitized)
                     if (!projDir.exists()) projDir.mkdirs()
+                    File(projDir, "cables.json").writeText(jsonString, Charsets.UTF_8)
+                    File(projDir, ".cables").writeText(jsonString, Charsets.UTF_8)
                     File(projDir, "liaisons.json").writeText(jsonString, Charsets.UTF_8)
                     File(projDir, ".liaisons").writeText(jsonString, Charsets.UTF_8)
                 } catch (e: Exception) {
@@ -718,15 +793,30 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    // --- CHARGEMENT & SAUVEGARDE DES TRAJETS (.trajets / trajets.json) ---
+    // --- CHARGEMENT & SAUVEGARDE DES INFRA_LINEAIRE (.infra_lineaire / infra_lineaire.json) ---
 
     fun loadTracks(project: String = currentProject): List<StoredTrack> {
+        return loadTracksForProject(project)
+    }
+
+    private fun loadTracksForProject(project: String): List<StoredTrack> {
         val sanitized = sanitizeProjectName(project)
-        val targetFiles = listOf("$sanitized/trajets.json", "$sanitized/.trajets", "trajets.json")
+        val targetFiles = mutableListOf(
+            "$sanitized/infra_lineaire.json",
+            "$sanitized/.infra_lineaire",
+            "$sanitized/trajets.json",
+            "$sanitized/.trajets"
+        )
+        if (sanitized == "projet01") {
+            targetFiles.add("infra_lineaire.json")
+            targetFiles.add("trajets.json")
+            targetFiles.add(".infra_lineaire")
+            targetFiles.add(".trajets")
+        }
 
         for (relPath in targetFiles) {
             val publicContent = PublicStorageHelper.loadPublicDocument(context, relPath)
-            if (!publicContent.isNullOrBlank() && publicContent != "[]") {
+            if (!publicContent.isNullOrBlank() && publicContent.trim() != "[]") {
                 try {
                     val jsonArray = JSONArray(publicContent)
                     val list = mutableListOf<StoredTrack>()
@@ -741,6 +831,7 @@ class DocumentStorageManager(private val context: Context) {
 
             val searchFiles = listOf(
                 File(publicBaseDir, relPath),
+                File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
             )
@@ -765,7 +856,7 @@ class DocumentStorageManager(private val context: Context) {
         }
 
         val prefsJson = prefs.getString("backup_tracks_json_$sanitized", null)
-        if (!prefsJson.isNullOrBlank() && prefsJson != "[]") {
+        if (!prefsJson.isNullOrBlank() && prefsJson.trim() != "[]") {
             try {
                 val jsonArray = JSONArray(prefsJson)
                 val list = mutableListOf<StoredTrack>()
@@ -789,13 +880,15 @@ class DocumentStorageManager(private val context: Context) {
             tracks.forEach { jsonArray.put(it.toJson()) }
             val jsonString = jsonArray.toString(2)
 
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/trajets.json", jsonString)
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/.trajets", jsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/infra_lineaire.json", jsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/.infra_lineaire", jsonString)
 
             for (dir in getWritableDirectories()) {
                 try {
                     val projDir = File(dir, sanitized)
                     if (!projDir.exists()) projDir.mkdirs()
+                    File(projDir, "infra_lineaire.json").writeText(jsonString, Charsets.UTF_8)
+                    File(projDir, ".infra_lineaire").writeText(jsonString, Charsets.UTF_8)
                     File(projDir, "trajets.json").writeText(jsonString, Charsets.UTF_8)
                     File(projDir, ".trajets").writeText(jsonString, Charsets.UTF_8)
                 } catch (e: Exception) {
@@ -811,7 +904,7 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
-    // --- GÉNÉRATION AUTOMATIQUE DU FICHIER GEOJSON DU PROJET ---
+    // --- GÉNÉRATION AUTOMATIQUE DU GEOJSON DANS LE DOSSIER PROJET ---
 
     fun generateAndSaveGeoJson(project: String = currentProject) {
         val sanitized = sanitizeProjectName(project)
@@ -820,98 +913,66 @@ class DocumentStorageManager(private val context: Context) {
             val links = loadLinks(sanitized)
             val tracks = loadTracks(sanitized)
 
+            val nodesMap = nodes.associateBy { it.id }
+
             val root = JSONObject()
             root.put("type", "FeatureCollection")
             root.put("project", sanitized)
+            root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
             val features = JSONArray()
-
-            val nodesMap = nodes.associateBy { it.id }
 
             // 1. Nœuds
             for (node in nodes) {
                 val feat = JSONObject()
                 feat.put("type", "Feature")
-                val geom = JSONObject()
-                geom.put("type", "Point")
-                val coords = JSONArray()
-                coords.put(node.longitude)
-                coords.put(node.latitude)
-                geom.put("coordinates", coords)
+                val geom = JSONObject().apply {
+                    put("type", "Point")
+                    val coords = JSONArray()
+                    coords.put(node.longitude)
+                    coords.put(node.latitude)
+                    put("coordinates", coords)
+                }
                 feat.put("geometry", geom)
-
-                val props = JSONObject()
-                props.put("id", node.id)
-                props.put("name", node.name)
-                props.put("type", node.type.name)
-                props.put("typeLabel", node.type.label)
-                props.put("status", node.status.label)
-                props.put("etat", node.etat.label)
-                props.put("address", node.address)
-                props.put("hasBoitierFtth", node.hasBoitierFtth)
-                props.put("notes", node.notes)
-                props.put("technician", node.technicianName)
-                props.put("updatedAt", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.FRANCE).format(Date(node.updatedAt)))
-                feat.put("properties", props)
+                feat.put("properties", nodeToJson(node).apply { put("entity_type", "noeud") })
                 features.put(feat)
             }
 
-            // 2. Liaisons
+            // 2. Câbles
             for (link in links) {
                 val n1 = nodesMap[link.fromNodeId]
                 val n2 = nodesMap[link.toNodeId]
                 if (n1 != null && n2 != null) {
                     val feat = JSONObject()
                     feat.put("type", "Feature")
-                    val geom = JSONObject()
-                    geom.put("type", "LineString")
-                    val lineCoords = JSONArray()
-                    lineCoords.put(JSONArray().apply { put(n1.longitude); put(n1.latitude) })
-                    lineCoords.put(JSONArray().apply { put(n2.longitude); put(n2.latitude) })
-                    geom.put("coordinates", lineCoords)
+                    val geom = JSONObject().apply {
+                        put("type", "LineString")
+                        val coords = JSONArray()
+                        coords.put(JSONArray().put(n1.longitude).put(n1.latitude))
+                        coords.put(JSONArray().put(n2.longitude).put(n2.latitude))
+                        put("coordinates", coords)
+                    }
                     feat.put("geometry", geom)
-
-                    val props = JSONObject()
-                    props.put("id", link.id)
-                    props.put("fromNodeId", link.fromNodeId)
-                    props.put("toNodeId", link.toNodeId)
-                    props.put("cableType", link.cableType)
-                    props.put("installationType", link.installationType)
-                    props.put("capacityFO", link.capacityFO)
-                    props.put("lengthMeters", link.lengthMeters)
-                    props.put("status", link.status.label)
-                    feat.put("properties", props)
+                    feat.put("properties", linkToJson(link).apply { put("entity_type", "cable") })
                     features.put(feat)
                 }
             }
 
-            // 3. Trajets
+            // 3. Infra_lineaire
             for (track in tracks) {
                 val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
                 if (pts.size >= 2) {
                     val feat = JSONObject()
                     feat.put("type", "Feature")
-                    val geom = JSONObject()
-                    geom.put("type", "LineString")
-                    val lineCoords = JSONArray()
-                    for (p in pts) {
-                        lineCoords.put(JSONArray().apply { put(p.longitude); put(p.latitude) })
+                    val geom = JSONObject().apply {
+                        put("type", "LineString")
+                        val coords = JSONArray()
+                        for (p in pts) {
+                            coords.put(JSONArray().put(p.longitude).put(p.latitude))
+                        }
+                        put("coordinates", coords)
                     }
-                    geom.put("coordinates", lineCoords)
                     feat.put("geometry", geom)
-
-                    val props = JSONObject()
-                    props.put("id", track.id)
-                    props.put("name", track.name)
-                    props.put("trajetType", track.type)
-                    props.put("etatTechnique", track.etat)
-                    props.put("conduitAudit", track.conduitAudit)
-                    props.put("conduitType", track.conduitType)
-                    props.put("conduitCount", track.conduitCount)
-                    props.put("conduitDiameters", JSONArray(track.conduitDiameters))
-                    props.put("distanceMeters", track.totalDistanceMeters)
-                    props.put("pointCount", pts.size)
-                    props.put("photoCount", track.photos.size)
-                    feat.put("properties", props)
+                    feat.put("properties", track.toJson().apply { put("entity_type", "infra_lineaire") })
                     features.put(feat)
                 }
             }
@@ -919,13 +980,13 @@ class DocumentStorageManager(private val context: Context) {
             root.put("features", features)
             val geoJsonString = root.toString(2)
 
-            PublicStorageHelper.savePublicDocument(context, "$sanitized/releve_terrain.geojson", geoJsonString)
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/releve_$sanitized.geojson", geoJsonString)
 
             for (dir in getWritableDirectories()) {
                 try {
                     val projDir = File(dir, sanitized)
                     if (!projDir.exists()) projDir.mkdirs()
-                    File(projDir, "releve_terrain.geojson").writeText(geoJsonString, Charsets.UTF_8)
+                    File(projDir, "releve_$sanitized.geojson").writeText(geoJsonString, Charsets.UTF_8)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -946,29 +1007,26 @@ class DocumentStorageManager(private val context: Context) {
         put("status", node.status.name)
         put("etat", node.etat.name)
         put("address", node.address)
+        put("hasBoitierFtth", node.hasBoitierFtth)
         put("notes", node.notes)
         put("technicianName", node.technicianName)
-        put("photoCount", node.photos.size)
         put("updatedAt", node.updatedAt)
-        put("hasBoitierFtth", node.hasBoitierFtth)
-        val photosArr = JSONArray()
-        node.photos.forEach { photosArr.put(it) }
-        put("photos", photosArr)
 
-        // Spécifiques
+        val phoArr = JSONArray()
+        node.photos.forEach { phoArr.put(it) }
+        put("photos", phoArr)
+
         put("poleNature", node.poleNature)
         put("poleHeight", node.poleHeight)
         put("chamberType", node.chamberType)
         put("boitierType", node.boitierType)
         put("isSaturated", node.isSaturated)
         put("boitierSupport", node.boitierSupport)
-        put("hasSplitter", node.hasSplitter)
         put("splitterType", node.splitterType)
         put("sroType", node.sroType)
         put("sroCapacity", node.sroCapacity)
         put("buildingFloors", node.buildingFloors)
         put("buildingDwellings", node.buildingDwellings)
-        put("buildingBoitiersEtage", node.buildingBoitiersEtage)
         put("hasLocalTechnique", node.hasLocalTechnique)
         put("hasGaineMontante", node.hasGaineMontante)
         put("syndicAuthorization", node.syndicAuthorization)
@@ -979,69 +1037,53 @@ class DocumentStorageManager(private val context: Context) {
 
     private fun nodeFromJson(json: JSONObject): FtthNodeEntity {
         val photosList = mutableListOf<String>()
-        val photosArr = json.optJSONArray("photos")
-        if (photosArr != null) {
-            for (i in 0 until photosArr.length()) {
-                photosList.add(photosArr.getString(i))
+        val phoArr = json.optJSONArray("photos")
+        if (phoArr != null) {
+            for (i in 0 until phoArr.length()) {
+                photosList.add(phoArr.getString(i))
             }
         }
 
         val typeStr = json.optString("type", FtthNodeType.POTEAU.name)
-        val type = try {
-            FtthNodeType.valueOf(typeStr)
-        } catch (e: Exception) {
-            FtthNodeType.POTEAU
-        }
+        val type = try { FtthNodeType.valueOf(typeStr) } catch (e: Exception) { FtthNodeType.POTEAU }
 
         val statusStr = json.optString("status", NodeStatus.EXISTANT.name)
-        val status = try {
-            NodeStatus.valueOf(statusStr)
-        } catch (e: Exception) {
-            NodeStatus.EXISTANT
-        }
+        val status = try { NodeStatus.valueOf(statusStr) } catch (e: Exception) { NodeStatus.EXISTANT }
 
         val etatStr = json.optString("etat", NodeConformity.CONFORME.name)
-        val etat = try {
-            NodeConformity.valueOf(etatStr)
-        } catch (e: Exception) {
-            NodeConformity.CONFORME
-        }
+        val etat = try { NodeConformity.valueOf(etatStr) } catch (e: Exception) { NodeConformity.CONFORME }
 
         return FtthNodeEntity(
-            id = json.optString("id", "NODE-${System.currentTimeMillis()}"),
-            name = json.optString("name", "Nœud"),
+            id = json.optString("id", "NODE-${System.currentTimeMillis() % 10000}"),
+            name = json.optString("name", ""),
             type = type,
             latitude = json.optDouble("latitude", 0.0),
             longitude = json.optDouble("longitude", 0.0),
             status = status,
             etat = etat,
             address = json.optString("address", ""),
-            photos = photosList,
-            notes = json.optString("notes", ""),
-            technicianName = json.optString("technicianName", "Technicien"),
-            photoCount = photosList.size,
-            updatedAt = json.optLong("updatedAt", System.currentTimeMillis()),
-            syncState = SyncState.SYNCED,
             hasBoitierFtth = json.optBoolean("hasBoitierFtth", false),
-            poleNature = json.optString("poleNature", "bois"),
+            notes = json.optString("notes", ""),
+            photos = photosList,
+            technicianName = json.optString("technicianName", ""),
+            updatedAt = json.optLong("updatedAt", System.currentTimeMillis()),
+            poleNature = json.optString("poleNature", "Bois"),
             poleHeight = json.optInt("poleHeight", 8),
-            chamberType = json.optString("chamberType", "L2T"),
+            chamberType = json.optString("chamberType", "L1T"),
             boitierType = json.optString("boitierType", "PBO"),
             isSaturated = json.optBoolean("isSaturated", false),
-            boitierSupport = json.optString("boitierSupport", "Poteau"),
-            hasSplitter = json.optBoolean("hasSplitter", false),
+            boitierSupport = json.optString("boitierSupport", "Façade"),
             splitterType = json.optString("splitterType", "1:8"),
-            sroType = json.optString("sroType", "armoire de rue"),
-            sroCapacity = json.optString("sroCapacity", "360 FO"),
-            buildingFloors = json.optInt("buildingFloors", 4),
-            buildingDwellings = json.optInt("buildingDwellings", 16),
-            buildingBoitiersEtage = json.optInt("buildingBoitiersEtage", 4),
-            hasLocalTechnique = json.optBoolean("hasLocalTechnique", true),
-            hasGaineMontante = json.optBoolean("hasGaineMontante", true),
-            syndicAuthorization = json.optString("syndicAuthorization", "Accord obtenu"),
+            sroType = json.optString("sroType", "Armoire"),
+            sroCapacity = json.optString("sroCapacity", "160 FO"),
+            buildingFloors = json.optInt("buildingFloors", 1),
+            buildingDwellings = json.optInt("buildingDwellings", 1),
+            hasLocalTechnique = json.optBoolean("hasLocalTechnique", false),
+            hasGaineMontante = json.optBoolean("hasGaineMontante", false),
+            syndicAuthorization = json.optString("syndicAuthorization", "Non"),
             syndicContact = json.optString("syndicContact", ""),
-            buildingConnectionMode = json.optString("buildingConnectionMode", "souterrain"),
-            villaConnectionMode = json.optString("villaConnectionMode", "aérien")
+            buildingConnectionMode = json.optString("buildingConnectionMode", "Souterrain"),
+            villaConnectionMode = json.optString("villaConnectionMode", "Aérien")
         )
     }
 
@@ -1059,20 +1101,15 @@ class DocumentStorageManager(private val context: Context) {
 
     private fun linkFromJson(json: JSONObject): FtthLinkEntity {
         val statusStr = json.optString("status", NodeStatus.EXISTANT.name)
-        val status = try {
-            NodeStatus.valueOf(statusStr)
-        } catch (e: Exception) {
-            NodeStatus.EXISTANT
-        }
-
+        val status = try { NodeStatus.valueOf(statusStr) } catch (e: Exception) { NodeStatus.EXISTANT }
         return FtthLinkEntity(
-            id = json.optString("id", "LNK-${System.currentTimeMillis()}"),
+            id = json.optString("id", "LNK-${System.currentTimeMillis() % 10000}"),
             fromNodeId = json.optString("fromNodeId", ""),
             toNodeId = json.optString("toNodeId", ""),
             cableType = json.optString("cableType", "Distribution"),
             installationType = json.optString("installationType", "Aérien"),
-            capacityFO = json.optInt("capacityFO", 24),
-            lengthMeters = json.optDouble("lengthMeters", 45.0),
+            capacityFO = json.optInt("capacityFO", 12),
+            lengthMeters = json.optDouble("lengthMeters", 0.0),
             status = status,
             updatedAt = json.optLong("updatedAt", System.currentTimeMillis())
         )

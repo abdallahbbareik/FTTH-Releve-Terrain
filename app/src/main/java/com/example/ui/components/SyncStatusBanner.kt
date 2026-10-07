@@ -78,7 +78,7 @@ fun SyncStatusBanner(
                 }
 
                 Text(
-                    text = "$nodesCount .points • $linksCount .liaisons • $tracksCount .trajets",
+                    text = "$nodesCount .noeuds • $tracksCount .infra_lineaire • $linksCount .cables",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFCBD5E1),
                     fontSize = 10.sp
@@ -93,7 +93,7 @@ fun SyncStatusBanner(
             ) {
                 Icon(
                     imageVector = Icons.Default.Folder,
-                    contentDescription = "Dossier Releve-Terrain (Points, Trajets, Liaisons)",
+                    contentDescription = "Dossier Releve-Terrain (Nœuds, Infra_lineaire, Câbles)",
                     tint = Color(0xFFE2E8F0),
                     modifier = Modifier.size(18.dp)
                 )

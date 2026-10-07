@@ -161,13 +161,6 @@ fun PiquetageTopBar(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Folder,
-                                            contentDescription = null,
-                                            tint = TelecomCyan,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
                                         Text(
                                             text = currentProject,
                                             color = TelecomCyan,
@@ -188,16 +181,6 @@ fun PiquetageTopBar(
                 }
             },
             actions = {
-                IconButton(
-                    onClick = onOpenProjectFolder,
-                    modifier = Modifier.testTag("open_project_folder_topbar_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = "Dossier Relevé-Terrain (Points, Trajets, Liaisons)"
-                    )
-                }
-
                 IconButton(
                     onClick = {
                         isSearchActive = !isSearchActive

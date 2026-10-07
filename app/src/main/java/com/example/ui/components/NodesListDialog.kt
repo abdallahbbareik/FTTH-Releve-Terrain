@@ -106,7 +106,7 @@ fun NodesListDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Liste des points relevés (${nodes.size})",
+                            text = "Liste des Nœuds relevés (${nodes.size})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )

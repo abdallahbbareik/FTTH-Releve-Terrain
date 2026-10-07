@@ -11,43 +11,99 @@ import java.io.File
 
 object PublicStorageHelper {
 
-    private const val BASE_DOCUMENTS_FOLDER = "Documents/Releve-Terrain"
-    private const val BASE_DIRECTORY_NAME = "Releve-Terrain"
+    private const val FOLDER_DOCUMENTS = "Documents/Releve-Terrain"
+    private const val FOLDER_DOWNLOADS = "Download/Releve-Terrain"
+    private const val DIR_NAME = "Releve-Terrain"
+    private const val PREFS_NAME = "ReleveTerrainDeletedProjects"
+
+    private fun getDeletedProjects(context: Context): Set<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getStringSet("deleted_projects", emptySet()) ?: emptySet()
+    }
+
+    fun markProjectDeleted(context: Context, projectName: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
+        current.add(projectName)
+        prefs.edit().putStringSet("deleted_projects", current).apply()
+    }
+
+    fun unmarkProjectDeleted(context: Context, projectName: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
+        if (current.remove(projectName)) {
+            prefs.edit().putStringSet("deleted_projects", current).apply()
+        }
+    }
 
     /**
-     * Sauvegarde un fichier texte dans Documents/Releve-Terrain/<relativePath>
-     * en utilisant le système de fichiers standard ET MediaStore pour survie après désinstallation/réinstallation.
+     * Sauvegarde un fichier texte dans Documents/Releve-Terrain/<relativePath> et Download/Releve-Terrain/<relativePath>
+     * et dans le stockage local de l'application, avec MediaStore pour survie absolue après réinstallation.
      */
     fun savePublicDocument(context: Context, relativePath: String, content: String): Boolean {
         var fileSuccess = false
-        val normalizedRelativePath = relativePath.trimStart('/')
-        
-        // 1. Sauvegarde via File API dans le stockage partagé public
+        val normalized = relativePath.trimStart('/')
+
+        val parts = normalized.split("/")
+        if (parts.size > 1) {
+            val proj = parts[0]
+            unmarkProjectDeleted(context, proj)
+        }
+
+        // 1. Sauvegarde File API dans Documents/Releve-Terrain
         try {
             val pubDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val baseDir = File(pubDocs, BASE_DIRECTORY_NAME)
-            val targetFile = File(baseDir, normalizedRelativePath)
-            targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
-            targetFile.writeText(content, Charsets.UTF_8)
-            fileSuccess = targetFile.exists() && targetFile.length() > 0
+            val fileDocs = File(File(pubDocs, DIR_NAME), normalized)
+            fileDocs.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            fileDocs.writeText(content, Charsets.UTF_8)
+            fileSuccess = fileDocs.exists() && fileDocs.length() > 0
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // 2. Sauvegarde via MediaStore (garantit l'accès et la persistance entre désinstallations/réinstallations)
+        // 2. Sauvegarde miroir File API dans Download/Releve-Terrain
+        try {
+            val pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val fileDownloads = File(File(pubDownloads, DIR_NAME), normalized)
+            fileDownloads.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            fileDownloads.writeText(content, Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. Sauvegarde dans les répertoires de l'application (externalFilesDir et filesDir)
+        try {
+            val extDocs = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), DIR_NAME)
+            val fileExt = File(extDocs, normalized)
+            fileExt.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            fileExt.writeText(content, Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
+            val intDocs = File(context.filesDir, DIR_NAME)
+            val fileInt = File(intDocs, normalized)
+            fileInt.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            fileInt.writeText(content, Charsets.UTF_8)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 4. Sauvegarde via MediaStore
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = context.contentResolver
                 val collection = MediaStore.Files.getContentUri("external")
 
-                val targetFileObj = File(normalizedRelativePath)
+                val targetFileObj = File(normalized)
                 val fileName = targetFileObj.name
                 val parentSubDir = targetFileObj.parent?.let { "/$it" } ?: ""
-                val fullRelativePath = "$BASE_DOCUMENTS_FOLDER$parentSubDir/"
+                val fullRelativePath = "$FOLDER_DOCUMENTS$parentSubDir/"
 
                 val projection = arrayOf(MediaStore.Files.FileColumns._ID)
-                val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf(fileName, "%$BASE_DOCUMENTS_FOLDER$parentSubDir%")
+                val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?"
+                val selectionArgs = arrayOf(fileName, fullRelativePath)
 
                 var existingUri: Uri? = null
                 resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
@@ -89,17 +145,16 @@ object PublicStorageHelper {
     }
 
     /**
-     * Lit un fichier depuis Documents/Releve-Terrain/<relativePath>.
-     * Tente via File API, et si non trouvé ou non lisible, tente via MediaStore.
-     * Cette fonction permet de récupérer les données sauvegardées même après réinstallation complète de l'application !
+     * Lit un fichier depuis Documents/Releve-Terrain/<relativePath> ou Download/Releve-Terrain/<relativePath>
+     * ou les répertoires internes de l'application.
      */
     fun loadPublicDocument(context: Context, relativePath: String): String? {
-        val normalizedRelativePath = relativePath.trimStart('/')
+        val normalized = relativePath.trimStart('/')
 
-        // 1. Tente par File API direct dans le dossier public
+        // 1. Tente par Documents/Releve-Terrain
         try {
             val pubDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val file = File(File(pubDocs, BASE_DIRECTORY_NAME), normalizedRelativePath)
+            val file = File(File(pubDocs, DIR_NAME), normalized)
             if (file.exists() && file.canRead()) {
                 val text = file.readText(Charsets.UTF_8).trim()
                 if (text.isNotEmpty() && text != "[]") return text
@@ -108,18 +163,55 @@ object PublicStorageHelper {
             e.printStackTrace()
         }
 
-        // 2. Tente par MediaStore (crucial après réinstallation)
+        // 2. Tente par Download/Releve-Terrain (secours persistant après réinstallation)
+        try {
+            val pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val file = File(File(pubDownloads, DIR_NAME), normalized)
+            if (file.exists() && file.canRead()) {
+                val text = file.readText(Charsets.UTF_8).trim()
+                if (text.isNotEmpty() && text != "[]") return text
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. Tente par externalFilesDir (persistant)
+        try {
+            val extDocs = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), DIR_NAME)
+            val file = File(extDocs, normalized)
+            if (file.exists() && file.canRead()) {
+                val text = file.readText(Charsets.UTF_8).trim()
+                if (text.isNotEmpty() && text != "[]") return text
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 4. Tente par filesDir interne
+        try {
+            val intDocs = File(context.filesDir, DIR_NAME)
+            val file = File(intDocs, normalized)
+            if (file.exists() && file.canRead()) {
+                val text = file.readText(Charsets.UTF_8).trim()
+                if (text.isNotEmpty() && text != "[]") return text
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 5. Tente par MediaStore avec correspondance stricte du sous-dossier
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = context.contentResolver
                 val collection = MediaStore.Files.getContentUri("external")
-                val targetFileObj = File(normalizedRelativePath)
+                val targetFileObj = File(normalized)
                 val fileName = targetFileObj.name
                 val parentSubDir = targetFileObj.parent?.let { "/$it" } ?: ""
+                val targetPath = "$FOLDER_DOCUMENTS$parentSubDir/"
 
                 val projection = arrayOf(MediaStore.Files.FileColumns._ID)
-                val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf(fileName, "%$BASE_DOCUMENTS_FOLDER$parentSubDir%")
+                val selection = "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND ${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?"
+                val selectionArgs = arrayOf(fileName, targetPath)
 
                 resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -140,46 +232,77 @@ object PublicStorageHelper {
     }
 
     /**
-     * Découvre la liste de tous les sous-dossiers de projets dans Documents/Releve-Terrain
+     * Découvre tous les sous-dossiers de projets dans Documents/Releve-Terrain et Download/Releve-Terrain
      */
     fun listPublicProjects(context: Context): List<String> {
         val projectNames = mutableSetOf<String>()
+        val deletedProjects = getDeletedProjects(context)
 
-        // 1. Via File API sur dossier public
+        fun checkAndAdd(file: File) {
+            if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
+                if (!deletedProjects.contains(file.name)) {
+                    projectNames.add(file.name)
+                }
+            }
+        }
+
+        // 1. Documents/Releve-Terrain
         try {
             val pubDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val baseDir = File(pubDocs, BASE_DIRECTORY_NAME)
+            val baseDir = File(pubDocs, DIR_NAME)
             if (baseDir.exists() && baseDir.isDirectory) {
-                baseDir.listFiles()?.forEach { file ->
-                    if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
-                        projectNames.add(file.name)
-                    }
-                }
+                baseDir.listFiles()?.forEach { checkAndAdd(it) }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // 2. Via MediaStore (détection des dossiers persistés après réinstallation)
+        // 2. Download/Releve-Terrain
+        try {
+            val pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val baseDir = File(pubDownloads, DIR_NAME)
+            if (baseDir.exists() && baseDir.isDirectory) {
+                baseDir.listFiles()?.forEach { checkAndAdd(it) }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. App External & Internal
+        try {
+            val extDocs = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), DIR_NAME)
+            if (extDocs.exists() && extDocs.isDirectory) {
+                extDocs.listFiles()?.forEach { checkAndAdd(it) }
+            }
+            val intDocs = File(context.filesDir, DIR_NAME)
+            if (intDocs.exists() && intDocs.isDirectory) {
+                intDocs.listFiles()?.forEach { checkAndAdd(it) }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 4. MediaStore
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = context.contentResolver
                 val collection = MediaStore.Files.getContentUri("external")
                 val projection = arrayOf(MediaStore.Files.FileColumns.RELATIVE_PATH)
                 val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%$BASE_DOCUMENTS_FOLDER/%")
+                val selectionArgs = arrayOf("%$DIR_NAME/%")
 
                 resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
                     val pathIdx = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH)
                     while (cursor.moveToNext()) {
                         val relPath = cursor.getString(pathIdx) ?: continue
-                        // Ex: "Documents/Releve-Terrain/projet01/" ou "Documents/Releve-Terrain/projet02/Photos/"
-                        val prefix = "$BASE_DOCUMENTS_FOLDER/"
-                        if (relPath.startsWith(prefix)) {
-                            val sub = relPath.removePrefix(prefix).trim('/')
-                            val firstSegment = sub.split("/").firstOrNull()
-                            if (!firstSegment.isNullOrBlank() && firstSegment != "Photos" && firstSegment != "Exports" && !firstSegment.startsWith(".")) {
-                                projectNames.add(firstSegment)
+                        val parts = relPath.split("/").filter { it.isNotBlank() }
+                        val dirIdx = parts.indexOf(DIR_NAME)
+                        if (dirIdx >= 0 && dirIdx + 1 < parts.size) {
+                            val subProject = parts[dirIdx + 1]
+                            if (subProject != "Photos" && subProject != "Exports" && !subProject.startsWith(".")) {
+                                if (!deletedProjects.contains(subProject)) {
+                                    projectNames.add(subProject)
+                                }
                             }
                         }
                     }
@@ -193,49 +316,103 @@ object PublicStorageHelper {
     }
 
     /**
-     * Supprime un sous-dossier de projet public et ses entrées MediaStore
+     * Supprime définitivement un projet dans tous les emplacements publics et MediaStore
      */
     fun deletePublicProject(context: Context, projectName: String): Boolean {
+        var deleted = false
+        markProjectDeleted(context, projectName)
+
+        // 1. Documents/Releve-Terrain/<projectName>
         try {
             val pubDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val projectDir = File(File(pubDocs, BASE_DIRECTORY_NAME), projectName)
+            val projectDir = File(File(pubDocs, DIR_NAME), projectName)
             if (projectDir.exists()) {
                 projectDir.deleteRecursively()
+                deleted = true
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
+        // 2. Download/Releve-Terrain/<projectName>
+        try {
+            val pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val projectDir = File(File(pubDownloads, DIR_NAME), projectName)
+            if (projectDir.exists()) {
+                projectDir.deleteRecursively()
+                deleted = true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. App Storage
+        try {
+            val extDocs = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), DIR_NAME)
+            val projectDirExt = File(extDocs, projectName)
+            if (projectDirExt.exists()) {
+                projectDirExt.deleteRecursively()
+                deleted = true
+            }
+
+            val intDocs = File(context.filesDir, DIR_NAME)
+            val projectDirInt = File(intDocs, projectName)
+            if (projectDirInt.exists()) {
+                projectDirInt.deleteRecursively()
+                deleted = true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 4. MediaStore
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = context.contentResolver
                 val collection = MediaStore.Files.getContentUri("external")
                 val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%$BASE_DOCUMENTS_FOLDER/$projectName%")
+                val selectionArgs = arrayOf("%$DIR_NAME/$projectName/%")
                 resolver.delete(collection, selection, selectionArgs)
+                deleted = true
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
-        return true
+        return deleted
     }
 
     /**
-     * Renomme un projet dans le dossier public
+     * Renomme un projet dans Documents et Download
      */
     fun renamePublicProject(context: Context, oldName: String, newName: String): Boolean {
-        try {
-            val pubDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val base = File(pubDocs, BASE_DIRECTORY_NAME)
-            val oldDir = File(base, oldName)
-            val newDir = File(base, newName)
-            if (oldDir.exists()) {
-                return oldDir.renameTo(newDir)
+        var success = false
+        unmarkProjectDeleted(context, newName)
+
+        val bases = listOf(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+            context.filesDir
+        )
+
+        for (baseRoot in bases) {
+            if (baseRoot == null) continue
+            try {
+                val base = File(baseRoot, DIR_NAME)
+                val oldDir = File(base, oldName)
+                val newDir = File(base, newName)
+                if (oldDir.exists()) {
+                    oldDir.copyRecursively(newDir, overwrite = true)
+                    oldDir.deleteRecursively()
+                    success = true
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return false
+
+        markProjectDeleted(context, oldName)
+        return success
     }
 }

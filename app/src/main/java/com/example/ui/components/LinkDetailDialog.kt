@@ -85,7 +85,7 @@ fun LinkDetailDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Liaison fibre ${link.id}",
+                            text = "Câble fibre ${link.id}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
