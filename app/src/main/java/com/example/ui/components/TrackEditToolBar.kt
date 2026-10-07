@@ -38,9 +38,14 @@ import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
 import java.util.Locale
 
+import androidx.compose.material.icons.filled.AddAPhoto
+import com.example.data.storage.TrackPhoto
+
 @Composable
 fun ManualTrackEditorBar(
     points: List<TrackPoint>,
+    photos: List<TrackPhoto> = emptyList(),
+    onAddPhoto: (() -> Unit)? = null,
     onUndoLastPoint: () -> Unit,
     onSaveTrack: () -> Unit,
     onCancel: () -> Unit,
@@ -67,52 +72,70 @@ fun ManualTrackEditorBar(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Tracé Manuel : ${points.size} sommets ($distStr)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "Touchez la carte",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Tracé Manuel : Touchez la carte",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "📍 ${points.size} sommets  •  📏 $distStr  •  📷 ${photos.size} photos",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedButton(
                     onClick = onCancel,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(0.9f),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Annuler", fontSize = 11.sp)
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("Annuler", fontSize = 10.sp)
+                }
+
+                if (onAddPhoto != null) {
+                    Button(
+                        onClick = onAddPhoto,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        modifier = Modifier.weight(1.1f),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding
+                    ) {
+                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Photo ici", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
 
                 OutlinedButton(
                     onClick = onUndoLastPoint,
                     enabled = points.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(0.9f),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
-                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retirer", fontSize = 11.sp)
+                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("Retirer", fontSize = 10.sp)
                 }
 
                 Button(
                     onClick = onSaveTrack,
                     enabled = points.size >= 2,
-                    modifier = Modifier.weight(1.3f)
+                    modifier = Modifier.weight(1.2f),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Enregistrer", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Enregistrer", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                 }
             }
         }

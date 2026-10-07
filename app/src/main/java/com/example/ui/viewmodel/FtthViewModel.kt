@@ -15,7 +15,9 @@ import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.data.local.SyncLogEntity
 import com.example.data.storage.DocumentStorageManager
+import com.example.data.storage.ProjectInfo
 import com.example.data.storage.StoredTrack
+import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +59,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     val userLocation: StateFlow<GpsLocationData?> = gpsService.currentLocation
     val gpsStatus: StateFlow<GpsStatus> = gpsService.gpsStatus
 
-    // Entités en mémoire synchronisées avec les fichiers JSON du dossier Documents/Releve-Terrain
+    // Nom et liste des projets dans Documents/Releve-Terrain
+    private val _currentProject = MutableStateFlow(docStorage.currentProject)
+    val currentProject: StateFlow<String> = _currentProject.asStateFlow()
+
+    private val _allProjects = MutableStateFlow<List<ProjectInfo>>(docStorage.listAllProjects())
+    val allProjects: StateFlow<List<ProjectInfo>> = _allProjects.asStateFlow()
+
+    // Entités en mémoire synchronisées avec les fichiers JSON du projet actif
     private val _rawNodes = MutableStateFlow<List<FtthNodeEntity>>(docStorage.loadNodes())
     val rawNodes: StateFlow<List<FtthNodeEntity>> = _rawNodes.asStateFlow()
 
@@ -80,6 +89,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _manualTrackPoints = MutableStateFlow<List<TrackPoint>>(emptyList())
     val manualTrackPoints: StateFlow<List<TrackPoint>> = _manualTrackPoints.asStateFlow()
+
+    private val _manualTrackPhotos = MutableStateFlow<List<TrackPhoto>>(emptyList())
+    val manualTrackPhotos: StateFlow<List<TrackPhoto>> = _manualTrackPhotos.asStateFlow()
 
     // Mode Redresser entre deux sommets
     private val _isStraightenMode = MutableStateFlow(false)
@@ -388,6 +400,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun startManualTrack() {
         _isManualTrackMode.value = true
         _manualTrackPoints.value = emptyList()
+        _manualTrackPhotos.value = emptyList()
         _bannerMessage.value = "Mode Tracé Manuel : Touchez la carte pour ajouter des sommets"
     }
 
@@ -405,20 +418,43 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addManualTrackPhoto(photoPath: String) {
+        val currentPhotos = _manualTrackPhotos.value.toMutableList()
+        val userLoc = userLocation.value
+        val lat = userLoc?.latitude ?: _manualTrackPoints.value.lastOrNull()?.latitude ?: 34.0
+        val lon = userLoc?.longitude ?: _manualTrackPoints.value.lastOrNull()?.longitude ?: 9.5375
+        val photo = TrackPhoto(
+            photoPath = photoPath,
+            latitude = lat,
+            longitude = lon
+        )
+        currentPhotos.add(photo)
+        _manualTrackPhotos.value = currentPhotos
+        _bannerMessage.value = "Photo ajoutée au tracé manuel (${currentPhotos.size} photos)"
+    }
+
     fun saveManualTrack(name: String = "Tracé Manuel ${System.currentTimeMillis() % 10000}") {
         viewModelScope.launch(Dispatchers.IO) {
             val pts = _manualTrackPoints.value
             if (pts.size < 2) return@launch
 
             val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+            val photos = _manualTrackPhotos.value
             val track = StoredTrack(
                 id = "TRK-${System.currentTimeMillis()}",
                 name = name,
+                type = "GC",
+                etat = "Conforme",
+                conduitAudit = "Libres",
+                conduitType = "PEHD",
+                conduitCount = 1,
+                conduitDiameters = listOf("Ø 40"),
                 startTime = System.currentTimeMillis(),
                 endTime = System.currentTimeMillis(),
                 totalDistanceMeters = dist,
                 rawPoints = pts,
                 points = pts,
+                photos = photos,
                 isSimplified = false,
                 isActive = false
             )
@@ -429,13 +465,16 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
             _isManualTrackMode.value = false
             _manualTrackPoints.value = emptyList()
-            _bannerMessage.value = "Trajet '$name' (${pts.size} sommets) enregistré dans Documents/Releve-Terrain/trajets.json"
+            _manualTrackPhotos.value = emptyList()
+            _selectedTrackForDetail.value = track
+            _bannerMessage.value = "Trajet '$name' (${pts.size} sommets, ${photos.size} photos) enregistré. Fiche ouverte pour configuration."
         }
     }
 
     fun cancelManualTrack() {
         _isManualTrackMode.value = false
         _manualTrackPoints.value = emptyList()
+        _manualTrackPhotos.value = emptyList()
     }
 
     // --- TRACE GPS AUTOMATIQUE ---
@@ -444,12 +483,41 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         val track = StoredTrack(
             id = "TRK-${System.currentTimeMillis()}",
             name = name,
+            type = "GC",
+            etat = "Conforme",
+            conduitAudit = "Libres",
+            conduitType = "PEHD",
+            conduitCount = 1,
+            conduitDiameters = listOf("Ø 40"),
             startTime = System.currentTimeMillis(),
             isActive = true
         )
         _activeTrack.value = track
         _activeTrackPoints.value = emptyList()
         _bannerMessage.value = "Enregistrement de la trace GPS démarré"
+    }
+
+    fun addActiveTrackPhoto(photoPath: String) {
+        val active = _activeTrack.value ?: return
+        val currentPhotos = active.photos.toMutableList()
+        val userLoc = userLocation.value
+        val lat = userLoc?.latitude ?: _activeTrackPoints.value.lastOrNull()?.latitude ?: 34.0
+        val lon = userLoc?.longitude ?: _activeTrackPoints.value.lastOrNull()?.longitude ?: 9.5375
+        val photo = TrackPhoto(
+            photoPath = photoPath,
+            latitude = lat,
+            longitude = lon
+        )
+        currentPhotos.add(photo)
+        val updated = active.copy(photos = currentPhotos)
+        _activeTrack.value = updated
+        _bannerMessage.value = "Photo géoréférencée ajoutée au tracé (${currentPhotos.size} photos)"
+    }
+
+    fun cancelActiveTrack() {
+        _activeTrack.value = null
+        _activeTrackPoints.value = emptyList()
+        _bannerMessage.value = "Enregistrement du tracé annulé"
     }
 
     private fun recordActiveTrackPoint(loc: GpsLocationData) {
@@ -490,7 +558,25 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _activeTrack.value = null
             _activeTrackPoints.value = emptyList()
             _selectedTrackForDetail.value = finished
-            _bannerMessage.value = "Trace GPS terminée (${pts.size} points). Ouvrez la fiche pour la simplifier."
+            _bannerMessage.value = "Trace GPS terminée (${pts.size} points, ${finished.photos.size} photos). Fiche ouverte pour configuration."
+        }
+    }
+
+    fun saveTrack(updatedTrack: StoredTrack) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == updatedTrack.id }
+            if (idx >= 0) {
+                all[idx] = updatedTrack
+            } else {
+                all.add(0, updatedTrack)
+            }
+            _allTracks.value = all
+            docStorage.saveTracks(all)
+            if (_selectedTrackForDetail.value?.id == updatedTrack.id) {
+                _selectedTrackForDetail.value = updatedTrack
+            }
+            _bannerMessage.value = "Trajet '${updatedTrack.name}' (${updatedTrack.type}) mis à jour"
         }
     }
 
@@ -894,6 +980,70 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMapFocusTarget() {
         _mapFocusTarget.value = null
+    }
+
+    // --- GESTION DES PROJETS FTTH (Documents/Releve-Terrain/<projet>) ---
+
+    fun refreshProjectsList() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _allProjects.value = docStorage.listAllProjects()
+            _currentProject.value = docStorage.currentProject
+        }
+    }
+
+    fun switchProject(projectName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            docStorage.setCurrentProject(projectName)
+            _currentProject.value = docStorage.currentProject
+
+            val nodes = docStorage.loadNodes(projectName)
+            val links = docStorage.loadLinks(projectName)
+            val tracks = docStorage.loadTracks(projectName)
+
+            _rawNodes.value = nodes
+            _rawLinks.value = links
+            _allTracks.value = tracks
+            _allProjects.value = docStorage.listAllProjects()
+
+            _selectedNode.value = null
+            _selectedTrackForDetail.value = null
+            _selectedLinkForDetail.value = null
+
+            if (nodes.isNotEmpty()) {
+                val first = nodes.first()
+                _mapFocusTarget.value = Pair(first.latitude, first.longitude)
+            }
+            _bannerMessage.value = "Projet '$projectName' ouvert (${nodes.size} points, ${tracks.size} trajets, ${links.size} liaisons)"
+        }
+    }
+
+    fun createNewProject(projectName: String, copyCurrent: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = docStorage.createProject(projectName, copyCurrent)
+            if (success) {
+                switchProject(projectName)
+                _bannerMessage.value = "Nouveau projet '$projectName' créé !"
+            }
+        }
+    }
+
+    fun deleteProject(projectName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            docStorage.deleteProject(projectName)
+            switchProject(docStorage.currentProject)
+            _bannerMessage.value = "Projet '$projectName' supprimé"
+        }
+    }
+
+    fun renameProject(oldName: String, newName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = docStorage.renameProject(oldName, newName)
+            if (success) {
+                _currentProject.value = docStorage.currentProject
+                _allProjects.value = docStorage.listAllProjects()
+                _bannerMessage.value = "Projet renommé en '$newName'"
+            }
+        }
     }
 
     fun setMapLayer(layer: MapLayerType) { _activeMapLayer.value = layer }

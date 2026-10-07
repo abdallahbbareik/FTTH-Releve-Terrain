@@ -117,20 +117,54 @@ fun TracksListDialog(
                                     modifier = Modifier.padding(12.dp)
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
                                             Text(
                                                 text = track.name,
                                                 fontWeight = FontWeight.Bold,
                                                 style = MaterialTheme.typography.bodyMedium
                                             )
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = when (track.type) {
+                                                    "GC" -> Color(0xFFFFEDD5)
+                                                    "Aérien" -> Color(0xFFE0F2FE)
+                                                    else -> Color(0xFFF3E8FF)
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = track.type,
+                                                    color = when (track.type) {
+                                                        "GC" -> Color(0xFFC2410C)
+                                                        "Aérien" -> Color(0xFF0369A1)
+                                                        else -> Color(0xFF7E22CE)
+                                                    },
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (track.etat == "Non conforme") Color(0xFFFEE2E2) else Color(0xFFDCFCE7)
+                                            ) {
+                                                Text(
+                                                    text = track.etat,
+                                                    color = if (track.etat == "Non conforme") Color(0xFF991B1B) else Color(0xFF166534),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
                                             if (track.isSimplified) {
-                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Surface(
                                                     shape = RoundedCornerShape(4.dp),
                                                     color = Color(0xFFDCFCE7)
                                                 ) {
                                                     Text(
-                                                        text = "Simplifié (${track.toleranceMeters?.toInt()}m)",
+                                                        text = "RDP",
                                                         color = Color(0xFF166534),
                                                         fontSize = 9.sp,
                                                         fontWeight = FontWeight.Bold,
@@ -141,8 +175,13 @@ fun TracksListDialog(
                                         }
 
                                         Spacer(modifier = Modifier.height(2.dp))
+                                        val subText = if (track.type == "GC") {
+                                            "$distStr • Conduites: ${track.conduitType} (${track.conduitAudit}) • ${track.photos.size} photos"
+                                        } else {
+                                            "$distStr • ${currentPoints.size} sommets • ${track.photos.size} photos"
+                                        }
                                         Text(
-                                            text = "$distStr • ${currentPoints.size} sommets • ${SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE).format(Date(track.startTime))}",
+                                            text = "$subText • ${SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE).format(Date(track.startTime))}",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

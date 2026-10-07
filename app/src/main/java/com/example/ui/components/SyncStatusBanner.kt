@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SyncStatusBanner(
+    currentProject: String = "projet01",
     nodesCount: Int,
     linksCount: Int,
     tracksCount: Int,
@@ -61,25 +62,25 @@ fun SyncStatusBanner(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Documents/Releve-Terrain",
+                        text = "📁 $currentProject",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFF8FAFC),
+                        color = Color(0xFF38BDF8),
                         fontSize = 11.sp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "• Fichiers JSON",
+                        text = "• Documents/Releve-Terrain/$currentProject",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF38BDF8),
+                        color = Color(0xFF94A3B8),
                         fontSize = 10.sp
                     )
                 }
 
                 Text(
-                    text = "$nodesCount nœuds • $linksCount liaisons • $tracksCount trajets",
+                    text = "$nodesCount .points • $linksCount .liaisons • $tracksCount .trajets",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF94A3B8),
+                    color = Color(0xFFCBD5E1),
                     fontSize = 10.sp
                 )
             }

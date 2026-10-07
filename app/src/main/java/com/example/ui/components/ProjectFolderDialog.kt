@@ -19,11 +19,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cable
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
@@ -34,6 +41,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -66,6 +74,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
+import com.example.data.storage.ProjectInfo
 import com.example.data.storage.StoredTrack
 import com.example.ui.theme.TelecomCyan
 import com.example.ui.theme.TelecomNavy
@@ -75,9 +84,15 @@ import java.util.Locale
 
 @Composable
 fun ProjectFolderDialog(
+    currentProject: String,
+    allProjects: List<ProjectInfo>,
     nodes: List<FtthNodeEntity>,
     tracks: List<StoredTrack>,
     links: List<FtthLinkEntity>,
+    onSwitchProject: (String) -> Unit,
+    onCreateProject: (String, Boolean) -> Unit,
+    onDeleteProject: (String) -> Unit,
+    onRenameProject: (String, String) -> Unit,
     onSelectNode: (FtthNodeEntity) -> Unit,
     onDeleteNode: (String) -> Unit,
     onSelectTrack: (StoredTrack) -> Unit,
@@ -88,10 +103,20 @@ fun ProjectFolderDialog(
     onExportKmz: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Points, 2: Trajets, 3: Liaisons
     var searchQuery by remember { mutableStateOf("") }
     var selectedTypeFilter by remember { mutableStateOf<FtthNodeType?>(null) }
-    var itemToDelete by remember { mutableStateOf<Pair<String, String>?>(null) } // type ("node", "track", "link") to id
+    
+    // Dialogues de gestion projet
+    var showCreateProjectDialog by remember { mutableStateOf(false) }
+    var newProjectNameInput by remember { mutableStateOf("") }
+    var copyCurrentDataCheck by remember { mutableStateOf(false) }
+
+    var projectToRename by remember { mutableStateOf<String?>(null) }
+    var renameInput by remember { mutableStateOf("") }
+
+    var projectToDelete by remember { mutableStateOf<String?>(null) }
+    var itemToDelete by remember { mutableStateOf<Pair<String, String>?>(null) } // type to id
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -110,20 +135,20 @@ fun ProjectFolderDialog(
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // En-tête Dossier
+                // En-tête Dossier & Projet Actif
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .background(TelecomNavy),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Folder,
+                            imageVector = Icons.Default.FolderOpen,
                             contentDescription = null,
                             tint = TelecomCyan,
                             modifier = Modifier.size(24.dp)
@@ -131,14 +156,29 @@ fun ProjectFolderDialog(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Projet : $currentProject",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFFDCFCE7)
+                            ) {
+                                Text(
+                                    text = "Actif",
+                                    color = Color(0xFF166534),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Text(
-                            text = "Dossier : Documents/Releve-Terrain",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${nodes.size} points • ${tracks.size} trajets • ${links.size} liaisons",
+                            text = "Documents/Releve-Terrain/$currentProject (${nodes.size} pts • ${tracks.size} traj • ${links.size} liais)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -151,18 +191,49 @@ fun ProjectFolderDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Onglets de navigation : Points / Trajets / Liaisons
+                // Bouton d'action rapide Créer Nouveau Projet
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Arborescence & Fichiers",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Button(
+                        onClick = {
+                            val nextNum = (allProjects.size + 1).toString().padStart(2, '0')
+                            newProjectNameInput = "projet$nextNum"
+                            copyCurrentDataCheck = false
+                            showCreateProjectDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(34.dp).testTag("create_new_project_button")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = TelecomCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("+ Nouveau Projet", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Onglets de navigation : Projets / Points / Trajets / Liaisons
                 TabRow(selectedTabIndex = selectedTab) {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Points (${nodes.size})", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text("Projets (${allProjects.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )
@@ -171,9 +242,9 @@ fun ProjectFolderDialog(
                         onClick = { selectedTab = 1 },
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Timeline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Trajets (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text(".points (${nodes.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )
@@ -182,9 +253,20 @@ fun ProjectFolderDialog(
                         onClick = { selectedTab = 2 },
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Cable, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Timeline, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Liaisons (${links.size})", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text(".trajets (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            }
+                        }
+                    )
+                    Tab(
+                        selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Cable, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(".liaisons (${links.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )
@@ -196,7 +278,30 @@ fun ProjectFolderDialog(
                 Box(modifier = Modifier.weight(1f)) {
                     when (selectedTab) {
                         0 -> {
-                            // ONGLET 0 : POINTS PIQUETÉS
+                            // ONGLET 0 : LISTE DES PROJETS
+                            ProjectsListContent(
+                                currentProject = currentProject,
+                                projects = allProjects,
+                                onSelectProject = { projName ->
+                                    onSwitchProject(projName)
+                                },
+                                onRenameProject = { projName ->
+                                    projectToRename = projName
+                                    renameInput = projName
+                                },
+                                onDeleteProject = { projName ->
+                                    projectToDelete = projName
+                                },
+                                onCreateProjectClick = {
+                                    val nextNum = (allProjects.size + 1).toString().padStart(2, '0')
+                                    newProjectNameInput = "projet$nextNum"
+                                    copyCurrentDataCheck = false
+                                    showCreateProjectDialog = true
+                                }
+                            )
+                        }
+                        1 -> {
+                            // ONGLET 1 : POINTS (.points / noeuds.json)
                             NodesListContent(
                                 nodes = nodes,
                                 searchQuery = searchQuery,
@@ -207,16 +312,16 @@ fun ProjectFolderDialog(
                                 onRequestDelete = { itemToDelete = Pair("node", it) }
                             )
                         }
-                        1 -> {
-                            // ONGLET 1 : TRAJETS / PARCOURS
+                        2 -> {
+                            // ONGLET 2 : TRAJETS (.trajets / trajets.json)
                             TracksListContent(
                                 tracks = tracks,
                                 onSelectTrack = onSelectTrack,
                                 onRequestDelete = { itemToDelete = Pair("track", it) }
                             )
                         }
-                        2 -> {
-                            // ONGLET 2 : LIAISONS FIBRE
+                        3 -> {
+                            // ONGLET 3 : LIAISONS (.liaisons / liaisons.json)
                             LinksListContent(
                                 links = links,
                                 onSelectLink = onSelectLink,
@@ -245,7 +350,7 @@ fun ProjectFolderDialog(
                         ) {
                             Icon(Icons.Default.FolderZip, contentDescription = null, tint = TelecomCyan, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export ZIP", fontSize = 12.sp, color = Color.White)
+                            Text("Export ZIP ($currentProject)", fontSize = 12.sp, color = Color.White)
                         }
                         OutlinedButton(
                             onClick = onExportKmz,
@@ -256,27 +361,159 @@ fun ProjectFolderDialog(
                         }
                     }
 
-                    TextButton(onClick = onDismiss) {
-                        Text("Fermer", fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Fermer", fontSize = 12.sp)
                     }
                 }
             }
         }
     }
 
-    // Dialogue de confirmation de suppression
+    // Modal Création d'un Nouveau Projet
+    if (showCreateProjectDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateProjectDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Folder, contentDescription = null, tint = TelecomNavy)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Créer un nouveau projet", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Le projet sera créé en tant que sous-dossier dans Documents/Releve-Terrain/ contenant ses propres .points, .trajets et .liaisons.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newProjectNameInput,
+                        onValueChange = { newProjectNameInput = it },
+                        label = { Text("Nom du projet (ex: projet02, Zone_Sud...)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { copyCurrentDataCheck = !copyCurrentDataCheck }
+                    ) {
+                        Checkbox(
+                            checked = copyCurrentDataCheck,
+                            onCheckedChange = { copyCurrentDataCheck = it }
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Dupliquer les données de '$currentProject'", fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = newProjectNameInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            onCreateProject(trimmed, copyCurrentDataCheck)
+                            showCreateProjectDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy)
+                ) {
+                    Text("Créer et Ouvrir", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateProjectDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // Modal Renommer un Projet
+    if (projectToRename != null) {
+        AlertDialog(
+            onDismissRequest = { projectToRename = null },
+            title = { Text("Renommer le projet") },
+            text = {
+                Column {
+                    Text("Entrez le nouveau nom pour le sous-dossier du projet :", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = renameInput,
+                        onValueChange = { renameInput = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = renameInput.trim()
+                        if (trimmed.isNotBlank() && projectToRename != null) {
+                            onRenameProject(projectToRename!!, trimmed)
+                            projectToRename = null
+                        }
+                    }
+                ) {
+                    Text("Renommer")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { projectToRename = null }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // Modal Confirmation Suppression Projet
+    if (projectToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { projectToDelete = null },
+            title = { Text("Supprimer le projet ?") },
+            text = {
+                Text("Voulez-vous vraiment supprimer le projet '$projectToDelete' et tous ses fichiers (.points, .trajets, .liaisons) ? Cette action est irréversible.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteProject(projectToDelete!!)
+                        projectToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Supprimer définitivement", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { projectToDelete = null }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // Modal Confirmation Suppression Élément
     if (itemToDelete != null) {
         val (type, id) = itemToDelete!!
-        val label = when (type) {
-            "node" -> "le nœud / point $id"
-            "track" -> "le tracé $id"
-            "link" -> "la liaison fibre $id"
+        val typeLabel = when (type) {
+            "node" -> "le point $id"
+            "track" -> "le trajet"
+            "link" -> "la liaison"
             else -> "cet élément"
         }
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
-            title = { Text("Confirmer la suppression") },
-            text = { Text("Êtes-vous sûr de vouloir supprimer définitivement $label du dossier Documents/Releve-Terrain ?") },
+            title = { Text("Supprimer $typeLabel ?") },
+            text = { Text("L'élément sera définitivement retiré du projet '$currentProject' et du stockage.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -287,9 +524,9 @@ fun ProjectFolderDialog(
                         }
                         itemToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
                 ) {
-                    Text("Supprimer")
+                    Text("Supprimer", color = Color.White)
                 }
             },
             dismissButton = {
@@ -301,6 +538,144 @@ fun ProjectFolderDialog(
     }
 }
 
+/**
+ * Onglet Liste des Projets (Documents/Releve-Terrain/<projet>)
+ */
+@Composable
+private fun ProjectsListContent(
+    currentProject: String,
+    projects: List<ProjectInfo>,
+    onSelectProject: (String) -> Unit,
+    onRenameProject: (String) -> Unit,
+    onDeleteProject: (String) -> Unit,
+    onCreateProjectClick: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Folder, contentDescription = null, tint = TelecomNavy, modifier = Modifier.size(28.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Dossier racine : Documents/Releve-Terrain",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Chaque projet dispose de ses sous-dossiers et fichiers (.points, .trajets, .liaisons). Les données sont automatiquement conservées après réinstallation.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569)
+                        )
+                    }
+                }
+            }
+        }
+
+        items(projects, key = { it.name }) { proj ->
+            val isCurrent = proj.name == currentProject
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCurrent) Color(0xFFF0FDF4) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { if (!isCurrent) onSelectProject(proj.name) }
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isCurrent) Icons.Default.CheckCircle else Icons.Default.Folder,
+                            contentDescription = null,
+                            tint = if (isCurrent) Color(0xFF16A34A) else TelecomNavy,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = proj.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isCurrent) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFF16A34A)
+                                    ) {
+                                        Text(
+                                            text = "EN COURS",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "📁 ${proj.name}  •  ${proj.nodesCount} points • ${proj.tracksCount} trajets • ${proj.linksCount} liaisons",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Boutons actions projet
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(
+                                onClick = { onRenameProject(proj.name) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.DriveFileRenameOutline, contentDescription = "Renommer", modifier = Modifier.size(18.dp))
+                            }
+                            if (projects.size > 1) {
+                                IconButton(
+                                    onClick = { onDeleteProject(proj.name) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    if (!isCurrent) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { onSelectProject(proj.name) },
+                            colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().height(32.dp)
+                        ) {
+                            Text("Ouvrir ce projet", fontSize = 11.sp, color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Onglet Liste des Points Piquetés (.points / noeuds.json)
+ */
 @Composable
 private fun NodesListContent(
     nodes: List<FtthNodeEntity>,
@@ -311,42 +686,30 @@ private fun NodesListContent(
     onSelectNode: (FtthNodeEntity) -> Unit,
     onRequestDelete: (String) -> Unit
 ) {
-    val filtered = remember(nodes, searchQuery, selectedTypeFilter) {
-        nodes.filter { node ->
-            val matchType = selectedTypeFilter == null || node.type == selectedTypeFilter
-            val matchQuery = searchQuery.isBlank() ||
-                    node.id.contains(searchQuery, ignoreCase = true) ||
-                    node.name.contains(searchQuery, ignoreCase = true) ||
-                    node.address.contains(searchQuery, ignoreCase = true)
-            matchType && matchQuery
-        }
+    val filtered = nodes.filter { node ->
+        val matchesType = selectedTypeFilter == null || node.type == selectedTypeFilter
+        val matchesQuery = searchQuery.isBlank() ||
+                node.name.contains(searchQuery, ignoreCase = true) ||
+                node.id.contains(searchQuery, ignoreCase = true) ||
+                node.address.contains(searchQuery, ignoreCase = true)
+        matchesType && matchesQuery
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column {
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = { Text("Rechercher point par ID, nom, adresse...", fontSize = 13.sp) },
+            placeholder = { Text("Rechercher un point dans .points...", fontSize = 12.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(Icons.Default.Close, contentDescription = "Effacer", modifier = Modifier.size(18.dp))
-                    }
-                }
-            },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
+            shape = RoundedCornerShape(10.dp)
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FilterChip(
@@ -356,17 +719,11 @@ private fun NodesListContent(
             )
             FtthNodeType.values().forEach { type ->
                 val count = nodes.count { it.type == type }
-                if (count > 0 || selectedTypeFilter == type) {
-                    FilterChip(
-                        selected = selectedTypeFilter == type,
-                        onClick = { onTypeFilterChange(if (selectedTypeFilter == type) null else type) },
-                        label = { Text("${type.label} ($count)", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = FtthNodeVisuals.getNodeColor(type).copy(alpha = 0.2f),
-                            selectedLabelColor = FtthNodeVisuals.getNodeColor(type)
-                        )
-                    )
-                }
+                FilterChip(
+                    selected = selectedTypeFilter == type,
+                    onClick = { onTypeFilterChange(if (selectedTypeFilter == type) null else type) },
+                    label = { Text("${type.label} ($count)", fontSize = 11.sp) }
+                )
             }
         }
 
@@ -374,129 +731,74 @@ private fun NodesListContent(
 
         if (filtered.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                modifier = Modifier.fillMaxWidth().padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Place, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (nodes.isEmpty()) "Aucun point relevé dans le projet" else "Aucun résultat trouvé",
-                        color = Color.Gray,
-                        fontSize = 13.sp
-                    )
-                }
+                Text(
+                    text = if (nodes.isEmpty()) "Aucun point dans ce projet" else "Aucun résultat trouvé",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(filtered, key = { it.id }) { node ->
-                    NodeCardItem(
-                        node = node,
-                        onSelectNode = { onSelectNode(node) },
-                        onDeleteNode = { onRequestDelete(node.id) }
-                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { onSelectNode(node) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = FtthNodeVisuals.getNodeColor(node.type),
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = node.type.name.take(3),
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${node.id} • ${node.name}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${node.type.label} • ${node.status.label} • ${node.etat.label}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (node.address.isNotBlank()) {
+                                    Text(text = node.address, fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                            IconButton(
+                                onClick = { onRequestDelete(node.id) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun NodeCardItem(
-    node: FtthNodeEntity,
-    onSelectNode: () -> Unit,
-    onDeleteNode: () -> Unit
-) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelectNode() }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(FtthNodeVisuals.getNodeColor(node.type).copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = FtthNodeVisuals.getNodeIcon(node.type),
-                    contentDescription = null,
-                    tint = FtthNodeVisuals.getNodeColor(node.type),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = node.id,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = FtthNodeVisuals.getNodeColor(node.type).copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = node.type.label,
-                            color = FtthNodeVisuals.getNodeColor(node.type),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = if (node.address.isNotBlank()) node.address else "${node.latitude.format(5)}, ${node.longitude.format(5)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-
-                if (node.photos.isNotEmpty()) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
-                    ) {
-                        Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color(0xFF2563EB))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("${node.photos.size} photo(s)", fontSize = 10.sp, color = Color(0xFF2563EB), fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
-            IconButton(
-                onClick = onDeleteNode,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-            }
-
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
-        }
-    }
-}
-
+/**
+ * Onglet Liste des Trajets (.trajets / trajets.json)
+ */
 @Composable
 private fun TracksListContent(
     tracks: List<StoredTrack>,
@@ -505,83 +807,81 @@ private fun TracksListContent(
 ) {
     if (tracks.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                Icon(Icons.Default.Timeline, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Aucun trajet enregistré.\nUtilisez 'Démarrer GPS' ou 'Tracé Manuel' pour enregistrer des parcours.",
-                    color = Color.Gray,
-                    fontSize = 13.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
+            Text(
+                text = "Aucun trajet enregistré dans ce projet.\nUtilisez le bouton 'Démarrer Tracé GPS' ou 'Tracé Manuel' sur la carte.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(tracks, key = { it.id }) { track ->
                 val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                val distMeters = track.totalDistanceMeters
+                val distStr = if (distMeters < 1000.0) "${distMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distMeters / 1000.0)
+
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectTrack(track) }
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { onSelectTrack(track) }
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
+                        modifier = Modifier.padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF0284C7).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Timeline, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(20.dp))
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = track.name,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            val distText = if (track.totalDistanceMeters >= 1000) {
-                                String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)
-                            } else {
-                                "${track.totalDistanceMeters.toInt()} m"
-                            }
-                            Text(
-                                text = "$distText • ${pts.size} sommets",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(track.startTime)),
-                                fontSize = 10.sp,
-                                color = Color.Gray
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { onRequestDelete(track.id) },
+                        Surface(
+                            shape = CircleShape,
+                            color = if (track.etat == "Conforme") Color(0xFF16A34A) else Color(0xFFDC2626),
                             modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Timeline, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
                         }
-
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = track.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer
+                                ) {
+                                    Text(
+                                        text = track.type,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "$distStr • ${pts.size} sommets • ${track.photos.size} photos • ${track.etat}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (track.type == "GC") {
+                                Text(
+                                    text = "GC: ${track.conduitAudit} • ${track.conduitType} • ${track.conduitCount} cond. (${track.conduitDiameters.joinToString()})",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { onRequestDelete(track.id) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
             }
@@ -589,6 +889,9 @@ private fun TracksListContent(
     }
 }
 
+/**
+ * Onglet Liste des Liaisons (.liaisons / liaisons.json)
+ */
 @Composable
 private fun LinksListContent(
     links: List<FtthLinkEntity>,
@@ -597,97 +900,63 @@ private fun LinksListContent(
 ) {
     if (links.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                Icon(Icons.Default.Cable, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Aucune liaison fibre enregistrée.\nUtilisez le mode 'Câbler' pour relier deux nœuds.",
-                    color = Color.Gray,
-                    fontSize = 13.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
+            Text(
+                text = "Aucune liaison câble dans ce projet.\nUtilisez 'Relier par câble' depuis la fiche d'un nœud.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(links, key = { it.id }) { link ->
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectLink(link) }
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { onSelectLink(link) }
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
+                        modifier = Modifier.padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Cable, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = link.id,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = Color(0x3310B981)
-                                ) {
-                                    Text(
-                                        text = "${link.capacityFO} FO",
-                                        color = Color(0xFF059669),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "${link.fromNodeId} ➔ ${link.toNodeId}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "${link.installationType} • ${link.cableType} • ${link.lengthMeters.toInt()}m",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { onRequestDelete(link.id) },
+                        Surface(
+                            shape = CircleShape,
+                            color = TelecomNavy,
                             modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Cable, contentDescription = null, tint = TelecomCyan, modifier = Modifier.size(18.dp))
+                            }
                         }
-
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Liaison ${link.cableType} (${link.id})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${link.installationType} • ${link.capacityFO} FO • ${link.lengthMeters.toInt()} m",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "De ${link.fromNodeId} ➔ ${link.toNodeId}",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        IconButton(
+                            onClick = { onRequestDelete(link.id) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
             }
         }
     }
 }
-
-private fun Double.format(decimals: Int): String = "%.${decimals}f".format(Locale.US, this)

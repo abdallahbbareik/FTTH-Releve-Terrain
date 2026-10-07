@@ -63,6 +63,7 @@ import com.example.data.local.FtthNodeEntity
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PiquetageTopBar(
+    currentProject: String = "projet01",
     searchQuery: String,
     totalNodesCount: Int,
     matchingNodes: List<FtthNodeEntity> = emptyList(),
@@ -124,7 +125,10 @@ fun PiquetageTopBar(
                         }
                     )
                 } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { onOpenProjectFolder() }
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
@@ -141,14 +145,40 @@ fun PiquetageTopBar(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Releve-Terrain",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF1E293B)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Folder,
+                                            contentDescription = null,
+                                            tint = TelecomCyan,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = currentProject,
+                                            color = TelecomCyan,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
                             Text(
-                                text = "Releve-Terrain",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "$totalNodesCount nœuds relevés",
+                                text = "$totalNodesCount nœuds dans $currentProject",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF94A3B8),
                                 fontSize = 11.sp

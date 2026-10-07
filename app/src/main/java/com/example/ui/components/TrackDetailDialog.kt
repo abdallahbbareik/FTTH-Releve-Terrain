@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,14 +26,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.Button
@@ -50,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,12 +83,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TrackDetailDialog(
     track: StoredTrack,
     userLocation: GpsLocationData?,
     onDismiss: () -> Unit,
-    onUpdateTrackName: (trackId: String, newName: String) -> Unit,
+    onSaveTrack: (updatedTrack: StoredTrack) -> Unit = {},
+    onUpdateTrackName: (trackId: String, newName: String) -> Unit = { _, _ -> },
     onAddTrackPhoto: (trackId: String, photoPath: String, lat: Double, lon: Double) -> Unit,
     onDeleteTrackPhoto: (trackId: String, photoId: String) -> Unit,
     onApplySimplification: (trackId: String, simplifiedPoints: List<TrackPoint>, tolerance: Double) -> Unit,
@@ -93,8 +101,43 @@ fun TrackDetailDialog(
 ) {
     val context = LocalContext.current
 
+    // Données générales du trajet
     var trackName by remember(track) { mutableStateOf(track.name) }
     var isEditingName by remember { mutableStateOf(false) }
+
+    // Type : GC, Aérien, Façade
+    var selectedType by remember(track) { mutableStateOf(track.type.ifBlank { "GC" }) }
+
+    // État technique : Conforme, Non conforme
+    var selectedEtat by remember(track) { mutableStateOf(track.etat.ifBlank { "Conforme" }) }
+
+    // Champs spécifiques GC
+    // 1- Audit Conduites : Libres, Occupés, Bouchés
+    var conduitAudit by remember(track) { mutableStateOf(track.conduitAudit.ifBlank { "Libres" }) }
+
+    // 2- Type Conduites : PEHD, PVC, Autre
+    var conduitTypeChoice by remember(track) {
+        val t = track.conduitType
+        if (t == "PEHD" || t == "PVC") mutableStateOf(t)
+        else if (t.isNotBlank()) mutableStateOf("Autre")
+        else mutableStateOf("PEHD")
+    }
+    var customConduitType by remember(track) {
+        val t = track.conduitType
+        if (t != "PEHD" && t != "PVC" && t.isNotBlank()) mutableStateOf(t)
+        else mutableStateOf("")
+    }
+
+    // 3- Nombre Conduites
+    var conduitCount by remember(track) { mutableIntStateOf(track.conduitCount.coerceAtLeast(1)) }
+
+    // 4- Diamètre Conduites (mm) (choix multiple) : Ø 30, Ø 40, Ø 50, Ø 80, Ø 100, autre
+    val standardDiameters = listOf("Ø 30", "Ø 40", "Ø 50", "Ø 80", "Ø 100")
+    var selectedDiameters by remember(track) {
+        mutableStateOf(track.conduitDiameters.ifEmpty { listOf("Ø 40") }.toSet())
+    }
+    var customDiameterInput by remember { mutableStateOf("") }
+    var showAddCustomDiameter by remember { mutableStateOf(false) }
 
     var selectedTolerance by remember { mutableDoubleStateOf(5.0) } // Tolérance par défaut 5m
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -102,12 +145,34 @@ fun TrackDetailDialog(
     var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
 
+    val currentPoints = if (track.points.isNotEmpty()) track.points else track.rawPoints
+    val lengthMeters = track.totalDistanceMeters
+    val distKm = lengthMeters / 1000.0
+    val distStr = if (lengthMeters < 1000.0) "${lengthMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distKm)
+
+    fun buildUpdatedTrack(): StoredTrack {
+        val finalConduitType = if (conduitTypeChoice == "Autre") {
+            if (customConduitType.isNotBlank()) customConduitType.trim() else "Autre"
+        } else {
+            conduitTypeChoice
+        }
+        return track.copy(
+            name = trackName.trim().ifEmpty { track.name },
+            type = selectedType,
+            etat = selectedEtat,
+            conduitAudit = conduitAudit,
+            conduitType = finalConduitType,
+            conduitCount = conduitCount,
+            conduitDiameters = selectedDiameters.toList()
+        )
+    }
+
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
-            val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 48.8566
-            val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 2.3522
+            val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 34.0
+            val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 9.5375
             onAddTrackPhoto(track.id, tempCameraFile!!.absolutePath, photoLat, photoLon)
         } else {
             tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
@@ -120,14 +185,12 @@ fun TrackDetailDialog(
         if (uri != null) {
             val saved = PhotoStorageManager.saveImportedPhoto(context, track.id, uri)
             if (saved != null) {
-                val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 48.8566
-                val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 2.3522
+                val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 34.0
+                val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 9.5375
                 onAddTrackPhoto(track.id, saved, photoLat, photoLon)
             }
         }
     }
-
-    val currentPoints = if (track.points.isNotEmpty()) track.points else track.rawPoints
 
     // Calcul de l'aperçu RDP
     val previewSimplifiedPoints = remember(currentPoints, selectedTolerance) {
@@ -140,7 +203,10 @@ fun TrackDetailDialog(
     } else 0
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            onSaveTrack(buildUpdatedTrack())
+            onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -164,7 +230,7 @@ fun TrackDetailDialog(
                         imageVector = Icons.Default.Timeline,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
 
@@ -177,6 +243,7 @@ fun TrackDetailDialog(
                             trailingIcon = {
                                 IconButton(onClick = {
                                     onUpdateTrackName(track.id, trackName)
+                                    onSaveTrack(buildUpdatedTrack())
                                     isEditingName = false
                                 }) {
                                     Icon(Icons.Default.Save, contentDescription = "Sauvegarder", tint = MaterialTheme.colorScheme.primary)
@@ -187,7 +254,7 @@ fun TrackDetailDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = track.name,
+                                    text = trackName,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -200,14 +267,17 @@ fun TrackDetailDialog(
                                 }
                             }
                             Text(
-                                text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(track.startTime)),
+                                text = "Trajet FTTH • " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE).format(Date(track.startTime)),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = {
+                        onSaveTrack(buildUpdatedTrack())
+                        onDismiss()
+                    }) {
                         Icon(Icons.Default.Close, contentDescription = "Fermer")
                     }
                 }
@@ -219,16 +289,382 @@ fun TrackDetailDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val distKm = track.totalDistanceMeters / 1000.0
-                    val distStr = if (distKm < 1.0) "${track.totalDistanceMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distKm)
-                    MetricCard("Distance", distStr, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                    MetricCard("Longueur (Auto)", distStr, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
                     MetricCard("Sommets", "${currentPoints.size} pts", Color(0xFF16A34A), Modifier.weight(1f))
                     MetricCard("Photos", "${track.photos.size}", Color(0xFF0284C7), Modifier.weight(1f))
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // --- SECTION PHOTOS LE LONG DU TRAJET ---
+                // --- 1. TYPE DE TRAJET (GC, Aérien, Façade) ---
+                Text(
+                    text = "Type de trajet :",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val trackTypes = listOf("GC" to "GC (Génie Civil)", "Aérien" to "Aérien", "Façade" to "Façade")
+                    for ((typeKey, typeLabel) in trackTypes) {
+                        val isSelected = selectedType == typeKey
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                selectedType = typeKey
+                                onSaveTrack(buildUpdatedTrack().copy(type = typeKey))
+                            },
+                            label = { Text(typeLabel, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // --- 2. ÉTAT TECHNIQUE (Conforme, Non conforme) ---
+                Text(
+                    text = "État technique :",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isConforme = selectedEtat == "Conforme"
+                    FilterChip(
+                        selected = isConforme,
+                        onClick = {
+                            selectedEtat = "Conforme"
+                            onSaveTrack(buildUpdatedTrack().copy(etat = "Conforme"))
+                        },
+                        leadingIcon = {
+                            Surface(shape = CircleShape, color = Color(0xFF16A34A), modifier = Modifier.size(10.dp)) {}
+                        },
+                        label = { Text("Conforme", fontWeight = if (isConforme) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFDCFCE7),
+                            selectedLabelColor = Color(0xFF166534)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    val isNonConforme = selectedEtat == "Non conforme"
+                    FilterChip(
+                        selected = isNonConforme,
+                        onClick = {
+                            selectedEtat = "Non conforme"
+                            onSaveTrack(buildUpdatedTrack().copy(etat = "Non conforme"))
+                        },
+                        leadingIcon = {
+                            Surface(shape = CircleShape, color = Color(0xFFDC2626), modifier = Modifier.size(10.dp)) {}
+                        },
+                        label = { Text("Non conforme", fontWeight = if (isNonConforme) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFFEE2E2),
+                            selectedLabelColor = Color(0xFF991B1B)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- 3. CHAMPS SPÉCIFIQUES SELON TYPE DE TRAJET ---
+                if (selectedType == "GC") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Caractéristiques Génie Civil (GC)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 1. Audit Conduites (libres, occupés, bouchés)
+                            Text(text = "1. Audit Conduites :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf("Libres", "Occupés", "Bouchés").forEach { auditOpt ->
+                                    val isSelected = conduitAudit == auditOpt
+                                    val chipColor = when (auditOpt) {
+                                        "Libres" -> Color(0xFF16A34A)
+                                        "Occupés" -> Color(0xFF2563EB)
+                                        else -> Color(0xFFDC2626)
+                                    }
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            conduitAudit = auditOpt
+                                            onSaveTrack(buildUpdatedTrack().copy(conduitAudit = auditOpt))
+                                        },
+                                        label = { Text(auditOpt, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                        leadingIcon = {
+                                            Surface(shape = CircleShape, color = chipColor, modifier = Modifier.size(8.dp)) {}
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 2. Type Conduites (PEHD, PVC, Autre)
+                            Text(text = "2. Type Conduites :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf("PEHD", "PVC", "Autre").forEach { tOpt ->
+                                    val isSelected = conduitTypeChoice == tOpt
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            conduitTypeChoice = tOpt
+                                            onSaveTrack(buildUpdatedTrack())
+                                        },
+                                        label = { Text(tOpt, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            if (conduitTypeChoice == "Autre") {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = customConduitType,
+                                    onValueChange = {
+                                        customConduitType = it
+                                        onSaveTrack(buildUpdatedTrack())
+                                    },
+                                    label = { Text("Précisez le type de conduite (ex: Acier, Fonte, etc.)", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 3. Nombre Conduites
+                            Text(text = "3. Nombre Conduites :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (conduitCount > 1) {
+                                            conduitCount--
+                                            onSaveTrack(buildUpdatedTrack().copy(conduitCount = conduitCount))
+                                        }
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Moins", modifier = Modifier.size(16.dp))
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.width(60.dp).height(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(text = "$conduitCount", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        conduitCount++
+                                        onSaveTrack(buildUpdatedTrack().copy(conduitCount = conduitCount))
+                                    },
+                                    modifier = Modifier.size(36.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Plus", modifier = Modifier.size(16.dp))
+                                }
+
+                                Text(
+                                    text = if (conduitCount == 1) "1 conduite" else "$conduitCount conduites",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 4. Diamètre Conduites (mm) (choix multiple) : Ø 30, Ø 40, Ø 50, Ø 80, Ø 100, autre
+                            Text(text = "4. Diamètre Conduites (mm) (Choix multiple) :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                standardDiameters.forEach { dia ->
+                                    val isSelected = selectedDiameters.contains(dia)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            val newSet = selectedDiameters.toMutableSet()
+                                            if (isSelected) {
+                                                if (newSet.size > 1) newSet.remove(dia)
+                                            } else {
+                                                newSet.add(dia)
+                                            }
+                                            selectedDiameters = newSet
+                                            onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                        },
+                                        label = { Text(dia, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+
+                                // Diamètres personnalisés déjà saisis
+                                selectedDiameters.filter { it !in standardDiameters }.forEach { customDia ->
+                                    FilterChip(
+                                        selected = true,
+                                        onClick = {
+                                            val newSet = selectedDiameters.toMutableSet()
+                                            newSet.remove(customDia)
+                                            selectedDiameters = newSet
+                                            onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                        },
+                                        trailingIcon = { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                        label = { Text(customDia, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                                    )
+                                }
+
+                                // Bouton pour ajouter un diamètre personnalisé
+                                OutlinedButton(
+                                    onClick = { showAddCustomDiameter = !showAddCustomDiameter },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Autre", fontSize = 11.sp)
+                                }
+                            }
+
+                            if (showAddCustomDiameter) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = customDiameterInput,
+                                        onValueChange = { customDiameterInput = it },
+                                        label = { Text("Ex: Ø 63, Ø 110...", fontSize = 11.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            val trimmed = customDiameterInput.trim()
+                                            if (trimmed.isNotBlank()) {
+                                                val formatted = if (trimmed.startsWith("Ø")) trimmed else "Ø $trimmed"
+                                                val newSet = selectedDiameters.toMutableSet()
+                                                newSet.add(formatted)
+                                                selectedDiameters = newSet
+                                                customDiameterInput = ""
+                                                showAddCustomDiameter = false
+                                                onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                            }
+                                        },
+                                        modifier = Modifier.height(48.dp)
+                                    ) {
+                                        Text("Ajouter", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // 5. Longueur Conduite (récupérée automatique)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(text = "5. Longueur (Auto) :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer
+                                ) {
+                                    Text(
+                                        text = distStr,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Type Aérien ou Façade
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Caractéristiques Trajet ${selectedType}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // 1. Longueur automatique
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(text = "1. Longueur (Auto) :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer
+                                ) {
+                                    Text(
+                                        text = distStr,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- 4. SECTION PHOTOS LE LONG DU TRAJET ---
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
                     shape = RoundedCornerShape(12.dp)
@@ -252,7 +688,7 @@ fun TrackDetailDialog(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Dossier : Documents/Releve-Terrain/Photos/${track.id}/",
+                                    text = "Points bleus sur la carte aux coordonnées exactes",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -274,12 +710,13 @@ fun TrackDetailDialog(
                                             } catch (ignored: Exception) {}
                                         }
                                     },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = ButtonDefaults.TextButtonContentPadding
                                 ) {
                                     Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Photo", fontSize = 11.sp)
+                                    Text("Photo ici", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 OutlinedButton(
@@ -334,7 +771,7 @@ fun TrackDetailDialog(
                         } else {
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Prenez des photos le long du parcours : elles apparaissent sur la carte avec leurs coordonnées GPS.",
+                                text = "Prenez des photos le long du parcours : chaque photo est marquée par un point bleu sur la carte avec ses coordonnées GPS.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -344,14 +781,14 @@ fun TrackDetailDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // --- SECTION MODIFICATION MANUELLE & REDRESSEMENT ---
+                // --- 5. SECTION MODIFICATION MANUELLE & REDRESSEMENT ---
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "Ajustement & Modification du tracé",
+                            text = "Ajustement & Outils du tracé",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -364,6 +801,7 @@ fun TrackDetailDialog(
                             // Bouton Déplacer un sommet
                             OutlinedButton(
                                 onClick = {
+                                    onSaveTrack(buildUpdatedTrack())
                                     onStartMoveVertexMode(track)
                                     onDismiss()
                                 },
@@ -377,6 +815,7 @@ fun TrackDetailDialog(
                             // Bouton Redresser entre 2 sommets
                             Button(
                                 onClick = {
+                                    onSaveTrack(buildUpdatedTrack())
                                     onStartStraightenMode(track)
                                     onDismiss()
                                 },
@@ -393,7 +832,7 @@ fun TrackDetailDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // --- SECTION SIMPLIFICATION ANTI-BRUIT GPS ---
+                // --- 6. SECTION SIMPLIFICATION ANTI-BRUIT GPS ---
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(12.dp)
@@ -511,6 +950,21 @@ fun TrackDetailDialog(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Bouton principal d'enregistrement
+                Button(
+                    onClick = {
+                        onSaveTrack(buildUpdatedTrack())
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                ) {
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Enregistrer les modifications", fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Supprimer le trajet
                 if (showDeleteConfirm) {

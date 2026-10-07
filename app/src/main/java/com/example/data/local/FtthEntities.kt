@@ -107,11 +107,23 @@ data class SyncLogEntity(
     val details: String
 )
 
+enum class TrackType(val label: String) {
+    GC("GC"),
+    AERIEN("Aérien"),
+    FACADE("Façade")
+}
+
 @Entity(tableName = "gps_tracks")
 data class GpsTrackEntity(
     @PrimaryKey
     val id: String,
     val name: String,
+    val type: String = "GC", // GC, Aérien, Façade
+    val etat: String = "Conforme", // Conforme, Non conforme
+    val conduitAudit: String = "Libres", // Libres, Occupés, Bouchés
+    val conduitType: String = "PEHD", // PEHD, PVC, Autre
+    val conduitCount: Int = 1,
+    val conduitDiameters: String = "Ø 40",
     val startTime: Long = System.currentTimeMillis(),
     val endTime: Long? = null,
     val totalDistanceMeters: Double = 0.0,

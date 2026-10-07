@@ -109,9 +109,11 @@ fun OsmMapView(
     userLocation: GpsLocationData?,
     allTracks: List<StoredTrack>,
     activeTrackPoints: List<TrackPoint>,
+    activeTrack: StoredTrack? = null,
     selectedNode: FtthNodeEntity?,
     isManualTrackMode: Boolean,
     manualTrackPoints: List<TrackPoint>,
+    manualTrackPhotos: List<TrackPhoto> = emptyList(),
     pendingStakePosition: Pair<Double, Double>?,
     isStraightenMode: Boolean,
     selectedStraightenIndices: Pair<Int?, Int?>,
@@ -329,8 +331,15 @@ fun OsmMapView(
                     }
                     outlinePaint.strokeWidth = 8f
                     outlinePaint.isAntiAlias = true
-                    outlinePaint.color = if (track.isSimplified) android.graphics.Color.parseColor("#059669") else android.graphics.Color.parseColor("#7C3AED")
-                    title = "${track.name} (${String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)})"
+                    outlinePaint.color = when {
+                        track.etat == "Non conforme" -> android.graphics.Color.parseColor("#DC2626")
+                        track.type == "GC" -> android.graphics.Color.parseColor("#EA580C")
+                        track.type == "Aérien" -> android.graphics.Color.parseColor("#0284C7")
+                        track.type == "Façade" -> android.graphics.Color.parseColor("#8B5CF6")
+                        track.isSimplified -> android.graphics.Color.parseColor("#059669")
+                        else -> android.graphics.Color.parseColor("#7C3AED")
+                    }
+                    title = "${track.name} [${track.type}] (${String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)})"
                     setOnClickListener { _, _, _ ->
                         if (!isStraightenMode && !isMoveVertexMode) {
                             onTrackClick?.invoke(track)
@@ -382,7 +391,7 @@ fun OsmMapView(
                     }
                 }
 
-                // Photos le long du trajet
+                // Photos le long du trajet (marquées par un point bleu avec icône photo sur la carte)
                 for (pho in track.photos) {
                     val photoMarker = Marker(mapView).apply {
                         position = GeoPoint(pho.latitude, pho.longitude)
@@ -397,6 +406,24 @@ fun OsmMapView(
                     }
                     mapView.overlays.add(photoMarker)
                 }
+            }
+        }
+
+        // Photos de la trace active en cours d'enregistrement
+        if (activeTrack != null) {
+            for (pho in activeTrack.photos) {
+                val photoMarker = Marker(mapView).apply {
+                    position = GeoPoint(pho.latitude, pho.longitude)
+                    title = "Photo enregistrée sur trace active"
+                    snippet = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE).format(Date(pho.timestamp))
+                    icon = MapMarkerHelper.createTrackPhotoDrawable(context)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setOnMarkerClickListener { _, _ ->
+                        onTrackPhotoClick?.invoke(pho)
+                        true
+                    }
+                }
+                mapView.overlays.add(photoMarker)
             }
         }
 
@@ -434,6 +461,22 @@ fun OsmMapView(
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 }
                 mapView.overlays.add(ptMarker)
+            }
+
+            // Photos sur tracé manuel
+            for (pho in manualTrackPhotos) {
+                val photoMarker = Marker(mapView).apply {
+                    position = GeoPoint(pho.latitude, pho.longitude)
+                    title = "Photo sur tracé manuel"
+                    snippet = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE).format(Date(pho.timestamp))
+                    icon = MapMarkerHelper.createTrackPhotoDrawable(context)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setOnMarkerClickListener { _, _ ->
+                        onTrackPhotoClick?.invoke(pho)
+                        true
+                    }
+                }
+                mapView.overlays.add(photoMarker)
             }
         }
 

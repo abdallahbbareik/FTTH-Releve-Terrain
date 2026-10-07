@@ -127,11 +127,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val rawNodes by viewModel.rawNodes.collectAsStateWithLifecycle()
     val rawLinks by viewModel.rawLinks.collectAsStateWithLifecycle()
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
+    val currentProject by viewModel.currentProject.collectAsStateWithLifecycle()
+    val allProjects by viewModel.allProjects.collectAsStateWithLifecycle()
     val activeTrack by viewModel.activeTrack.collectAsStateWithLifecycle()
     val activeTrackPoints by viewModel.activeTrackPoints.collectAsStateWithLifecycle()
 
     val isManualTrackMode by viewModel.isManualTrackMode.collectAsStateWithLifecycle()
     val manualTrackPoints by viewModel.manualTrackPoints.collectAsStateWithLifecycle()
+    val manualTrackPhotos by viewModel.manualTrackPhotos.collectAsStateWithLifecycle()
 
     val isStraightenMode by viewModel.isStraightenMode.collectAsStateWithLifecycle()
     val selectedStraightenTrack by viewModel.selectedStraightenTrack.collectAsStateWithLifecycle()
@@ -157,6 +160,17 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val selectedLinkForDetail by viewModel.selectedLinkForDetail.collectAsStateWithLifecycle()
 
     var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
+    var tempManualPhotoFile by remember { mutableStateOf<File?>(null) }
+
+    val manualTrackPhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempManualPhotoFile != null && tempManualPhotoFile!!.exists() && tempManualPhotoFile!!.length() > 0) {
+            viewModel.addManualTrackPhoto(tempManualPhotoFile!!.absolutePath)
+        } else {
+            tempManualPhotoFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
+        }
+    }
 
     val filterState by viewModel.filterState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -229,6 +243,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
         topBar = {
             Column {
                 PiquetageTopBar(
+                    currentProject = currentProject,
                     searchQuery = searchQuery,
                     totalNodesCount = rawNodes.size,
                     matchingNodes = filteredNodes,
@@ -246,6 +261,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
                 // Bandeau d'état : Stockage Local Documents/Releve-Terrain
                 SyncStatusBanner(
+                    currentProject = currentProject,
                     nodesCount = rawNodes.size,
                     linksCount = rawLinks.size,
                     tracksCount = allTracks.size,
@@ -263,6 +279,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         totalNodesCount = rawNodes.size,
                         onStartAutoTrack = { viewModel.startAutoGpsTrack() },
                         onStopAutoTrack = { viewModel.stopAutoGpsTrack() },
+                        onCancelActiveTrack = { viewModel.cancelActiveTrack() },
+                        onAddActiveTrackPhoto = { path -> viewModel.addActiveTrackPhoto(path) },
                         onStartManualTrack = { viewModel.startManualTrack() },
                         onPinAtGpsLocation = { viewModel.requestStakingAtGpsLocation() },
                         onPinOnMapLocation = { viewModel.startPickOnMapMode() },
@@ -304,6 +322,17 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 if (isManualTrackMode) {
                     ManualTrackEditorBar(
                         points = manualTrackPoints,
+                        photos = manualTrackPhotos,
+                        onAddPhoto = {
+                            try {
+                                val file = com.example.data.photo.PhotoStorageManager.createNewPhotoFile(context, "MANUAL_TRACK")
+                                tempManualPhotoFile = file
+                                val uri = com.example.data.photo.PhotoStorageManager.getUriForPhotoFile(context, file)
+                                manualTrackPhotoLauncher.launch(uri)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
                         onUndoLastPoint = { viewModel.undoLastManualTrackPoint() },
                         onSaveTrack = { viewModel.saveManualTrack() },
                         onCancel = { viewModel.cancelManualTrack() }
@@ -357,9 +386,11 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 userLocation = userLocation,
                 allTracks = allTracks,
                 activeTrackPoints = activeTrackPoints,
+                activeTrack = activeTrack,
                 selectedNode = selectedNode,
                 isManualTrackMode = isManualTrackMode,
                 manualTrackPoints = manualTrackPoints,
+                manualTrackPhotos = manualTrackPhotos,
                 pendingStakePosition = pendingStakePosition,
                 isStraightenMode = isStraightenMode,
                 selectedStraightenIndices = selectedStraightenIndices,
@@ -476,39 +507,18 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
             }
 
-            // Dialogue Dossier Relevé-Terrain (Liste des Points, Trajets, Liaisons)
+            // Dialogue Dossier Relevé-Terrain (Projets, .points, .trajets, .liaisons)
             if (showProjectFolderDialog) {
                 ProjectFolderDialog(
+                    currentProject = currentProject,
+                    allProjects = allProjects,
                     nodes = rawNodes,
                     tracks = allTracks,
                     links = rawLinks,
-                    onSelectNode = {
-                        viewModel.dismissProjectFolder()
-                        viewModel.selectNode(it)
-                    },
-                    onDeleteNode = { viewModel.deleteNode(it) },
-                    onSelectTrack = {
-                        viewModel.dismissProjectFolder()
-                        viewModel.openTrackDetail(it)
-                    },
-                    onDeleteTrack = { viewModel.deleteTrack(it) },
-                    onSelectLink = {
-                        viewModel.dismissProjectFolder()
-                        viewModel.selectLinkForDetail(it)
-                    },
-                    onDeleteLink = { viewModel.deleteLink(it) },
-                    onExportZip = { viewModel.exportCompleteZipAndShare(context) },
-                    onExportKmz = { viewModel.exportKmzAndShare(context) },
-                    onDismiss = { viewModel.dismissProjectFolder() }
-                )
-            }
-
-            // Dossier Relevé-Terrain complet (Points, Trajets, Liaisons)
-            if (showProjectFolderDialog) {
-                ProjectFolderDialog(
-                    nodes = rawNodes,
-                    tracks = allTracks,
-                    links = rawLinks,
+                    onSwitchProject = { projName -> viewModel.switchProject(projName) },
+                    onCreateProject = { name, copy -> viewModel.createNewProject(name, copy) },
+                    onDeleteProject = { name -> viewModel.deleteProject(name) },
+                    onRenameProject = { old, new -> viewModel.renameProject(old, new) },
                     onSelectNode = {
                         viewModel.dismissProjectFolder()
                         viewModel.selectNode(it)
@@ -524,16 +534,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         viewModel.openLinkDetail(it)
                     },
                     onDeleteLink = { viewModel.deleteLink(it) },
-                    onExportZip = {
-                        viewModel.exportCompleteZip(context) { uri ->
-                            uri?.let { viewModel.shareExportFile(context, it, "application/zip") }
-                        }
-                    },
-                    onExportKmz = {
-                        viewModel.exportKmz(context) { uri ->
-                            uri?.let { viewModel.shareExportFile(context, it, "application/vnd.google-earth.kmz") }
-                        }
-                    },
+                    onExportZip = { viewModel.exportCompleteZipAndShare(context) },
+                    onExportKmz = { viewModel.exportKmzAndShare(context) },
                     onDismiss = { viewModel.dismissProjectFolder() }
                 )
             }
@@ -565,12 +567,13 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
             }
 
-            // Dialogue Fiche Trajet (Renommage, Photos sur trajet, Simplification RDP, Déplacement sommet)
+            // Dialogue Fiche Trajet (Renommage, Type, État, Conduites, Photos, Simplification RDP, Déplacement sommet)
             if (selectedTrackForDetail != null) {
                 TrackDetailDialog(
                     track = selectedTrackForDetail!!,
                     userLocation = userLocation,
                     onDismiss = { viewModel.closeTrackDetail() },
+                    onSaveTrack = { updated -> viewModel.saveTrack(updated) },
                     onUpdateTrackName = { id, name -> viewModel.updateTrackName(id, name) },
                     onAddTrackPhoto = { id, path, lat, lon -> viewModel.addTrackPhoto(id, path, lat, lon) },
                     onDeleteTrackPhoto = { id, photoId -> viewModel.deleteTrackPhoto(id, photoId) },
