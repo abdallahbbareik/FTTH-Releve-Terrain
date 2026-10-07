@@ -169,6 +169,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _mapFocusTarget = MutableStateFlow<Pair<Double, Double>?>(null)
+    val mapFocusTarget: StateFlow<Pair<Double, Double>?> = _mapFocusTarget.asStateFlow()
+
     private val _activeMapLayer = MutableStateFlow(MapLayerType.CADASTRE)
     val activeMapLayer: StateFlow<MapLayerType> = _activeMapLayer.asStateFlow()
 
@@ -277,7 +280,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 list.add(0, node)
             }
 
-            var createdAutoBoitierName: String? = null
+            var createdAutoBoitier: FtthNodeEntity? = null
 
             // Si Boîtier FTTH = Oui et le nœud parent n'est pas déjà un Boîtier :
             if (node.hasBoitierFtth && node.type != FtthNodeType.BOITIER) {
@@ -292,12 +295,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 val existingIdx = list.indexOfFirst { it.id == boitierId }
                 if (existingIdx >= 0) {
                     val existing = list[existingIdx]
-                    list[existingIdx] = existing.copy(
+                    val updated = existing.copy(
                         latitude = node.latitude,
                         longitude = node.longitude,
                         boitierSupport = support,
                         address = node.address
                     )
+                    list[existingIdx] = updated
+                    createdAutoBoitier = updated
                 } else {
                     val autoBoitier = FtthNodeEntity(
                         id = boitierId,
@@ -316,22 +321,24 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                         updatedAt = System.currentTimeMillis()
                     )
                     list.add(0, autoBoitier)
-                    createdAutoBoitierName = boitierName
+                    createdAutoBoitier = autoBoitier
                 }
             }
 
             _rawNodes.value = list
             docStorage.saveNodes(list)
-            if (closeSheet) {
+
+            if (createdAutoBoitier != null) {
+                // Ouverture immédiate du boîtier créé en modification pour permettre à l'utilisateur de saisir ses informations
+                _selectedNode.value = createdAutoBoitier
+                _mapFocusTarget.value = Pair(createdAutoBoitier.latitude, createdAutoBoitier.longitude)
+                val supportName = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
+                _bannerMessage.value = "Nœud ${node.id} enregistré. Boîtier ${createdAutoBoitier.id} créé et ouvert en modification ($supportName) : complétez ses spécifications."
+            } else if (closeSheet) {
                 _selectedNode.value = null
+                _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
             } else {
                 _selectedNode.value = node
-            }
-
-            if (createdAutoBoitierName != null) {
-                val supportName = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
-                _bannerMessage.value = "Nœud ${node.id} enregistré. Boîtier $createdAutoBoitierName créé automatiquement sur son support ($supportName). Pensez à le compléter !"
-            } else {
                 _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
             }
         }
@@ -867,7 +874,28 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setFilterState(state: MapFilterState) { _filterState.value = state }
-    fun updateSearchQuery(query: String) { _searchQuery.value = query }
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            val exactMatch = _rawNodes.value.firstOrNull { it.id.equals(trimmed, ignoreCase = true) }
+            if (exactMatch != null) {
+                _mapFocusTarget.value = Pair(exactMatch.latitude, exactMatch.longitude)
+                _bannerMessage.value = "Entité ${exactMatch.id} trouvée : centrage et zoom sur la carte"
+            }
+        }
+    }
+
+    fun zoomAndFocusOnNode(node: FtthNodeEntity) {
+        _mapFocusTarget.value = Pair(node.latitude, node.longitude)
+        _selectedNode.value = node
+        _bannerMessage.value = "Zoom sur ${node.id} (${node.name})"
+    }
+
+    fun clearMapFocusTarget() {
+        _mapFocusTarget.value = null
+    }
+
     fun setMapLayer(layer: MapLayerType) { _activeMapLayer.value = layer }
     fun openFilterSheet() { _showFilterSheet.value = true }
     fun dismissFilterSheet() { _showFilterSheet.value = false }

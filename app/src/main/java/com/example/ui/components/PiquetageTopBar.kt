@@ -52,12 +52,22 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.TelecomCyan
 import com.example.ui.theme.TelecomNavy
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.text.TextStyle
+import com.example.data.local.FtthNodeEntity
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PiquetageTopBar(
     searchQuery: String,
     totalNodesCount: Int,
+    matchingNodes: List<FtthNodeEntity> = emptyList(),
     onSearchQueryChange: (String) -> Unit,
+    onSelectNode: (FtthNodeEntity) -> Unit = {},
     onOpenFilters: () -> Unit,
     onOpenSyncLogs: () -> Unit,
     onOpenProjectFolder: () -> Unit = onOpenSyncLogs,
@@ -70,7 +80,7 @@ fun PiquetageTopBar(
     var isSearchActive by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         TopAppBar(
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = TelecomNavy,
@@ -82,12 +92,29 @@ fun PiquetageTopBar(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = onSearchQueryChange,
-                        placeholder = { Text("Rechercher nœud, adresse, réf...", color = Color(0xFFA0AEC0), fontSize = 13.sp) },
+                        placeholder = { Text("Réf (POT-101...), nom, adresse...", color = Color(0xFF94A3B8), fontSize = 12.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .height(48.dp)
                             .testTag("search_nodes_input"),
                         singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = TelecomCyan,
+                            focusedBorderColor = TelecomCyan,
+                            unfocusedBorderColor = Color(0xFF64748B),
+                            focusedContainerColor = Color(0xFF1E293B),
+                            unfocusedContainerColor = Color(0xFF1E293B),
+                            focusedPlaceholderColor = Color(0xFF94A3B8),
+                            unfocusedPlaceholderColor = Color(0xFF94A3B8)
+                        ),
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { onSearchQueryChange("") }) {
@@ -226,5 +253,113 @@ fun PiquetageTopBar(
                 }
             }
         )
+
+        // Liste déroulante des résultats de recherche pour zoomer directement sur la référence
+        AnimatedVisibility(visible = isSearchActive && searchQuery.isNotBlank()) {
+            Surface(
+                color = Color(0xFF0F172A),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = 8.dp
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Résultats (${matchingNodes.size}) : touchez pour zoomer",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TelecomCyan,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { onSearchQueryChange("") },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Fermer recherche", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    if (matchingNodes.isEmpty()) {
+                        Text(
+                            text = "Aucune entité trouvée pour \"$searchQuery\"",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF94A3B8),
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.height(minOf(200.dp, (matchingNodes.size * 52).dp))) {
+                            items(matchingNodes.take(10)) { node ->
+                                val nodeCol = FtthNodeVisuals.getNodeColor(node.type)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSelectNode(node)
+                                            isSearchActive = false
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(nodeCol),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = FtthNodeVisuals.getNodeIcon(node.type),
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = node.id,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color.White
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = node.name,
+                                                fontSize = 12.sp,
+                                                color = Color(0xFFCBD5E1),
+                                                maxLines = 1
+                                            )
+                                        }
+                                        if (node.address.isNotBlank()) {
+                                            Text(
+                                                text = node.address,
+                                                fontSize = 10.sp,
+                                                color = Color(0xFF94A3B8),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Place,
+                                        contentDescription = "Zoomer sur la carte",
+                                        tint = TelecomCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                HorizontalDivider(color = Color(0xFF1E293B))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

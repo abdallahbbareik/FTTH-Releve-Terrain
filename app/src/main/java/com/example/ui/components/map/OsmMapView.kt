@@ -135,6 +135,8 @@ fun OsmMapView(
     onMapClickForMove: ((latitude: Double, longitude: Double) -> Unit)? = null,
     onSelectVertexToMove: ((index: Int) -> Unit)? = null,
     onTrackPhotoClick: ((TrackPhoto) -> Unit)? = null,
+    mapFocusTarget: Pair<Double, Double>? = null,
+    onMapFocusTargetConsumed: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -188,6 +190,21 @@ fun OsmMapView(
             hasAutoCenteredOnGps = true
             mapView.controller.setZoom(16.5)
             mapView.controller.animateTo(GeoPoint(userLocation.latitude, userLocation.longitude))
+        }
+    }
+
+    LaunchedEffect(mapFocusTarget) {
+        if (mapFocusTarget != null) {
+            mapView.controller.setZoom(18.5)
+            mapView.controller.animateTo(GeoPoint(mapFocusTarget.first, mapFocusTarget.second))
+            onMapFocusTargetConsumed?.invoke()
+        }
+    }
+
+    LaunchedEffect(selectedNode) {
+        if (selectedNode != null) {
+            mapView.controller.setZoom(18.5)
+            mapView.controller.animateTo(GeoPoint(selectedNode.latitude, selectedNode.longitude))
         }
     }
 

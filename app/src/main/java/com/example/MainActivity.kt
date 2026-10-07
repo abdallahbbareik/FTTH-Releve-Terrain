@@ -161,6 +161,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val filterState by viewModel.filterState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val activeMapLayer by viewModel.activeMapLayer.collectAsStateWithLifecycle()
+    val mapFocusTarget by viewModel.mapFocusTarget.collectAsStateWithLifecycle()
 
     val isCableDrawingMode by viewModel.isCableDrawingMode.collectAsStateWithLifecycle()
     val cableFirstNode by viewModel.cableFirstNode.collectAsStateWithLifecycle()
@@ -230,7 +231,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 PiquetageTopBar(
                     searchQuery = searchQuery,
                     totalNodesCount = rawNodes.size,
+                    matchingNodes = filteredNodes,
                     onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                    onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
                     onOpenFilters = { viewModel.openFilterSheet() },
                     onOpenSyncLogs = { viewModel.openSyncLogSheet() },
                     onOpenProjectFolder = { viewModel.openProjectFolder() },
@@ -383,6 +386,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 },
                 onSelectVertexToMove = { idx -> viewModel.selectVertexToMove(idx) },
                 onTrackPhotoClick = { photo -> viewingTrackPhoto = photo },
+                mapFocusTarget = mapFocusTarget,
+                onMapFocusTargetConsumed = { viewModel.clearMapFocusTarget() },
                 modifier = Modifier.fillMaxSize()
             )
 
