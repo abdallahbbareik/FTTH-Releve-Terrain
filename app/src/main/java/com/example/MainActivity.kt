@@ -125,6 +125,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     }
 
     val filteredNodes by viewModel.filteredNodes.collectAsStateWithLifecycle()
+    val filteredLinks by viewModel.filteredLinks.collectAsStateWithLifecycle()
+    val filteredTracks by viewModel.filteredTracks.collectAsStateWithLifecycle()
     val rawNodes by viewModel.rawNodes.collectAsStateWithLifecycle()
     val rawLinks by viewModel.rawLinks.collectAsStateWithLifecycle()
     val allTracks by viewModel.allTracks.collectAsStateWithLifecycle()
@@ -390,9 +392,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             // Vue Cartographique OsmDroid
             OsmMapView(
                 nodes = filteredNodes,
-                links = rawLinks,
+                links = filteredLinks,
                 userLocation = userLocation,
-                allTracks = allTracks,
+                allTracks = filteredTracks,
                 activeTrackPoints = activeTrackPoints,
                 activeTrack = activeTrack,
                 selectedNode = selectedNode,

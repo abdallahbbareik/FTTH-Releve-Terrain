@@ -60,6 +60,7 @@ fun FilterLayerSheet(
     var showImmeubles by remember(filterState) { mutableStateOf(filterState.showImmeubles) }
     var showVillas by remember(filterState) { mutableStateOf(filterState.showVillas) }
     var showCables by remember(filterState) { mutableStateOf(filterState.showCables) }
+    var showTracks by remember(filterState) { mutableStateOf(filterState.showTracks) }
     var selectedStatus by remember(filterState) { mutableStateOf(filterState.selectedStatus) }
     var selectedConformity by remember(filterState) { mutableStateOf(filterState.selectedConformity) }
 
@@ -100,7 +101,7 @@ fun FilterLayerSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Statut Filter (Existant, À poser, À remplacer, À déposer)
+            // Statut Filter (Tous, À poser, À remplacer)
             Text(
                 text = "Filtrer par statut :",
                 style = MaterialTheme.typography.labelMedium,
@@ -114,13 +115,16 @@ fun FilterLayerSheet(
                 FilterChip(
                     selected = selectedStatus == null,
                     onClick = { selectedStatus = null },
-                    label = { Text("Tous", fontSize = 11.sp) }
+                    label = { Text("Tous", fontSize = 11.sp) },
+                    modifier = Modifier.testTag("filter_status_all")
                 )
-                NodeStatus.values().forEach { st ->
+                val targetStatuses = listOf(NodeStatus.A_POSER, NodeStatus.A_REMPLACER)
+                targetStatuses.forEach { st ->
                     FilterChip(
                         selected = selectedStatus == st,
                         onClick = { selectedStatus = if (selectedStatus == st) null else st },
-                        label = { Text(st.label, fontSize = 11.sp) }
+                        label = { Text(st.label, fontSize = 11.sp) },
+                        modifier = Modifier.testTag("filter_status_${st.name.lowercase()}")
                     )
                 }
             }
@@ -156,9 +160,9 @@ fun FilterLayerSheet(
             HorizontalDivider()
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Node types checkboxes
+            // Entités visibles sur la carte (incluant infra linéaire)
             Text(
-                text = "Équipements visibles sur la carte :",
+                text = "Entités visibles sur la carte :",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -171,6 +175,7 @@ fun FilterLayerSheet(
             FilterCheckboxItem("Immeubles collectifs", showImmeubles, FtthNodeVisuals.getNodeColor(FtthNodeType.IMMEUBLE)) { showImmeubles = it }
             FilterCheckboxItem("Villas & Pavillons", showVillas, FtthNodeVisuals.getNodeColor(FtthNodeType.VILLA)) { showVillas = it }
             FilterCheckboxItem("Câbles fibres optiques", showCables, MaterialTheme.colorScheme.primary) { showCables = it }
+            FilterCheckboxItem("Infra linéaire (Tracés)", showTracks, androidx.compose.ui.graphics.Color(0xFF0284C7)) { showTracks = it }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -188,6 +193,7 @@ fun FilterLayerSheet(
                         showImmeubles = true
                         showVillas = true
                         showCables = true
+                        showTracks = true
                         selectedStatus = null
                         selectedConformity = null
                     },
@@ -207,6 +213,7 @@ fun FilterLayerSheet(
                                 showImmeubles = showImmeubles,
                                 showVillas = showVillas,
                                 showCables = showCables,
+                                showTracks = showTracks,
                                 selectedStatus = selectedStatus,
                                 selectedConformity = selectedConformity
                             )

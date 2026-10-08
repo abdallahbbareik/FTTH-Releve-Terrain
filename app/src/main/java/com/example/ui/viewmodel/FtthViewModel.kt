@@ -45,6 +45,7 @@ data class MapFilterState(
     val showImmeubles: Boolean = true,
     val showVillas: Boolean = true,
     val showCables: Boolean = true,
+    val showTracks: Boolean = true,
     val selectedStatus: NodeStatus? = null,
     val selectedConformity: NodeConformity? = null
 )
@@ -217,6 +218,20 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
             matchesType && matchesStatus && matchesConformity && matchesQuery
         }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val filteredLinks: StateFlow<List<FtthLinkEntity>> = combine(
+        rawLinks,
+        _filterState
+    ) { links, filters ->
+        if (filters.showCables) links else emptyList()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val filteredTracks: StateFlow<List<StoredTrack>> = combine(
+        allTracks,
+        _filterState
+    ) { tracks, filters ->
+        if (filters.showTracks) tracks else emptyList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {

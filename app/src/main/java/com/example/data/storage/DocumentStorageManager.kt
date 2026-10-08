@@ -311,24 +311,15 @@ class DocumentStorageManager(private val context: Context) {
     }
 
     /**
-     * Vérifie et restaure le projet par défaut ou existant lors d'un lancement ou après réinstallation
+     * Vérifie et restaure le projet actif sauvegardé lors du démarrage
      */
     private fun ensureDefaultProjectExists() {
-        val projects = listAllProjects()
-        if (projects.isNotEmpty()) {
-            val existing = projects.firstOrNull { it.name == _currentProject }
-            if (existing == null) {
-                // Trouver le premier projet qui possède des données, sinon le premier de la liste
-                val projectWithData = projects.firstOrNull { it.nodesCount > 0 || it.tracksCount > 0 || it.linksCount > 0 }
-                    ?: projects.first()
-                _currentProject = projectWithData.name
-                prefs.edit().putString("active_project_name", _currentProject).apply()
-            }
+        val saved = prefs.getString("active_project_name", null)
+        if (!saved.isNullOrBlank()) {
+            _currentProject = sanitizeProjectName(saved)
         } else {
-            // Aucun projet sur le disque : préparer projet01 sans écraser de fichiers
             _currentProject = "projet01"
             prefs.edit().putString("active_project_name", "projet01").apply()
-            ensureProjectDirectoriesExist("projet01")
         }
     }
 
@@ -440,15 +431,36 @@ class DocumentStorageManager(private val context: Context) {
 
         val result = mutableListOf<ProjectInfo>()
         for ((name, lastMod) in projectMap) {
-            val nodes = loadNodesForProject(name)
-            val tracks = loadTracksForProject(name)
-            val links = loadLinksForProject(name)
+            var nCount = 0
+            var tCount = 0
+            var lCount = 0
+
+            val projDir = File(baseDir, name)
+            val nf = File(projDir, "noeuds.json")
+            if (nf.exists() && nf.length() > 2) {
+                try { nCount = JSONArray(nf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
+            }
+            val tf = File(projDir, "infra_lineaire.json")
+            if (tf.exists() && tf.length() > 2) {
+                try { tCount = JSONArray(tf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
+            }
+            val lf = File(projDir, "cables.json")
+            if (lf.exists() && lf.length() > 2) {
+                try { lCount = JSONArray(lf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
+            }
+
+            if (name == _currentProject && nCount == 0 && tCount == 0 && lCount == 0) {
+                nCount = loadNodesForProject(name).size
+                tCount = loadTracksForProject(name).size
+                lCount = loadLinksForProject(name).size
+            }
+
             result.add(
                 ProjectInfo(
                     name = name,
-                    nodesCount = nodes.size,
-                    tracksCount = tracks.size,
-                    linksCount = links.size,
+                    nodesCount = nCount,
+                    tracksCount = tCount,
+                    linksCount = lCount,
                     lastModified = lastMod,
                     isCurrent = name == _currentProject
                 )
