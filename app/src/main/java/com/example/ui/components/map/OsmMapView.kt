@@ -138,6 +138,11 @@ fun OsmMapView(
     onMapClickForMove: ((latitude: Double, longitude: Double) -> Unit)? = null,
     onSelectVertexToMove: ((index: Int) -> Unit)? = null,
     onTrackPhotoClick: ((TrackPhoto) -> Unit)? = null,
+    editingCableRouteLink: FtthLinkEntity? = null,
+    editingCablePoints: List<Pair<Double, Double>> = emptyList(),
+    onAddCableVertex: ((latitude: Double, longitude: Double) -> Unit)? = null,
+    onUpdateCableVertex: ((index: Int, latitude: Double, longitude: Double) -> Unit)? = null,
+    onRemoveCableVertex: ((index: Int) -> Unit)? = null,
     mapFocusTarget: Pair<Double, Double>? = null,
     onMapFocusTargetConsumed: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -245,12 +250,14 @@ fun OsmMapView(
     val currentOnManualTrackAddPoint by rememberUpdatedState(onManualTrackAddPoint)
     val currentOnUpdateStakingPosition by rememberUpdatedState(onUpdateStakingPosition)
     val currentOnMapLongClick by rememberUpdatedState(onMapLongClick)
+    val currentEditingCableRouteLink by rememberUpdatedState(editingCableRouteLink)
+    val currentOnAddCableVertex by rememberUpdatedState(onAddCableVertex)
 
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode
+        isPickOnMapMode, editingCableRouteLink, editingCablePoints
     ) {
         mapView.overlays.clear()
 
@@ -265,6 +272,10 @@ fun OsmMapView(
         val eventsReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null) {
+                    if (currentEditingCableRouteLink != null) {
+                        currentOnAddCableVertex?.invoke(p.latitude, p.longitude)
+                        return true
+                    }
                     if (currentMovingNode != null || (currentIsMoveVertexMode && currentMovingVertexIndex != null)) {
                         currentOnMapClickForMove?.invoke(p.latitude, p.longitude)
                         return true
@@ -286,7 +297,7 @@ fun OsmMapView(
             }
 
             override fun longPressHelper(p: GeoPoint?): Boolean {
-                if (p != null && !currentIsManualTrackMode && currentMovingNode == null && !currentIsMoveVertexMode) {
+                if (p != null && !currentIsManualTrackMode && currentMovingNode == null && !currentIsMoveVertexMode && currentEditingCableRouteLink == null) {
                     currentOnMapLongClick(p.latitude, p.longitude)
                     return true
                 }
@@ -306,15 +317,22 @@ fun OsmMapView(
                 val polyline = Polyline(mapView).apply {
                     addPoint(GeoPoint(from.latitude, from.longitude))
 
-                    val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
-                    if (assocTrack != null) {
-                        val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
-                        if (pts.isNotEmpty()) {
-                            val distStart = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.first().latitude, pts.first().longitude)
-                            val distEnd = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.last().latitude, pts.last().longitude)
-                            val orderedPts = if (distStart > distEnd) pts.reversed() else pts
-                            for (pt in orderedPts) {
-                                addPoint(GeoPoint(pt.latitude, pt.longitude))
+                    val interPts = TrackGeometryHelper.parseCablePoints(link.intermediatePoints)
+                    if (interPts.isNotEmpty()) {
+                        for (pt in interPts) {
+                            addPoint(GeoPoint(pt.first, pt.second))
+                        }
+                    } else {
+                        val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
+                        if (assocTrack != null) {
+                            val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
+                            if (pts.isNotEmpty()) {
+                                val distStart = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.first().latitude, pts.first().longitude)
+                                val distEnd = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.last().latitude, pts.last().longitude)
+                                val orderedPts = if (distStart > distEnd) pts.reversed() else pts
+                                for (pt in orderedPts) {
+                                    addPoint(GeoPoint(pt.latitude, pt.longitude))
+                                }
                             }
                         }
                     }
@@ -329,11 +347,58 @@ fun OsmMapView(
                     }
                     title = "${link.id} (${link.capacityFO} FO - ${link.cableType})"
                     setOnClickListener { _, _, _ ->
-                        onLinkClick?.invoke(link)
-                        true
+                        if (editingCableRouteLink == null) {
+                            onLinkClick?.invoke(link)
+                            true
+                        } else false
                     }
                 }
                 mapView.overlays.add(polyline)
+            }
+        }
+
+        // Overlay Mode Modification du Tracé Non-Linéaire de Câble (Souterrain / Façade)
+        if (editingCableRouteLink != null) {
+            val fromNode = nodesMap[editingCableRouteLink.fromNodeId]
+            val toNode = nodesMap[editingCableRouteLink.toNodeId]
+            if (fromNode != null && toNode != null) {
+                val routePolyline = Polyline(mapView).apply {
+                    addPoint(GeoPoint(fromNode.latitude, fromNode.longitude))
+                    for (pt in editingCablePoints) {
+                        addPoint(GeoPoint(pt.first, pt.second))
+                    }
+                    addPoint(GeoPoint(toNode.latitude, toNode.longitude))
+                    outlinePaint.strokeWidth = 10f
+                    outlinePaint.isAntiAlias = true
+                    outlinePaint.color = android.graphics.Color.parseColor("#EAB308")
+                    title = "Tracé du câble ${editingCableRouteLink.id} en cours d'édition"
+                }
+                mapView.overlays.add(routePolyline)
+
+                for ((idx, pt) in editingCablePoints.withIndex()) {
+                    val vertexMarker = Marker(mapView).apply {
+                        position = GeoPoint(pt.first, pt.second)
+                        title = "Sommet #${idx + 1}"
+                        snippet = "Glissez avec le doigt pour modifier le tracé"
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, true)
+                        isDraggable = true
+                        setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                            override fun onMarkerDragStart(marker: Marker?) {}
+                            override fun onMarkerDrag(marker: Marker?) {
+                                marker?.position?.let { gp ->
+                                    onUpdateCableVertex?.invoke(idx, gp.latitude, gp.longitude)
+                                }
+                            }
+                            override fun onMarkerDragEnd(marker: Marker?) {
+                                marker?.position?.let { gp ->
+                                    onUpdateCableVertex?.invoke(idx, gp.latitude, gp.longitude)
+                                }
+                            }
+                        })
+                    }
+                    mapView.overlays.add(vertexMarker)
+                }
             }
         }
 

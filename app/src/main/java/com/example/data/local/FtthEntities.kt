@@ -94,7 +94,8 @@ data class FtthLinkEntity(
     val lengthMeters: Double = 45.0,
     val status: NodeStatus = NodeStatus.EXISTANT,
     val updatedAt: Long = System.currentTimeMillis(),
-    val associatedTrackId: String = "" // Id du tracé / infra_lineaire (GC / Façade / Aérien) emprunté pour cheminement non-linéaire
+    val associatedTrackId: String = "", // Id du tracé / infra_lineaire (GC / Façade / Aérien) emprunté
+    val intermediatePoints: String = "" // Points intermédiaires du câble (JSON Array) pour tracé non-linéaire (Souterrain / Façade)
 )
 
 @Entity(tableName = "sync_logs")

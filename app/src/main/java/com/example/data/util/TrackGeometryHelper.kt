@@ -2,6 +2,8 @@ package com.example.data.util
 
 import android.location.Location
 import com.example.data.storage.TrackPoint
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -109,5 +111,55 @@ object TrackGeometryHelper {
         }
 
         return result
+    }
+
+    fun parseCablePoints(jsonStr: String): List<Pair<Double, Double>> {
+        if (jsonStr.isBlank()) return emptyList()
+        val list = mutableListOf<Pair<Double, Double>>()
+        try {
+            val jsonArray = JSONArray(jsonStr)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val lat = obj.optDouble("lat", 0.0)
+                val lng = obj.optDouble("lng", 0.0)
+                if (lat != 0.0 || lng != 0.0) {
+                    list.add(Pair(lat, lng))
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun serializeCablePoints(points: List<Pair<Double, Double>>): String {
+        if (points.isEmpty()) return ""
+        val jsonArray = JSONArray()
+        for (pt in points) {
+            val obj = JSONObject().apply {
+                put("lat", pt.first)
+                put("lng", pt.second)
+            }
+            jsonArray.put(obj)
+        }
+        return jsonArray.toString()
+    }
+
+    fun computeCableLengthMeters(
+        fromLat: Double, fromLng: Double,
+        intermediatePoints: List<Pair<Double, Double>>,
+        toLat: Double, toLng: Double
+    ): Double {
+        var total = 0.0
+        var currLat = fromLat
+        var currLng = fromLng
+
+        for (pt in intermediatePoints) {
+            total += calculateDistanceMeters(currLat, currLng, pt.first, pt.second)
+            currLat = pt.first
+            currLng = pt.second
+        }
+        total += calculateDistanceMeters(currLat, currLng, toLat, toLng)
+        return total
     }
 }

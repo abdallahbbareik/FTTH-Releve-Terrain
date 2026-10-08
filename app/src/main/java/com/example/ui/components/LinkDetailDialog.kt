@@ -55,7 +55,8 @@ fun LinkDetailDialog(
     availableTracks: List<StoredTrack> = emptyList(),
     onDismiss: () -> Unit,
     onSaveLink: (FtthLinkEntity) -> Unit,
-    onDeleteLink: (String) -> Unit
+    onDeleteLink: (String) -> Unit,
+    onEditRoute: ((FtthLinkEntity) -> Unit)? = null
 ) {
     var cableType by remember(link) { mutableStateOf(link.cableType) }
     var installationType by remember(link) { mutableStateOf(link.installationType) }
@@ -225,6 +226,67 @@ fun LinkDetailDialog(
                             label = { Text("${trk.name} (${trk.type})") }
                         )
                     }
+                }
+
+                // Option : Modifier le tracé (Création de sommets et glissement sur la carte) pour Souterrain & Façade
+                val isNonLinearSupported = installationType.equals("souterrain", ignoreCase = true) ||
+                        installationType.equals("gc", ignoreCase = true) ||
+                        installationType.equals("façade", ignoreCase = true)
+
+                if (isNonLinearSupported) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Tracé non-linéaire (Souterrain / Façade)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Créez des sommets et ajustez le parcours directement avec le doigt sur la carte.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    val currentLinkState = link.copy(
+                                        cableType = cableType,
+                                        installationType = installationType,
+                                        capacityFO = capacityFO,
+                                        associatedTrackId = associatedTrackId
+                                    )
+                                    onEditRoute?.invoke(currentLinkState)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("edit_cable_route_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.AltRoute,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Modifier le tracé sur la carte", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Note : Le mode Aérien conserve un tracé direct en ligne droite. Choisissez Souterrain ou Façade pour un tracé non-linéaire.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

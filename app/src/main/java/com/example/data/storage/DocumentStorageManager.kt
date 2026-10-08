@@ -1112,15 +1112,22 @@ class DocumentStorageManager(private val context: Context) {
                         val coords = JSONArray()
                         coords.put(JSONArray().put(n1.longitude).put(n1.latitude))
 
-                        val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
-                        if (assocTrack != null) {
-                            val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
-                            if (pts.isNotEmpty()) {
-                                val distStart = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.first().latitude, pts.first().longitude)
-                                val distEnd = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.last().latitude, pts.last().longitude)
-                                val orderedPts = if (distStart > distEnd) pts.reversed() else pts
-                                for (pt in orderedPts) {
-                                    coords.put(JSONArray().put(pt.longitude).put(pt.latitude))
+                        val intermediatePts = TrackGeometryHelper.parseCablePoints(link.intermediatePoints)
+                        if (intermediatePts.isNotEmpty()) {
+                            for (pt in intermediatePts) {
+                                coords.put(JSONArray().put(pt.second).put(pt.first))
+                            }
+                        } else {
+                            val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
+                            if (assocTrack != null) {
+                                val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
+                                if (pts.isNotEmpty()) {
+                                    val distStart = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.first().latitude, pts.first().longitude)
+                                    val distEnd = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.last().latitude, pts.last().longitude)
+                                    val orderedPts = if (distStart > distEnd) pts.reversed() else pts
+                                    for (pt in orderedPts) {
+                                        coords.put(JSONArray().put(pt.longitude).put(pt.latitude))
+                                    }
                                 }
                             }
                         }
@@ -1349,6 +1356,7 @@ class DocumentStorageManager(private val context: Context) {
         put("status", link.status.name)
         put("updatedAt", link.updatedAt)
         put("associatedTrackId", link.associatedTrackId)
+        put("intermediatePoints", link.intermediatePoints)
     }
 
     private fun linkFromJson(json: JSONObject): FtthLinkEntity {
@@ -1364,7 +1372,8 @@ class DocumentStorageManager(private val context: Context) {
             lengthMeters = json.optDouble("lengthMeters", 0.0),
             status = status,
             updatedAt = json.optLong("updatedAt", System.currentTimeMillis()),
-            associatedTrackId = json.optString("associatedTrackId", "")
+            associatedTrackId = json.optString("associatedTrackId", ""),
+            intermediatePoints = json.optString("intermediatePoints", "")
         )
     }
 }
