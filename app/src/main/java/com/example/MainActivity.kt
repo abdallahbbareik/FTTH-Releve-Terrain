@@ -200,6 +200,13 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
 
+    LaunchedEffect(bannerMessage) {
+        if (bannerMessage != null) {
+            kotlinx.coroutines.delay(2000L)
+            viewModel.dismissBanner()
+        }
+    }
+
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
                 movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||

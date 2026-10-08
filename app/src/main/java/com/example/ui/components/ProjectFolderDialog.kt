@@ -44,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -217,7 +218,11 @@ fun ProjectFolderDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Onglets de navigation : Projets / Nœuds / Infra_lineaire / Câbles
-                TabRow(selectedTabIndex = selectedTab) {
+                ScrollableTabRow(
+                    selectedTabIndex = selectedTab,
+                    edgePadding = 0.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
@@ -247,7 +252,7 @@ fun ProjectFolderDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Timeline, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Infra_lineaire (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
+                                Text("Infra_lineaire (${tracks.size})", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                             }
                         }
                     )

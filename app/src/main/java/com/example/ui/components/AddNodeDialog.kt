@@ -456,14 +456,22 @@ fun AddNodeDialog(
                 // Champs spécifiques
                 when (selectedType) {
                     FtthNodeType.POTEAU -> {
-                        Text(text = "Nature :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
-                                FilterChip(
-                                    selected = poleNature.equals(nat, ignoreCase = true),
-                                    onClick = { poleNature = nat },
-                                    label = { Text(lbl, fontSize = 11.sp) }
-                                )
+                        Text(text = "Nature de l'appui :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(
+                                listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton"),
+                                listOf("composite" to "Composite", "façade" to "Façade")
+                            ).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    row.forEach { (nat, lbl) ->
+                                        FilterChip(
+                                            selected = poleNature.equals(nat, ignoreCase = true),
+                                            onClick = { poleNature = nat },
+                                            label = { Text(lbl, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))

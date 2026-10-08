@@ -376,13 +376,14 @@ class DocumentStorageManager(private val context: Context) {
 
     fun listAllProjects(): List<ProjectInfo> {
         val projectMap = mutableMapOf<String, Long>()
+        val deletedProjects = PublicStorageHelper.getDeletedProjects(context)
 
         // 1. Scanner Documents/Releve-Terrain
         try {
             if (publicBaseDir.exists() && publicBaseDir.isDirectory) {
                 publicBaseDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
                         projectMap[file.name] = file.lastModified()
                     }
                 }
@@ -396,7 +397,7 @@ class DocumentStorageManager(private val context: Context) {
             if (publicDownloadsDir.exists() && publicDownloadsDir.isDirectory) {
                 publicDownloadsDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -410,7 +411,7 @@ class DocumentStorageManager(private val context: Context) {
             if (appExtBaseDir.exists() && appExtBaseDir.isDirectory) {
                 appExtBaseDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -422,10 +423,15 @@ class DocumentStorageManager(private val context: Context) {
         // 4. Scanner via MediaStore (secours persistant après réinstallation)
         val mediaStoreProjects = PublicStorageHelper.listPublicProjects(context)
         for (p in mediaStoreProjects) {
-            projectMap.putIfAbsent(p, System.currentTimeMillis())
+            if (!deletedProjects.contains(p)) {
+                projectMap.putIfAbsent(p, System.currentTimeMillis())
+            }
         }
 
+        projectMap.keys.removeAll(deletedProjects)
+
         if (projectMap.isEmpty()) {
+            PublicStorageHelper.unmarkProjectDeleted(context, "projet01")
             projectMap["projet01"] = System.currentTimeMillis()
         }
 
@@ -498,36 +504,53 @@ class DocumentStorageManager(private val context: Context) {
     fun deleteProject(projectName: String): Boolean {
         val sanitized = sanitizeProjectName(projectName)
 
-        // 1. Supprimer sur tous les dossiers physiques
-        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
-            try {
-                val dir = File(base, sanitized)
-                if (dir.exists()) {
-                    dir.deleteRecursively()
+        // Marquer comme supprimé pour filtrage immédiat
+        PublicStorageHelper.markProjectDeleted(context, sanitized)
+        PublicStorageHelper.markProjectDeleted(context, projectName)
+
+        // 1. Supprimer sur tous les dossiers physiques (Releve-Terrain et releve-terrain)
+        listOf(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+            context.filesDir
+        ).forEach { baseDir ->
+            listOf("Releve-Terrain", "releve-terrain").forEach { subDirName ->
+                try {
+                    val targetBase = File(baseDir, subDirName)
+                    File(targetBase, sanitized).let { if (it.exists()) it.deleteRecursively() }
+                    File(targetBase, projectName).let { if (it.exists()) it.deleteRecursively() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
 
-        // 2. Supprimer via MediaStore et marquer tombstone
+        // 2. Supprimer via MediaStore
         PublicStorageHelper.deletePublicProject(context, sanitized)
+        PublicStorageHelper.deletePublicProject(context, projectName)
 
         // 3. Nettoyer les clés SharedPreferences pour ce projet
         prefs.edit()
             .remove("backup_nodes_json_$sanitized")
             .remove("backup_tracks_json_$sanitized")
             .remove("backup_links_json_$sanitized")
-            .apply()
+            .remove("backup_nodes_json_$projectName")
+            .remove("backup_tracks_json_$projectName")
+            .remove("backup_links_json_$projectName")
+            .commit()
 
         // 4. Si c'était le projet courant, basculer sur un autre projet existant
-        if (_currentProject == sanitized) {
-            val remaining = listAllProjects().filter { it.name != sanitized }
+        if (_currentProject.equals(sanitized, ignoreCase = true) || _currentProject.equals(projectName, ignoreCase = true)) {
+            val remaining = listAllProjects().filter {
+                !it.name.equals(sanitized, ignoreCase = true) && !it.name.equals(projectName, ignoreCase = true)
+            }
             if (remaining.isNotEmpty()) {
                 setCurrentProject(remaining.first().name)
             } else {
                 _currentProject = "projet01"
-                prefs.edit().putString("active_project_name", "projet01").apply()
+                PublicStorageHelper.unmarkProjectDeleted(context, "projet01")
+                prefs.edit().putString("active_project_name", "projet01").commit()
                 createProject("projet01", copyCurrent = false)
             }
         }
