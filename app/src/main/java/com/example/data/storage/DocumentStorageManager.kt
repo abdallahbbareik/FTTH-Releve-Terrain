@@ -9,6 +9,7 @@ import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.data.local.SyncState
+import com.example.data.util.TrackGeometryHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1091,6 +1092,7 @@ class DocumentStorageManager(private val context: Context) {
             cleanupIndividualGeoJsonFiles(sanitized)
             val currentNodes = nodes ?: loadNodes(sanitized)
             val nodesMap = currentNodes.associateBy { it.id }
+            val tracksMap = loadTracks(sanitized).associateBy { it.id }
 
             val root = JSONObject()
             root.put("type", "FeatureCollection")
@@ -1109,6 +1111,27 @@ class DocumentStorageManager(private val context: Context) {
                         put("type", "LineString")
                         val coords = JSONArray()
                         coords.put(JSONArray().put(n1.longitude).put(n1.latitude))
+
+                        val intermediatePts = TrackGeometryHelper.parseCablePoints(link.intermediatePoints)
+                        if (intermediatePts.isNotEmpty()) {
+                            for (pt in intermediatePts) {
+                                coords.put(JSONArray().put(pt.second).put(pt.first))
+                            }
+                        } else {
+                            val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
+                            if (assocTrack != null) {
+                                val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
+                                if (pts.isNotEmpty()) {
+                                    val distStart = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.first().latitude, pts.first().longitude)
+                                    val distEnd = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.last().latitude, pts.last().longitude)
+                                    val orderedPts = if (distStart > distEnd) pts.reversed() else pts
+                                    for (pt in orderedPts) {
+                                        coords.put(JSONArray().put(pt.longitude).put(pt.latitude))
+                                    }
+                                }
+                            }
+                        }
+
                         coords.put(JSONArray().put(n2.longitude).put(n2.latitude))
                         put("coordinates", coords)
                     }
@@ -1332,6 +1355,8 @@ class DocumentStorageManager(private val context: Context) {
         put("lengthMeters", link.lengthMeters)
         put("status", link.status.name)
         put("updatedAt", link.updatedAt)
+        put("associatedTrackId", link.associatedTrackId)
+        put("intermediatePoints", link.intermediatePoints)
     }
 
     private fun linkFromJson(json: JSONObject): FtthLinkEntity {
@@ -1346,7 +1371,9 @@ class DocumentStorageManager(private val context: Context) {
             capacityFO = json.optInt("capacityFO", 12),
             lengthMeters = json.optDouble("lengthMeters", 0.0),
             status = status,
-            updatedAt = json.optLong("updatedAt", System.currentTimeMillis())
+            updatedAt = json.optLong("updatedAt", System.currentTimeMillis()),
+            associatedTrackId = json.optString("associatedTrackId", ""),
+            intermediatePoints = json.optString("intermediatePoints", "")
         )
     }
 }

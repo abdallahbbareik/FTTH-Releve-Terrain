@@ -848,13 +848,19 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         toNode: FtthNodeEntity,
         cableType: String,
         installationType: String,
-        capacityFO: Int
+        capacityFO: Int,
+        associatedTrackId: String = ""
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dist = TrackGeometryHelper.calculateDistanceMeters(
-                fromNode.latitude, fromNode.longitude,
-                toNode.latitude, toNode.longitude
-            )
+            val targetTrack = _allTracks.value.firstOrNull { it.id == associatedTrackId }
+            val dist = if (targetTrack != null && targetTrack.totalDistanceMeters > 0) {
+                targetTrack.totalDistanceMeters
+            } else {
+                TrackGeometryHelper.calculateDistanceMeters(
+                    fromNode.latitude, fromNode.longitude,
+                    toNode.latitude, toNode.longitude
+                )
+            }
             val linkId = "LNK-${System.currentTimeMillis() % 10000}"
             val link = FtthLinkEntity(
                 id = linkId,
@@ -864,14 +870,15 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 installationType = installationType,
                 capacityFO = capacityFO,
                 lengthMeters = (dist * 10).toInt() / 10.0,
-                status = NodeStatus.EXISTANT
+                status = NodeStatus.EXISTANT,
+                associatedTrackId = associatedTrackId
             )
             val list = _rawLinks.value.toMutableList()
             list.add(link)
             _rawLinks.value = list
             docStorage.saveLinks(list)
 
-            _bannerMessage.value = "Liaison fibre ${link.id} enregistrée (${link.lengthMeters.toInt()}m)"
+            _bannerMessage.value = "Câble $linkId enregistré (${link.lengthMeters.toInt()}m)"
             _showConnectCableDialog.value = false
             _pendingLinkNodes.value = null
         }
@@ -979,6 +986,95 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Mode Modification du Tracé Non-Linéaire de Câble (Souterrain / Façade)
+    private val _editingCableRouteLink = MutableStateFlow<FtthLinkEntity?>(null)
+    val editingCableRouteLink: StateFlow<FtthLinkEntity?> = _editingCableRouteLink.asStateFlow()
+
+    private val _editingCablePoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
+    val editingCablePoints: StateFlow<List<Pair<Double, Double>>> = _editingCablePoints.asStateFlow()
+
+    private val _movingCableVertexIndex = MutableStateFlow<Int?>(null)
+    val movingCableVertexIndex: StateFlow<Int?> = _movingCableVertexIndex.asStateFlow()
+
+    fun startEditingCableRoute(link: FtthLinkEntity) {
+        val pts = TrackGeometryHelper.parseCablePoints(link.intermediatePoints)
+        _editingCablePoints.value = pts
+        _editingCableRouteLink.value = link
+        _movingCableVertexIndex.value = null
+        _selectedLinkForDetail.value = null
+        _bannerMessage.value = "Modification du parcours : touchez la carte pour ajouter un sommet ou glissez un sommet existant"
+    }
+
+    fun addCableVertex(lat: Double, lon: Double) {
+        val current = _editingCablePoints.value.toMutableList()
+        current.add(Pair(lat, lon))
+        _editingCablePoints.value = current
+    }
+
+    fun updateCableVertex(index: Int, lat: Double, lon: Double) {
+        val current = _editingCablePoints.value.toMutableList()
+        if (index in current.indices) {
+            current[index] = Pair(lat, lon)
+            _editingCablePoints.value = current
+        }
+    }
+
+    fun removeCableVertex(index: Int) {
+        val current = _editingCablePoints.value.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _editingCablePoints.value = current
+        }
+    }
+
+    fun resetCableRouteToStraightLine() {
+        _editingCablePoints.value = emptyList()
+        _bannerMessage.value = "Parcours réinitialisé en ligne directe"
+    }
+
+    fun saveCableRoute() {
+        val link = _editingCableRouteLink.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val pts = _editingCablePoints.value
+            val jsonPts = TrackGeometryHelper.serializeCablePoints(pts)
+            val nodesMap = _rawNodes.value.associateBy { it.id }
+            val fromNode = nodesMap[link.fromNodeId]
+            val toNode = nodesMap[link.toNodeId]
+
+            val newLength = if (fromNode != null && toNode != null) {
+                TrackGeometryHelper.computeCableLengthMeters(
+                    fromNode.latitude, fromNode.longitude,
+                    pts,
+                    toNode.latitude, toNode.longitude
+                )
+            } else link.lengthMeters
+
+            val updated = link.copy(
+                intermediatePoints = jsonPts,
+                lengthMeters = (newLength * 10).toInt() / 10.0,
+                updatedAt = System.currentTimeMillis()
+            )
+
+            val list = _rawLinks.value.toMutableList()
+            val idx = list.indexOfFirst { it.id == updated.id }
+            if (idx >= 0) list[idx] = updated else list.add(updated)
+
+            _rawLinks.value = list
+            docStorage.saveLinks(list)
+
+            _editingCableRouteLink.value = null
+            _editingCablePoints.value = emptyList()
+            _movingCableVertexIndex.value = null
+            _bannerMessage.value = "Parcours du câble ${updated.id} enregistré (${updated.lengthMeters.toInt()}m)"
+        }
+    }
+
+    fun cancelEditingCableRoute() {
+        _editingCableRouteLink.value = null
+        _editingCablePoints.value = emptyList()
+        _movingCableVertexIndex.value = null
+    }
+
     fun dismissAddNodeDialog() {
         _showAddNodeDialog.value = false
         _stakedPositionForForm.value = null
@@ -988,7 +1084,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         val willBe = !_isCableDrawingMode.value
         _isCableDrawingMode.value = willBe
         _cableFirstNode.value = null
-        _bannerMessage.value = if (willBe) "Mode Câblage : Touchez le 1er nœud puis le 2ème" else null
+        _bannerMessage.value = if (willBe) "Mode Ajout Câble : Touchez le 1er nœud puis le 2ème" else null
     }
 
     fun setFilterState(state: MapFilterState) { _filterState.value = state }
