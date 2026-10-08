@@ -44,12 +44,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
+import com.example.data.repository.FtthRepository
+import com.example.data.storage.StoredTrack
 
 @Composable
 fun LinkDetailDialog(
     link: FtthLinkEntity,
     fromNode: FtthNodeEntity?,
     toNode: FtthNodeEntity?,
+    availableTracks: List<StoredTrack> = emptyList(),
     onDismiss: () -> Unit,
     onSaveLink: (FtthLinkEntity) -> Unit,
     onDeleteLink: (String) -> Unit
@@ -57,7 +60,25 @@ fun LinkDetailDialog(
     var cableType by remember(link) { mutableStateOf(link.cableType) }
     var installationType by remember(link) { mutableStateOf(link.installationType) }
     var capacityFO by remember(link) { mutableIntStateOf(link.capacityFO) }
+    var associatedTrackId by remember(link) { mutableStateOf(link.associatedTrackId) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    val selectedTrack = remember(associatedTrackId, availableTracks) {
+        availableTracks.firstOrNull { it.id == associatedTrackId }
+    }
+
+    val calculatedLength = remember(fromNode, toNode, selectedTrack) {
+        if (selectedTrack != null && selectedTrack.totalDistanceMeters > 0) {
+            selectedTrack.totalDistanceMeters
+        } else if (fromNode != null && toNode != null) {
+            FtthRepository.calculateDistanceMeters(
+                fromNode.latitude, fromNode.longitude,
+                toNode.latitude, toNode.longitude
+            )
+        } else {
+            link.lengthMeters
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -90,7 +111,7 @@ fun LinkDetailDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Longueur : ${link.lengthMeters.toInt()} mètres",
+                            text = "Longueur : ${calculatedLength.toInt()} mètres" + if (selectedTrack != null) " (Suivie sur ${selectedTrack.name})" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
@@ -173,6 +194,41 @@ fun LinkDetailDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Choix du tracé emprunté (non-linéaire)
+                Text(
+                    text = "Tracé de l'infrastructure support (Trace non-linéaire) :",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Permet de modifier le tracé emprunté par le câble (GC / Façade)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = associatedTrackId.isEmpty(),
+                        onClick = { associatedTrackId = "" },
+                        label = { Text("Direct (Ligne droite)") }
+                    )
+                    availableTracks.forEach { trk ->
+                        FilterChip(
+                            selected = associatedTrackId == trk.id,
+                            onClick = { associatedTrackId = trk.id },
+                            label = { Text("${trk.name} (${trk.type})") }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Capacité du câble
                 Text(text = "Capacité du câble (Fibre Optique) :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
@@ -210,7 +266,9 @@ fun LinkDetailDialog(
                             val updated = link.copy(
                                 cableType = cableType,
                                 installationType = installationType,
-                                capacityFO = capacityFO
+                                capacityFO = capacityFO,
+                                lengthMeters = (calculatedLength * 10).toInt() / 10.0,
+                                associatedTrackId = associatedTrackId
                             )
                             onSaveLink(updated)
                             onDismiss()
@@ -233,7 +291,7 @@ fun LinkDetailDialog(
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                text = "Supprimer la liaison ${link.id} ?",
+                                text = "Supprimer le câble ${link.id} ?",
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 fontSize = 12.sp

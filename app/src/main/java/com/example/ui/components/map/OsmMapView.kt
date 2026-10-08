@@ -63,6 +63,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.data.gps.GpsLocationData
 import com.example.data.local.FtthLinkEntity
+import com.example.data.util.TrackGeometryHelper
 import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPhoto
@@ -295,6 +296,7 @@ fun OsmMapView(
         mapView.overlays.add(MapEventsOverlay(eventsReceiver))
 
         val nodesMap = nodes.associateBy { it.id }
+        val tracksMap = allTracks.associateBy { it.id }
 
         // Liaisons Câbles
         for (link in links) {
@@ -303,6 +305,20 @@ fun OsmMapView(
             if (from != null && to != null) {
                 val polyline = Polyline(mapView).apply {
                     addPoint(GeoPoint(from.latitude, from.longitude))
+
+                    val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
+                    if (assocTrack != null) {
+                        val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
+                        if (pts.isNotEmpty()) {
+                            val distStart = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.first().latitude, pts.first().longitude)
+                            val distEnd = TrackGeometryHelper.calculateDistanceMeters(from.latitude, from.longitude, pts.last().latitude, pts.last().longitude)
+                            val orderedPts = if (distStart > distEnd) pts.reversed() else pts
+                            for (pt in orderedPts) {
+                                addPoint(GeoPoint(pt.latitude, pt.longitude))
+                            }
+                        }
+                    }
+
                     addPoint(GeoPoint(to.latitude, to.longitude))
                     outlinePaint.strokeWidth = 7f
                     outlinePaint.isAntiAlias = true

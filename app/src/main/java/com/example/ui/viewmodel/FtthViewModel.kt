@@ -848,13 +848,19 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         toNode: FtthNodeEntity,
         cableType: String,
         installationType: String,
-        capacityFO: Int
+        capacityFO: Int,
+        associatedTrackId: String = ""
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dist = TrackGeometryHelper.calculateDistanceMeters(
-                fromNode.latitude, fromNode.longitude,
-                toNode.latitude, toNode.longitude
-            )
+            val targetTrack = _allTracks.value.firstOrNull { it.id == associatedTrackId }
+            val dist = if (targetTrack != null && targetTrack.totalDistanceMeters > 0) {
+                targetTrack.totalDistanceMeters
+            } else {
+                TrackGeometryHelper.calculateDistanceMeters(
+                    fromNode.latitude, fromNode.longitude,
+                    toNode.latitude, toNode.longitude
+                )
+            }
             val linkId = "LNK-${System.currentTimeMillis() % 10000}"
             val link = FtthLinkEntity(
                 id = linkId,
@@ -864,14 +870,15 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 installationType = installationType,
                 capacityFO = capacityFO,
                 lengthMeters = (dist * 10).toInt() / 10.0,
-                status = NodeStatus.EXISTANT
+                status = NodeStatus.EXISTANT,
+                associatedTrackId = associatedTrackId
             )
             val list = _rawLinks.value.toMutableList()
             list.add(link)
             _rawLinks.value = list
             docStorage.saveLinks(list)
 
-            _bannerMessage.value = "Liaison fibre ${link.id} enregistrée (${link.lengthMeters.toInt()}m)"
+            _bannerMessage.value = "Câble $linkId enregistré (${link.lengthMeters.toInt()}m)"
             _showConnectCableDialog.value = false
             _pendingLinkNodes.value = null
         }
@@ -988,7 +995,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         val willBe = !_isCableDrawingMode.value
         _isCableDrawingMode.value = willBe
         _cableFirstNode.value = null
-        _bannerMessage.value = if (willBe) "Mode Câblage : Touchez le 1er nœud puis le 2ème" else null
+        _bannerMessage.value = if (willBe) "Mode Ajout Câble : Touchez le 1er nœud puis le 2ème" else null
     }
 
     fun setFilterState(state: MapFilterState) { _filterState.value = state }

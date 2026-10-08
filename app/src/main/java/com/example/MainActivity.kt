@@ -373,7 +373,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.toggleCableDrawingMode() },
                         icon = { Icon(Icons.Default.Timeline, contentDescription = null) },
-                        text = { Text("Lier Fibre", fontSize = 12.sp) },
+                        text = { Text("Ajouter Câble", fontSize = 12.sp) },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.testTag("toggle_cable_fab")
@@ -578,6 +578,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     link = link,
                     fromNode = nodesMap[link.fromNodeId],
                     toNode = nodesMap[link.toNodeId],
+                    availableTracks = allTracks,
                     onDismiss = { viewModel.dismissLinkDetail() },
                     onSaveLink = { updated -> viewModel.saveLink(updated) },
                     onDeleteLink = { id -> viewModel.deleteLink(id) }
@@ -691,14 +692,16 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 AddLinkDialog(
                     fromNode = pendingLinkNodes!!.first,
                     toNode = pendingLinkNodes!!.second,
+                    availableTracks = allTracks,
                     onDismiss = { viewModel.dismissConnectCableDialog() },
-                    onLinkCreated = { cableType, installationType, capacityFO ->
+                    onLinkCreated = { cableType, installationType, capacityFO, associatedTrackId ->
                         viewModel.createFiberLink(
                             pendingLinkNodes!!.first,
                             pendingLinkNodes!!.second,
                             cableType,
                             installationType,
-                            capacityFO
+                            capacityFO,
+                            associatedTrackId
                         )
                     }
                 )
