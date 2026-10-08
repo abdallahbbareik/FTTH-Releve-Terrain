@@ -195,7 +195,8 @@ fun NodeDetailSheet(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
-            val updated = photos + tempCameraFile!!.absolutePath
+            val finalizedPath = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
+            val updated = photos + finalizedPath
             photos = updated
             triggerAutoSave(updated)
         } else {
@@ -1046,10 +1047,18 @@ fun NodeDetailSheet(
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold
                                 )
+                                val activeProject = remember { PhotoStorageManager.getProjectName(context) }
+                                val activeMode = remember { PhotoStorageManager.getPhotoResolutionMode(context) }
                                 Text(
-                                    text = "Dossier : ftth_photos/${node.id}/",
+                                    text = "Dossier : releve-terrain/$activeProject/photos/",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Résolution enregistrée : ${activeMode.title} (${activeMode.subtitle})",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -1112,6 +1121,8 @@ fun NodeDetailSheet(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 items(photos) { photoPath ->
+                                    val resolvedFile = PhotoStorageManager.resolvePhotoFile(context, photoPath)
+                                    val itemDetails = remember(photoPath) { PhotoStorageManager.getPhotoDetails(resolvedFile.absolutePath) }
                                     Box(
                                         modifier = Modifier
                                             .size(80.dp)
@@ -1120,11 +1131,30 @@ fun NodeDetailSheet(
                                             .clickable { viewingPhotoPath = photoPath }
                                     ) {
                                         AsyncImage(
-                                            model = File(photoPath),
+                                            model = resolvedFile,
                                             contentDescription = "Photo ${node.id}",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
                                         )
+
+                                        // Badge résolution sur la miniature
+                                        if (itemDetails.width > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(3.dp),
+                                                color = Color.Black.copy(alpha = 0.7f),
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomCenter)
+                                                    .padding(bottom = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (itemDetails.megaPixelsLabel.isNotEmpty()) itemDetails.megaPixelsLabel else "${itemDetails.width}x${itemDetails.height}",
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
 
                                         // Delete badge button
                                         IconButton(
@@ -1161,7 +1191,10 @@ fun NodeDetailSheet(
                 }
 
                 // Fullscreen Photo Preview Dialog
-                if (viewingPhotoPath != null) {
+                val currentViewingPhoto = viewingPhotoPath
+                if (currentViewingPhoto != null) {
+                    val resolvedPreview = PhotoStorageManager.resolvePhotoFile(context, currentViewingPhoto)
+                    val photoDetails = PhotoStorageManager.getPhotoDetails(resolvedPreview.absolutePath)
                     Dialog(onDismissRequest = { viewingPhotoPath = null }) {
                         Card(
                             shape = RoundedCornerShape(16.dp),
@@ -1178,10 +1211,29 @@ fun NodeDetailSheet(
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium
                                 )
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Résolution : ${photoDetails.resolutionLabel}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (photoDetails.qualityLabel.isNotEmpty()) {
+                                    Text(
+                                        text = "Qualité : ${photoDetails.qualityLabel}",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF16A34A),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = "Dossier : releve-terrain/projet/photos/${resolvedPreview.name}",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
 
                                 AsyncImage(
-                                    model = File(viewingPhotoPath!!),
+                                    model = resolvedPreview,
                                     contentDescription = "Photo agrandie",
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
@@ -59,6 +60,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.text.TextStyle
 import com.example.data.local.FtthNodeEntity
+import com.example.data.photo.PhotoResolutionMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,6 +69,7 @@ fun PiquetageTopBar(
     searchQuery: String,
     totalNodesCount: Int,
     matchingNodes: List<FtthNodeEntity> = emptyList(),
+    currentPhotoResolutionMode: PhotoResolutionMode = PhotoResolutionMode.NATIVE,
     onSearchQueryChange: (String) -> Unit,
     onSelectNode: (FtthNodeEntity) -> Unit = {},
     onOpenFilters: () -> Unit,
@@ -74,6 +77,7 @@ fun PiquetageTopBar(
     onOpenProjectFolder: () -> Unit = onOpenSyncLogs,
     onOpenExport: () -> Unit,
     onOpenWorkflowGuide: () -> Unit,
+    onOpenPhotoResolutionConfig: () -> Unit = {},
     onExportZip: () -> Unit,
     onExportKmz: () -> Unit,
     onExportGeoJson: () -> Unit
@@ -235,6 +239,24 @@ fun PiquetageTopBar(
                             onClick = {
                                 menuExpanded = false
                                 onExportGeoJson()
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("Qualité & Résolution des photos", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = "${currentPhotoResolutionMode.title} (${currentPhotoResolutionMode.subtitle})",
+                                        fontSize = 11.sp,
+                                        color = TelecomCyan
+                                    )
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = TelecomCyan) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenPhotoResolutionConfig()
                             }
                         )
                         HorizontalDivider()

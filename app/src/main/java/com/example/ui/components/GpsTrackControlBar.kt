@@ -82,7 +82,8 @@ fun GpsTrackControlBar(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
-            onAddActiveTrackPhoto?.invoke(tempCameraFile!!.absolutePath)
+            val finalized = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
+            onAddActiveTrackPhoto?.invoke(finalized)
         } else {
             tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
         }

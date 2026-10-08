@@ -240,7 +240,7 @@ class DocumentStorageManager(private val context: Context) {
     }
 
     fun getProjectPhotosDir(projectName: String = currentProject): File {
-        val dir = File(getProjectDir(projectName), "Photos")
+        val dir = File(getProjectDir(projectName), "photos")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
@@ -336,6 +336,7 @@ class DocumentStorageManager(private val context: Context) {
         listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 if (!base.exists()) base.mkdirs()
+                File(base, "photos").let { if (!it.exists()) it.mkdirs() }
                 File(base, "Photos").let { if (!it.exists()) it.mkdirs() }
                 File(base, "Exports").let { if (!it.exists()) it.mkdirs() }
             } catch (e: Exception) {
@@ -350,6 +351,7 @@ class DocumentStorageManager(private val context: Context) {
             try {
                 val projDir = File(base, sanitized)
                 if (!projDir.exists()) projDir.mkdirs()
+                File(projDir, "photos").let { if (!it.exists()) it.mkdirs() }
                 File(projDir, "Photos").let { if (!it.exists()) it.mkdirs() }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -388,7 +390,8 @@ class DocumentStorageManager(private val context: Context) {
         try {
             if (publicBaseDir.exists() && publicBaseDir.isDirectory) {
                 publicBaseDir.listFiles()?.forEach { file ->
-                    if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
+                    val lower = file.name.lowercase()
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap[file.name] = file.lastModified()
                     }
                 }
@@ -401,7 +404,8 @@ class DocumentStorageManager(private val context: Context) {
         try {
             if (publicDownloadsDir.exists() && publicDownloadsDir.isDirectory) {
                 publicDownloadsDir.listFiles()?.forEach { file ->
-                    if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
+                    val lower = file.name.lowercase()
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -414,7 +418,8 @@ class DocumentStorageManager(private val context: Context) {
         try {
             if (appExtBaseDir.exists() && appExtBaseDir.isDirectory) {
                 appExtBaseDir.listFiles()?.forEach { file ->
-                    if (file.isDirectory && file.name != "Photos" && file.name != "Exports" && !file.name.startsWith(".")) {
+                    val lower = file.name.lowercase()
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -663,7 +668,12 @@ class DocumentStorageManager(private val context: Context) {
                 }
             }
 
-            if (updateGeoJson) generateAndSaveGeoJson(sanitized)
+            // Génération immédiate du GeoJSON dédié aux nœuds du projet
+            generateAndSaveNodesGeoJson(nodes, sanitized)
+            if (updateGeoJson) {
+                generateAndSaveLinksGeoJson(loadLinks(sanitized), sanitized, nodes)
+                generateAndSaveGeoJson(sanitized)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -787,6 +797,8 @@ class DocumentStorageManager(private val context: Context) {
                 }
             }
 
+            // Génération immédiate du GeoJSON dédié aux câbles du projet
+            generateAndSaveLinksGeoJson(links, sanitized)
             if (updateGeoJson) generateAndSaveGeoJson(sanitized)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -898,13 +910,195 @@ class DocumentStorageManager(private val context: Context) {
 
             prefs.edit().putString("backup_tracks_json_$sanitized", jsonString).apply()
 
+            // Génération immédiate du GeoJSON dédié aux infras linéaires du projet
+            generateAndSaveTracksGeoJson(tracks, sanitized)
             if (updateGeoJson) generateAndSaveGeoJson(sanitized)
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    // --- GÉNÉRATION AUTOMATIQUE DU GEOJSON DANS LE DOSSIER PROJET ---
+    // --- GÉNÉRATION AUTOMATIQUE DES FICHIERS GEOJSON DÉDIÉS PAR TYPE D'ENTITÉS ---
+
+    /**
+     * Supprime tout fichier GeoJSON individuel résiduel pour garantir strictement un fichier par type d'entités
+     */
+    private fun cleanupIndividualGeoJsonFiles(sanitized: String) {
+        val allowedGeoJsonNames = setOf("noeuds.geojson", "infra_lineaire.geojson", "cables.geojson", "releve_$sanitized.geojson")
+        val allBases = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "releve-terrain"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "releve-terrain"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain"),
+            File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "releve-terrain"),
+            File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain"),
+            File(context.filesDir, "releve-terrain"),
+            File(context.filesDir, "Releve-Terrain")
+        )
+        for (dir in allBases) {
+            try {
+                val projDir = File(dir, sanitized)
+                if (projDir.exists() && projDir.isDirectory) {
+                    projDir.listFiles()?.forEach { file ->
+                        if (file.name.endsWith(".geojson") && !allowedGeoJsonNames.contains(file.name)) {
+                            file.delete()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /**
+     * Génère et sauvegarde le fichier GeoJSON unique pour tous les NŒUDS du projet : noeuds.geojson
+     */
+    fun generateAndSaveNodesGeoJson(nodes: List<FtthNodeEntity>, project: String = currentProject) {
+        val sanitized = sanitizeProjectName(project)
+        try {
+            cleanupIndividualGeoJsonFiles(sanitized)
+            val root = JSONObject()
+            root.put("type", "FeatureCollection")
+            root.put("name", "noeuds")
+            root.put("project", sanitized)
+            root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
+
+            val features = JSONArray()
+            for (node in nodes) {
+                val feat = JSONObject()
+                feat.put("type", "Feature")
+                val geom = JSONObject().apply {
+                    put("type", "Point")
+                    val coords = JSONArray()
+                    coords.put(node.longitude)
+                    coords.put(node.latitude)
+                    put("coordinates", coords)
+                }
+                feat.put("geometry", geom)
+                feat.put("properties", nodeToJson(node).apply { put("entity_type", "noeud") })
+                features.put(feat)
+            }
+            root.put("features", features)
+            val geoJsonString = root.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/noeuds.geojson", geoJsonString)
+            for (dir in getWritableDirectories()) {
+                try {
+                    val projDir = File(dir, sanitized)
+                    if (!projDir.exists()) projDir.mkdirs()
+                    File(projDir, "noeuds.geojson").writeText(geoJsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Génère et sauvegarde le fichier GeoJSON unique pour toutes les INFRASTRUCTURES LINÉAIRES du projet : infra_lineaire.geojson
+     */
+    fun generateAndSaveTracksGeoJson(tracks: List<StoredTrack>, project: String = currentProject) {
+        val sanitized = sanitizeProjectName(project)
+        try {
+            cleanupIndividualGeoJsonFiles(sanitized)
+            val root = JSONObject()
+            root.put("type", "FeatureCollection")
+            root.put("name", "infra_lineaire")
+            root.put("project", sanitized)
+            root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
+
+            val features = JSONArray()
+            for (track in tracks) {
+                val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                if (pts.size >= 2) {
+                    val feat = JSONObject()
+                    feat.put("type", "Feature")
+                    val geom = JSONObject().apply {
+                        put("type", "LineString")
+                        val coords = JSONArray()
+                        for (p in pts) {
+                            coords.put(JSONArray().put(p.longitude).put(p.latitude))
+                        }
+                        put("coordinates", coords)
+                    }
+                    feat.put("geometry", geom)
+                    feat.put("properties", track.toJson().apply { put("entity_type", "infra_lineaire") })
+                    features.put(feat)
+                }
+            }
+            root.put("features", features)
+            val geoJsonString = root.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/infra_lineaire.geojson", geoJsonString)
+            for (dir in getWritableDirectories()) {
+                try {
+                    val projDir = File(dir, sanitized)
+                    if (!projDir.exists()) projDir.mkdirs()
+                    File(projDir, "infra_lineaire.geojson").writeText(geoJsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Génère et sauvegarde le fichier GeoJSON unique pour tous les CÂBLES du projet : cables.geojson
+     */
+    fun generateAndSaveLinksGeoJson(links: List<FtthLinkEntity>, project: String = currentProject, nodes: List<FtthNodeEntity>? = null) {
+        val sanitized = sanitizeProjectName(project)
+        try {
+            cleanupIndividualGeoJsonFiles(sanitized)
+            val currentNodes = nodes ?: loadNodes(sanitized)
+            val nodesMap = currentNodes.associateBy { it.id }
+
+            val root = JSONObject()
+            root.put("type", "FeatureCollection")
+            root.put("name", "cables")
+            root.put("project", sanitized)
+            root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
+
+            val features = JSONArray()
+            for (link in links) {
+                val n1 = nodesMap[link.fromNodeId]
+                val n2 = nodesMap[link.toNodeId]
+                if (n1 != null && n2 != null) {
+                    val feat = JSONObject()
+                    feat.put("type", "Feature")
+                    val geom = JSONObject().apply {
+                        put("type", "LineString")
+                        val coords = JSONArray()
+                        coords.put(JSONArray().put(n1.longitude).put(n1.latitude))
+                        coords.put(JSONArray().put(n2.longitude).put(n2.latitude))
+                        put("coordinates", coords)
+                    }
+                    feat.put("geometry", geom)
+                    feat.put("properties", linkToJson(link).apply { put("entity_type", "cable") })
+                    features.put(feat)
+                }
+            }
+            root.put("features", features)
+            val geoJsonString = root.toString(2)
+
+            PublicStorageHelper.savePublicDocument(context, "$sanitized/cables.geojson", geoJsonString)
+            for (dir in getWritableDirectories()) {
+                try {
+                    val projDir = File(dir, sanitized)
+                    if (!projDir.exists()) projDir.mkdirs()
+                    File(projDir, "cables.geojson").writeText(geoJsonString, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     fun generateAndSaveGeoJson(project: String = currentProject) {
         val sanitized = sanitizeProjectName(project)
@@ -913,6 +1107,12 @@ class DocumentStorageManager(private val context: Context) {
             val links = loadLinks(sanitized)
             val tracks = loadTracks(sanitized)
 
+            // 1. Mettre à jour chaque fichier GeoJSON spécifique
+            generateAndSaveNodesGeoJson(nodes, sanitized)
+            generateAndSaveTracksGeoJson(tracks, sanitized)
+            generateAndSaveLinksGeoJson(links, sanitized, nodes)
+
+            // 2. Générer également le GeoJSON combiné complet du projet
             val nodesMap = nodes.associateBy { it.id }
 
             val root = JSONObject()
@@ -921,7 +1121,7 @@ class DocumentStorageManager(private val context: Context) {
             root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
             val features = JSONArray()
 
-            // 1. Nœuds
+            // Nœuds
             for (node in nodes) {
                 val feat = JSONObject()
                 feat.put("type", "Feature")
@@ -937,7 +1137,7 @@ class DocumentStorageManager(private val context: Context) {
                 features.put(feat)
             }
 
-            // 2. Câbles
+            // Câbles
             for (link in links) {
                 val n1 = nodesMap[link.fromNodeId]
                 val n2 = nodesMap[link.toNodeId]
@@ -957,7 +1157,7 @@ class DocumentStorageManager(private val context: Context) {
                 }
             }
 
-            // 3. Infra_lineaire
+            // Infra_lineaire
             for (track in tracks) {
                 val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
                 if (pts.size >= 2) {

@@ -69,6 +69,7 @@ import com.example.ui.components.MoveVertexEditorBar
 import com.example.ui.components.NodeDetailSheet
 import com.example.ui.components.NodesListDialog
 import com.example.ui.components.LinkDetailDialog
+import com.example.ui.components.PhotoResolutionDialog
 import com.example.ui.components.PiquetageTopBar
 import com.example.ui.components.ProjectFolderDialog
 import com.example.ui.components.StraightenEditorBar
@@ -161,12 +162,15 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
     var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
     var tempManualPhotoFile by remember { mutableStateOf<File?>(null) }
+    var showPhotoResolutionDialog by remember { mutableStateOf(false) }
+    var currentPhotoResolutionMode by remember { mutableStateOf(com.example.data.photo.PhotoStorageManager.getPhotoResolutionMode(context)) }
 
     val manualTrackPhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempManualPhotoFile != null && tempManualPhotoFile!!.exists() && tempManualPhotoFile!!.length() > 0) {
-            viewModel.addManualTrackPhoto(tempManualPhotoFile!!.absolutePath)
+            val finalized = com.example.data.photo.PhotoStorageManager.syncAndFinalizePhoto(context, tempManualPhotoFile!!)
+            viewModel.addManualTrackPhoto(finalized)
         } else {
             tempManualPhotoFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
         }
@@ -199,9 +203,11 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
-                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null
+                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog
     ) {
-        if (selectedNode != null) {
+        if (showPhotoResolutionDialog) {
+            showPhotoResolutionDialog = false
+        } else if (selectedNode != null) {
             viewModel.selectNode(null)
         } else if (viewingTrackPhoto != null) {
             viewingTrackPhoto = null
@@ -247,6 +253,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     searchQuery = searchQuery,
                     totalNodesCount = rawNodes.size,
                     matchingNodes = filteredNodes,
+                    currentPhotoResolutionMode = currentPhotoResolutionMode,
                     onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                     onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
                     onOpenFilters = { viewModel.openFilterSheet() },
@@ -254,6 +261,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onOpenProjectFolder = { viewModel.openProjectFolder() },
                     onOpenExport = { viewModel.openExportDialog() },
                     onOpenWorkflowGuide = { showWorkflowGuide = true },
+                    onOpenPhotoResolutionConfig = { showPhotoResolutionDialog = true },
                     onExportZip = { viewModel.exportCompleteZipAndShare(context) },
                     onExportKmz = { viewModel.exportKmzAndShare(context) },
                     onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) }
@@ -587,6 +595,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
             // Aperçu d'une photo le long du tracé cliquée sur la carte
             if (viewingTrackPhoto != null) {
+                val resolvedFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, viewingTrackPhoto!!.photoPath)
+                val photoDetails = com.example.data.photo.PhotoStorageManager.getPhotoDetails(resolvedFile.absolutePath)
                 Dialog(onDismissRequest = { viewingTrackPhoto = null }) {
                     Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -595,14 +605,27 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
+                            if (photoDetails.width > 0) {
+                                Text(
+                                    text = "Résolution : ${photoDetails.resolutionLabel}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             Text(
                                 text = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE).format(Date(viewingTrackPhoto!!.timestamp)),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Text(
+                                text = resolvedFile.name,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(modifier = Modifier.height(10.dp))
                             AsyncImage(
-                                model = File(viewingTrackPhoto!!.photoPath),
+                                model = resolvedFile,
                                 contentDescription = "Photo trajet",
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(8.dp))
@@ -669,6 +692,20 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                             capacityFO
                         )
                     }
+                )
+            }
+
+            // Dialogue de configuration de taille et résolution des photos
+            if (showPhotoResolutionDialog) {
+                PhotoResolutionDialog(
+                    currentMode = currentPhotoResolutionMode,
+                    currentProject = currentProject,
+                    onSelectMode = { newMode ->
+                        currentPhotoResolutionMode = newMode
+                        com.example.data.photo.PhotoStorageManager.setPhotoResolutionMode(context, newMode)
+                        viewModel.showBanner("Taille photos configurée : ${newMode.title} (${newMode.subtitle})")
+                    },
+                    onDismiss = { showPhotoResolutionDialog = false }
                 )
             }
         }

@@ -1081,6 +1081,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissExportDialog() { _showExportDialog.value = false }
     fun dismissConnectCableDialog() { _showConnectCableDialog.value = false }
     fun dismissBanner() { _bannerMessage.value = null }
+    fun showBanner(message: String) { _bannerMessage.value = message }
 
     fun resetDemoData() {
         viewModelScope.launch(Dispatchers.IO) {

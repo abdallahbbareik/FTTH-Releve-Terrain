@@ -325,8 +325,8 @@ object RealExportService {
             // Add all photos
             for (node in nodes) {
                 for (photoPath in node.photos) {
-                    val pFile = File(photoPath)
-                    if (pFile.exists()) {
+                    val pFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, photoPath)
+                    if (pFile.exists() && pFile.length() > 0) {
                         val sanitizedNodeId = node.id.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
                         addFileToZip(zos, pFile, "photos/${sanitizedNodeId}/${pFile.name}")
                     }

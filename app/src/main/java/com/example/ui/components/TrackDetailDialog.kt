@@ -171,9 +171,10 @@ fun TrackDetailDialog(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
+            val finalized = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
             val photoLat = userLocation?.latitude ?: track.points.firstOrNull()?.latitude ?: 34.0
             val photoLon = userLocation?.longitude ?: track.points.firstOrNull()?.longitude ?: 9.5375
-            onAddTrackPhoto(track.id, tempCameraFile!!.absolutePath, photoLat, photoLon)
+            onAddTrackPhoto(track.id, finalized, photoLat, photoLon)
         } else {
             tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
         }
@@ -687,8 +688,9 @@ fun TrackDetailDialog(
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold
                                 )
+                                val projName = remember { PhotoStorageManager.getProjectName(context) }
                                 Text(
-                                    text = "Points bleus sur la carte aux coordonnées exactes",
+                                    text = "Dossier : releve-terrain/$projName/photos/",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -737,6 +739,8 @@ fun TrackDetailDialog(
                             Spacer(modifier = Modifier.height(10.dp))
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(track.photos) { photo ->
+                                    val resolvedFile = PhotoStorageManager.resolvePhotoFile(context, photo.photoPath)
+                                    val itemDetails = remember(photo.photoPath) { PhotoStorageManager.getPhotoDetails(resolvedFile.absolutePath) }
                                     Box(
                                         modifier = Modifier
                                             .size(76.dp)
@@ -745,11 +749,29 @@ fun TrackDetailDialog(
                                             .clickable { viewingPhotoPath = photo.photoPath }
                                     ) {
                                         AsyncImage(
-                                            model = File(photo.photoPath),
+                                            model = resolvedFile,
                                             contentDescription = "Photo trajet",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
                                         )
+
+                                        if (itemDetails.width > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(3.dp),
+                                                color = Color.Black.copy(alpha = 0.7f),
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomCenter)
+                                                    .padding(bottom = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (itemDetails.megaPixelsLabel.isNotEmpty()) itemDetails.megaPixelsLabel else "${itemDetails.width}x${itemDetails.height}",
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
 
                                         IconButton(
                                             onClick = { onDeleteTrackPhoto(track.id, photo.id) },
@@ -932,13 +954,41 @@ fun TrackDetailDialog(
                 }
 
                 // Aperçu photo plein écran
-                if (viewingPhotoPath != null) {
+                val currentViewingPhoto = viewingPhotoPath
+                if (currentViewingPhoto != null) {
+                    val resolvedPreview = PhotoStorageManager.resolvePhotoFile(context, currentViewingPhoto)
+                    val photoDetails = PhotoStorageManager.getPhotoDetails(resolvedPreview.absolutePath)
                     Dialog(onDismissRequest = { viewingPhotoPath = null }) {
                         Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                             Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Photo de l'infra linéaire",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "Résolution : ${photoDetails.resolutionLabel}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (photoDetails.qualityLabel.isNotEmpty()) {
+                                    Text(
+                                        text = "Qualité : ${photoDetails.qualityLabel}",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF16A34A),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = "Dossier : releve-terrain/projet/photos/${resolvedPreview.name}",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
                                 AsyncImage(
-                                    model = File(viewingPhotoPath!!),
-                                    contentDescription = "Photo trajet",
+                                    model = resolvedPreview,
+                                    contentDescription = "Photo infra linéaire",
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(8.dp))
                                 )
