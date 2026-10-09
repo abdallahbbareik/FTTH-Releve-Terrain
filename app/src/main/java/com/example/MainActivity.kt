@@ -24,20 +24,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.AddLocationAlt
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -202,28 +198,16 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val pendingLinkNodes by viewModel.pendingLinkNodes.collectAsStateWithLifecycle()
 
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
-    val editingCableRouteLink by viewModel.editingCableRouteLink.collectAsStateWithLifecycle()
-    val editingCablePoints by viewModel.editingCablePoints.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
-
-    LaunchedEffect(bannerMessage) {
-        if (bannerMessage != null) {
-            kotlinx.coroutines.delay(2000L)
-            viewModel.dismissBanner()
-        }
-    }
 
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
                 movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
-                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog ||
-                editingCableRouteLink != null
+                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog
     ) {
-        if (editingCableRouteLink != null) {
-            viewModel.cancelEditingCableRoute()
-        } else if (showPhotoResolutionDialog) {
+        if (showPhotoResolutionDialog) {
             showPhotoResolutionDialog = false
         } else if (selectedNode != null) {
             viewModel.selectNode(null)
@@ -374,79 +358,15 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         onCancel = { viewModel.cancelStraightenMode() }
                     )
                 }
-
-                // Barre d'outils flottante : Mode Modification du Tracé de Câble (Souterrain / Façade)
-                if (editingCableRouteLink != null) {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                            .testTag("cable_route_editor_bar")
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Tracé du câble ${editingCableRouteLink!!.id} (${editingCableRouteLink!!.installationType})",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "${editingCablePoints.size} sommet(s) • Touchez la carte pour insérer un sommet, glissez-le pour ajuster",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { viewModel.resetCableRouteToStraightLine() },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Réinitialiser", fontSize = 11.sp)
-                                }
-                                OutlinedButton(
-                                    onClick = { viewModel.cancelEditingCableRoute() },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Annuler", fontSize = 11.sp)
-                                }
-                                Button(
-                                    onClick = { viewModel.saveCableRoute() },
-                                    modifier = Modifier.weight(1.3f)
-                                ) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Valider", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
-                }
             }
         },
         floatingActionButton = {
-            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && editingCableRouteLink == null) {
+            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.toggleCableDrawingMode() },
                         icon = { Icon(Icons.Default.Timeline, contentDescription = null) },
-                        text = { Text("Ajouter Câble", fontSize = 12.sp) },
+                        text = { Text("Lier Fibre", fontSize = 12.sp) },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.testTag("toggle_cable_fab")
@@ -507,11 +427,6 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 },
                 onSelectVertexToMove = { idx -> viewModel.selectVertexToMove(idx) },
                 onTrackPhotoClick = { photo -> viewingTrackPhoto = photo },
-                editingCableRouteLink = editingCableRouteLink,
-                editingCablePoints = editingCablePoints,
-                onAddCableVertex = { lat, lon -> viewModel.addCableVertex(lat, lon) },
-                onUpdateCableVertex = { idx, lat, lon -> viewModel.updateCableVertex(idx, lat, lon) },
-                onRemoveCableVertex = { idx -> viewModel.removeCableVertex(idx) },
                 mapFocusTarget = mapFocusTarget,
                 onMapFocusTargetConsumed = { viewModel.clearMapFocusTarget() },
                 modifier = Modifier.fillMaxSize()
@@ -656,11 +571,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     link = link,
                     fromNode = nodesMap[link.fromNodeId],
                     toNode = nodesMap[link.toNodeId],
-                    availableTracks = allTracks,
                     onDismiss = { viewModel.dismissLinkDetail() },
                     onSaveLink = { updated -> viewModel.saveLink(updated) },
-                    onDeleteLink = { id -> viewModel.deleteLink(id) },
-                    onEditRoute = { viewModel.startEditingCableRoute(it) }
+                    onDeleteLink = { id -> viewModel.deleteLink(id) }
                 )
             }
 
@@ -771,16 +684,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 AddLinkDialog(
                     fromNode = pendingLinkNodes!!.first,
                     toNode = pendingLinkNodes!!.second,
-                    availableTracks = allTracks,
                     onDismiss = { viewModel.dismissConnectCableDialog() },
-                    onLinkCreated = { cableType, installationType, capacityFO, associatedTrackId ->
+                    onLinkCreated = { cableType, installationType, capacityFO ->
                         viewModel.createFiberLink(
                             pendingLinkNodes!!.first,
                             pendingLinkNodes!!.second,
                             cableType,
                             installationType,
-                            capacityFO,
-                            associatedTrackId
+                            capacityFO
                         )
                     }
                 )

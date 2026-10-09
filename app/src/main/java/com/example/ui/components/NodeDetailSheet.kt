@@ -605,23 +605,16 @@ fun NodeDetailSheet(
                     FtthNodeType.POTEAU -> {
                         Text(text = "Nature de l'appui :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(
-                                listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton"),
-                                listOf("composite" to "Composite", "façade" to "Façade")
-                            ).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { (nat, lbl) ->
-                                        FilterChip(
-                                            selected = poleNature.equals(nat, ignoreCase = true),
-                                            onClick = {
-                                                poleNature = nat
-                                                triggerAutoSave()
-                                            },
-                                            label = { Text(lbl, fontSize = 11.sp) }
-                                        )
-                                    }
-                                }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
+                                FilterChip(
+                                    selected = poleNature.equals(nat, ignoreCase = true),
+                                    onClick = {
+                                        poleNature = nat
+                                        triggerAutoSave()
+                                    },
+                                    label = { Text(lbl, fontSize = 11.sp) }
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))

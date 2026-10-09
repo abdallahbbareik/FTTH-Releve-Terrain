@@ -9,7 +9,6 @@ import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.data.local.SyncState
-import com.example.data.util.TrackGeometryHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -312,15 +311,24 @@ class DocumentStorageManager(private val context: Context) {
     }
 
     /**
-     * Vérifie et restaure le projet actif sauvegardé lors du démarrage
+     * Vérifie et restaure le projet par défaut ou existant lors d'un lancement ou après réinstallation
      */
     private fun ensureDefaultProjectExists() {
-        val saved = prefs.getString("active_project_name", null)
-        if (!saved.isNullOrBlank()) {
-            _currentProject = sanitizeProjectName(saved)
+        val projects = listAllProjects()
+        if (projects.isNotEmpty()) {
+            val existing = projects.firstOrNull { it.name == _currentProject }
+            if (existing == null) {
+                // Trouver le premier projet qui possède des données, sinon le premier de la liste
+                val projectWithData = projects.firstOrNull { it.nodesCount > 0 || it.tracksCount > 0 || it.linksCount > 0 }
+                    ?: projects.first()
+                _currentProject = projectWithData.name
+                prefs.edit().putString("active_project_name", _currentProject).apply()
+            }
         } else {
+            // Aucun projet sur le disque : préparer projet01 sans écraser de fichiers
             _currentProject = "projet01"
             prefs.edit().putString("active_project_name", "projet01").apply()
+            ensureProjectDirectoriesExist("projet01")
         }
     }
 
@@ -377,14 +385,13 @@ class DocumentStorageManager(private val context: Context) {
 
     fun listAllProjects(): List<ProjectInfo> {
         val projectMap = mutableMapOf<String, Long>()
-        val deletedProjects = PublicStorageHelper.getDeletedProjects(context)
 
         // 1. Scanner Documents/Releve-Terrain
         try {
             if (publicBaseDir.exists() && publicBaseDir.isDirectory) {
                 publicBaseDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap[file.name] = file.lastModified()
                     }
                 }
@@ -398,7 +405,7 @@ class DocumentStorageManager(private val context: Context) {
             if (publicDownloadsDir.exists() && publicDownloadsDir.isDirectory) {
                 publicDownloadsDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -412,7 +419,7 @@ class DocumentStorageManager(private val context: Context) {
             if (appExtBaseDir.exists() && appExtBaseDir.isDirectory) {
                 appExtBaseDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".") && !deletedProjects.contains(file.name)) {
+                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
                         projectMap.putIfAbsent(file.name, file.lastModified())
                     }
                 }
@@ -424,50 +431,24 @@ class DocumentStorageManager(private val context: Context) {
         // 4. Scanner via MediaStore (secours persistant après réinstallation)
         val mediaStoreProjects = PublicStorageHelper.listPublicProjects(context)
         for (p in mediaStoreProjects) {
-            if (!deletedProjects.contains(p)) {
-                projectMap.putIfAbsent(p, System.currentTimeMillis())
-            }
+            projectMap.putIfAbsent(p, System.currentTimeMillis())
         }
 
-        projectMap.keys.removeAll(deletedProjects)
-
         if (projectMap.isEmpty()) {
-            PublicStorageHelper.unmarkProjectDeleted(context, "projet01")
             projectMap["projet01"] = System.currentTimeMillis()
         }
 
         val result = mutableListOf<ProjectInfo>()
         for ((name, lastMod) in projectMap) {
-            var nCount = 0
-            var tCount = 0
-            var lCount = 0
-
-            val projDir = File(baseDir, name)
-            val nf = File(projDir, "noeuds.json")
-            if (nf.exists() && nf.length() > 2) {
-                try { nCount = JSONArray(nf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
-            }
-            val tf = File(projDir, "infra_lineaire.json")
-            if (tf.exists() && tf.length() > 2) {
-                try { tCount = JSONArray(tf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
-            }
-            val lf = File(projDir, "cables.json")
-            if (lf.exists() && lf.length() > 2) {
-                try { lCount = JSONArray(lf.readText(Charsets.UTF_8)).length() } catch (ignored: Exception) {}
-            }
-
-            if (name == _currentProject && nCount == 0 && tCount == 0 && lCount == 0) {
-                nCount = loadNodesForProject(name).size
-                tCount = loadTracksForProject(name).size
-                lCount = loadLinksForProject(name).size
-            }
-
+            val nodes = loadNodesForProject(name)
+            val tracks = loadTracksForProject(name)
+            val links = loadLinksForProject(name)
             result.add(
                 ProjectInfo(
                     name = name,
-                    nodesCount = nCount,
-                    tracksCount = tCount,
-                    linksCount = lCount,
+                    nodesCount = nodes.size,
+                    tracksCount = tracks.size,
+                    linksCount = links.size,
                     lastModified = lastMod,
                     isCurrent = name == _currentProject
                 )
@@ -505,53 +486,36 @@ class DocumentStorageManager(private val context: Context) {
     fun deleteProject(projectName: String): Boolean {
         val sanitized = sanitizeProjectName(projectName)
 
-        // Marquer comme supprimé pour filtrage immédiat
-        PublicStorageHelper.markProjectDeleted(context, sanitized)
-        PublicStorageHelper.markProjectDeleted(context, projectName)
-
-        // 1. Supprimer sur tous les dossiers physiques (Releve-Terrain et releve-terrain)
-        listOf(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
-            context.filesDir
-        ).forEach { baseDir ->
-            listOf("Releve-Terrain", "releve-terrain").forEach { subDirName ->
-                try {
-                    val targetBase = File(baseDir, subDirName)
-                    File(targetBase, sanitized).let { if (it.exists()) it.deleteRecursively() }
-                    File(targetBase, projectName).let { if (it.exists()) it.deleteRecursively() }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+        // 1. Supprimer sur tous les dossiers physiques
+        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+            try {
+                val dir = File(base, sanitized)
+                if (dir.exists()) {
+                    dir.deleteRecursively()
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
 
-        // 2. Supprimer via MediaStore
+        // 2. Supprimer via MediaStore et marquer tombstone
         PublicStorageHelper.deletePublicProject(context, sanitized)
-        PublicStorageHelper.deletePublicProject(context, projectName)
 
         // 3. Nettoyer les clés SharedPreferences pour ce projet
         prefs.edit()
             .remove("backup_nodes_json_$sanitized")
             .remove("backup_tracks_json_$sanitized")
             .remove("backup_links_json_$sanitized")
-            .remove("backup_nodes_json_$projectName")
-            .remove("backup_tracks_json_$projectName")
-            .remove("backup_links_json_$projectName")
-            .commit()
+            .apply()
 
         // 4. Si c'était le projet courant, basculer sur un autre projet existant
-        if (_currentProject.equals(sanitized, ignoreCase = true) || _currentProject.equals(projectName, ignoreCase = true)) {
-            val remaining = listAllProjects().filter {
-                !it.name.equals(sanitized, ignoreCase = true) && !it.name.equals(projectName, ignoreCase = true)
-            }
+        if (_currentProject == sanitized) {
+            val remaining = listAllProjects().filter { it.name != sanitized }
             if (remaining.isNotEmpty()) {
                 setCurrentProject(remaining.first().name)
             } else {
                 _currentProject = "projet01"
-                PublicStorageHelper.unmarkProjectDeleted(context, "projet01")
-                prefs.edit().putString("active_project_name", "projet01").commit()
+                prefs.edit().putString("active_project_name", "projet01").apply()
                 createProject("projet01", copyCurrent = false)
             }
         }
@@ -1092,7 +1056,6 @@ class DocumentStorageManager(private val context: Context) {
             cleanupIndividualGeoJsonFiles(sanitized)
             val currentNodes = nodes ?: loadNodes(sanitized)
             val nodesMap = currentNodes.associateBy { it.id }
-            val tracksMap = loadTracks(sanitized).associateBy { it.id }
 
             val root = JSONObject()
             root.put("type", "FeatureCollection")
@@ -1111,27 +1074,6 @@ class DocumentStorageManager(private val context: Context) {
                         put("type", "LineString")
                         val coords = JSONArray()
                         coords.put(JSONArray().put(n1.longitude).put(n1.latitude))
-
-                        val intermediatePts = TrackGeometryHelper.parseCablePoints(link.intermediatePoints)
-                        if (intermediatePts.isNotEmpty()) {
-                            for (pt in intermediatePts) {
-                                coords.put(JSONArray().put(pt.second).put(pt.first))
-                            }
-                        } else {
-                            val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
-                            if (assocTrack != null) {
-                                val pts = if (assocTrack.points.isNotEmpty()) assocTrack.points else assocTrack.rawPoints
-                                if (pts.isNotEmpty()) {
-                                    val distStart = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.first().latitude, pts.first().longitude)
-                                    val distEnd = TrackGeometryHelper.calculateDistanceMeters(n1.latitude, n1.longitude, pts.last().latitude, pts.last().longitude)
-                                    val orderedPts = if (distStart > distEnd) pts.reversed() else pts
-                                    for (pt in orderedPts) {
-                                        coords.put(JSONArray().put(pt.longitude).put(pt.latitude))
-                                    }
-                                }
-                            }
-                        }
-
                         coords.put(JSONArray().put(n2.longitude).put(n2.latitude))
                         put("coordinates", coords)
                     }
@@ -1355,8 +1297,6 @@ class DocumentStorageManager(private val context: Context) {
         put("lengthMeters", link.lengthMeters)
         put("status", link.status.name)
         put("updatedAt", link.updatedAt)
-        put("associatedTrackId", link.associatedTrackId)
-        put("intermediatePoints", link.intermediatePoints)
     }
 
     private fun linkFromJson(json: JSONObject): FtthLinkEntity {
@@ -1371,9 +1311,7 @@ class DocumentStorageManager(private val context: Context) {
             capacityFO = json.optInt("capacityFO", 12),
             lengthMeters = json.optDouble("lengthMeters", 0.0),
             status = status,
-            updatedAt = json.optLong("updatedAt", System.currentTimeMillis()),
-            associatedTrackId = json.optString("associatedTrackId", ""),
-            intermediatePoints = json.optString("intermediatePoints", "")
+            updatedAt = json.optLong("updatedAt", System.currentTimeMillis())
         )
     }
 }

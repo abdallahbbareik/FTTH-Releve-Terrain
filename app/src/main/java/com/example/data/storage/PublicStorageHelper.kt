@@ -20,31 +20,23 @@ object PublicStorageHelper {
     private const val DIR_NAME_LOWER = "releve-terrain"
     private const val PREFS_NAME = "ReleveTerrainDeletedProjects"
 
-    fun getDeletedProjects(context: Context): Set<String> {
+    private fun getDeletedProjects(context: Context): Set<String> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getStringSet("deleted_projects", emptySet()) ?: emptySet()
-    }
-
-    fun isProjectDeleted(context: Context, projectName: String): Boolean {
-        val deleted = getDeletedProjects(context)
-        return deleted.contains(projectName) || deleted.contains(projectName.lowercase())
     }
 
     fun markProjectDeleted(context: Context, projectName: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
         current.add(projectName)
-        current.add(projectName.lowercase())
-        prefs.edit().putStringSet("deleted_projects", HashSet(current)).commit()
+        prefs.edit().putStringSet("deleted_projects", current).apply()
     }
 
     fun unmarkProjectDeleted(context: Context, projectName: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
-        var changed = current.remove(projectName)
-        changed = current.remove(projectName.lowercase()) || changed
-        if (changed) {
-            prefs.edit().putStringSet("deleted_projects", HashSet(current)).commit()
+        if (current.remove(projectName)) {
+            prefs.edit().putStringSet("deleted_projects", current).apply()
         }
     }
 
@@ -59,9 +51,7 @@ object PublicStorageHelper {
         val parts = normalized.split("/")
         if (parts.size > 1) {
             val proj = parts[0]
-            if (isProjectDeleted(context, proj)) {
-                return false
-            }
+            unmarkProjectDeleted(context, proj)
         }
 
         // 1. Sauvegarde File API dans Documents/releve-terrain et Documents/Releve-Terrain

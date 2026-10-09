@@ -1,8 +1,5 @@
 package com.example.ui.components
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,25 +7,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -55,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -63,15 +53,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.AsyncImage
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
-import com.example.data.photo.PhotoStorageManager
 import com.example.data.util.AddressHelper
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Locale
 
 @Composable
@@ -150,34 +137,6 @@ fun AddNodeDialog(
     var villaConnectionMode by remember { mutableStateOf("aérien") }
 
     var isGeocoding by remember { mutableStateOf(false) }
-
-    // Photos initiales prises lors du piquetage
-    var initialPhotos by remember { mutableStateOf<List<String>>(emptyList()) }
-    var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
-    var tempCameraFile by remember { mutableStateOf<File?>(null) }
-
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
-            val finalizedPath = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
-            initialPhotos = initialPhotos + finalizedPath
-        } else {
-            tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
-        }
-    }
-
-    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            val effectiveId = nodeId.trim().ifEmpty { generatedId }
-            val savedPath = PhotoStorageManager.saveImportedPhoto(context, effectiveId, uri)
-            if (savedPath != null) {
-                initialPhotos = initialPhotos + savedPath
-            }
-        }
-    }
 
     // Auto-fetch address upon opening dialog
     LaunchedEffect(latitude, longitude) {
@@ -456,22 +415,14 @@ fun AddNodeDialog(
                 // Champs spécifiques
                 when (selectedType) {
                     FtthNodeType.POTEAU -> {
-                        Text(text = "Nature de l'appui :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(
-                                listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton"),
-                                listOf("composite" to "Composite", "façade" to "Façade")
-                            ).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { (nat, lbl) ->
-                                        FilterChip(
-                                            selected = poleNature.equals(nat, ignoreCase = true),
-                                            onClick = { poleNature = nat },
-                                            label = { Text(lbl, fontSize = 11.sp) }
-                                        )
-                                    }
-                                }
+                        Text(text = "Nature :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
+                                FilterChip(
+                                    selected = poleNature.equals(nat, ignoreCase = true),
+                                    onClick = { poleNature = nat },
+                                    label = { Text(lbl, fontSize = 11.sp) }
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
@@ -722,224 +673,6 @@ fun AddNodeDialog(
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // PHOTOS DU PIQUETAGE INITIAL
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AddAPhoto,
-                                contentDescription = "Photos",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Photos du piquetage initial (${initialPhotos.size})",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                val activeProject = remember { PhotoStorageManager.getProjectName(context) }
-                                val activeMode = remember { PhotoStorageManager.getPhotoResolutionMode(context) }
-                                Text(
-                                    text = "Dossier : releve-terrain/$activeProject/photos/",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "Résolution : ${activeMode.title} (${activeMode.subtitle})",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Boutons Appareil Photo et Galerie
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val effectiveId = nodeId.trim().ifEmpty { generatedId }
-                                        val file = PhotoStorageManager.createNewPhotoFile(context, effectiveId)
-                                        tempCameraFile = file
-                                        val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
-                                        takePictureLauncher.launch(uri)
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                        try {
-                                            pickVisualMediaLauncher.launch(
-                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                            )
-                                        } catch (ignored: Exception) {}
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("initial_take_photo_camera_button"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Appareil Photo", fontSize = 11.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    pickVisualMediaLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("initial_pick_photo_gallery_button"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Galerie", fontSize = 11.sp)
-                            }
-                        }
-
-                        // Liste des miniatures photos capturées
-                        if (initialPhotos.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                items(initialPhotos) { photoPath ->
-                                    val resolvedFile = PhotoStorageManager.resolvePhotoFile(context, photoPath)
-                                    val itemDetails = remember(photoPath) { PhotoStorageManager.getPhotoDetails(resolvedFile.absolutePath) }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(76.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.surface)
-                                            .clickable { viewingPhotoPath = photoPath }
-                                    ) {
-                                        AsyncImage(
-                                            model = resolvedFile,
-                                            contentDescription = "Photo piquetage",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-
-                                        // Badge résolution
-                                        if (itemDetails.width > 0) {
-                                            Surface(
-                                                shape = RoundedCornerShape(3.dp),
-                                                color = Color.Black.copy(alpha = 0.7f),
-                                                modifier = Modifier
-                                                    .align(Alignment.BottomCenter)
-                                                    .padding(bottom = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = if (itemDetails.megaPixelsLabel.isNotEmpty()) itemDetails.megaPixelsLabel else "${itemDetails.width}x${itemDetails.height}",
-                                                    color = Color.White,
-                                                    fontSize = 8.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
-                                                )
-                                            }
-                                        }
-
-                                        // Bouton Supprimer
-                                        IconButton(
-                                            onClick = {
-                                                PhotoStorageManager.deletePhoto(photoPath)
-                                                initialPhotos = initialPhotos - photoPath
-                                            },
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .size(22.dp)
-                                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Supprimer photo",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Aperçu plein écran de photo
-                val currentViewingPhoto = viewingPhotoPath
-                if (currentViewingPhoto != null) {
-                    val resolvedPreview = PhotoStorageManager.resolvePhotoFile(context, currentViewingPhoto)
-                    val photoDetails = PhotoStorageManager.getPhotoDetails(resolvedPreview.absolutePath)
-                    Dialog(onDismissRequest = { viewingPhotoPath = null }) {
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(280.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.Black)
-                                ) {
-                                    AsyncImage(
-                                        model = resolvedPreview,
-                                        contentDescription = "Aperçu photo piquetage",
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = resolvedPreview.name,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = "${photoDetails.resolutionLabel} (${photoDetails.megaPixelsLabel})",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = { viewingPhotoPath = null },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Fermer l'aperçu")
-                                }
-                            }
-                        }
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Actions
@@ -967,8 +700,6 @@ fun AddNodeDialog(
                                 address = address,
                                 hasBoitierFtth = if (selectedType == FtthNodeType.BOITIER || selectedType == FtthNodeType.VILLA || selectedType == FtthNodeType.SRO) false else hasBoitierFtth,
                                 notes = notes,
-                                photos = initialPhotos,
-                                photoCount = initialPhotos.size,
                                 poleNature = poleNature,
                                 poleHeight = poleHeight,
                                 chamberType = chamberType,
