@@ -62,6 +62,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val docStorage = DocumentStorageManager(application)
     private val gpsService = GpsLocationService(application)
 
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
     // Données GPS Temps Réel
     val userLocation: StateFlow<GpsLocationData?> = gpsService.currentLocation
     val gpsStatus: StateFlow<GpsStatus> = gpsService.gpsStatus
@@ -1463,12 +1466,17 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun reloadPersistedData() {
         viewModelScope.launch(Dispatchers.IO) {
+            _isLoading.value = true
+            delay(400)
             val loadedNodes = docStorage.loadNodes()
             val loadedLinks = docStorage.loadLinks()
             val loadedTracks = docStorage.loadTracks()
-            _rawNodes.value = loadedNodes
-            _rawLinks.value = loadedLinks
-            _allTracks.value = loadedTracks
+            withContext(Dispatchers.Main) {
+                _rawNodes.value = loadedNodes
+                _rawLinks.value = loadedLinks
+                _allTracks.value = loadedTracks
+                _isLoading.value = false
+            }
         }
     }
 

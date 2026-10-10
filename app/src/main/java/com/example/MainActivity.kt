@@ -220,6 +220,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val pendingLinkNodes by viewModel.pendingLinkNodes.collectAsStateWithLifecycle()
 
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
 
@@ -271,8 +272,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
         topBar = {
             Column {
                 PiquetageTopBar(
@@ -813,6 +815,48 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             // Dialogue bloquant avec barre de progression pour les tâches lourdes (ex: suppression de projet)
             if (blockingTaskState != null && blockingTaskState!!.isRunning) {
                 BlockingTaskDialog(state = blockingTaskState!!)
+            }
+        }
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .clickable(enabled = false) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .padding(32.dp)
+                            .testTag("loading_card"),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(56.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Text(
+                                text = "Démarrage de l'application...",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Chargement des projets et données topographiques...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }
