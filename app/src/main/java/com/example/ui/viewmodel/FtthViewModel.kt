@@ -148,11 +148,53 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedAdjustVertexIdx = MutableStateFlow<Int?>(null)
     val selectedAdjustVertexIdx: StateFlow<Int?> = _selectedAdjustVertexIdx.asStateFlow()
 
+    private val _isDragAllVerticesMode = MutableStateFlow(false)
+    val isDragAllVerticesMode: StateFlow<Boolean> = _isDragAllVerticesMode.asStateFlow()
+
     private val _liveAdjustDistance = MutableStateFlow<Double?>(null)
     val liveAdjustDistance: StateFlow<Double?> = _liveAdjustDistance.asStateFlow()
 
     fun selectAdjustVertex(index: Int?) {
         _selectedAdjustVertexIdx.value = index
+    }
+
+    fun setDragAllVerticesMode(enabled: Boolean) {
+        _isDragAllVerticesMode.value = enabled
+        if (enabled) {
+            showBanner("Mode Tous les sommets : Glissez n'importe quel sommet pour déplacer tout le tracé")
+        } else {
+            showBanner("Mode Sommet unique : Glissez un sommet individuel")
+        }
+    }
+
+    fun shiftAdjustTrackAllVertices(deltaLat: Double, deltaLon: Double, isDragEnd: Boolean = true) {
+        val track = _selectedAdjustTrack.value ?: return
+        val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
+        if (!isDragEnd) {
+            for (i in pts.indices) {
+                pts[i] = pts[i].copy(latitude = pts[i].latitude + deltaLat, longitude = pts[i].longitude + deltaLon)
+            }
+            val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+            _liveAdjustDistance.value = dist
+            return
+        }
+        _adjustHistory.add(pts.toList())
+        _canUndoAdjust.value = true
+        for (i in pts.indices) {
+            pts[i] = pts[i].copy(latitude = pts[i].latitude + deltaLat, longitude = pts[i].longitude + deltaLon)
+        }
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+        val updated = track.copy(points = pts, totalDistanceMeters = dist)
+        _selectedAdjustTrack.value = updated
+        _liveAdjustDistance.value = null
+
+        val all = _allTracks.value.toMutableList()
+        val idx = all.indexOfFirst { it.id == track.id }
+        if (idx >= 0) {
+            all[idx] = updated
+            _allTracks.value = all
+        }
+        showBanner("Tracé entier déplacé (${pts.size} sommets translatés)")
     }
 
     fun deleteAdjustTrackVertex(index: Int) {
@@ -186,6 +228,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isAdjustTrackMode.value = true
         _selectedAdjustTrack.value = track
         _selectedAdjustVertexIdx.value = null
+        _isDragAllVerticesMode.value = false
         _liveAdjustDistance.value = null
         _adjustTolerance.value = 5.0
         _isAdjustStraightenActive.value = false
@@ -378,6 +421,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isAdjustTrackMode.value = false
         _selectedAdjustTrack.value = null
         _selectedAdjustVertexIdx.value = null
+        _isDragAllVerticesMode.value = false
         _liveAdjustDistance.value = null
         _isAdjustStraightenActive.value = false
         _adjustStraightenStartIdx.value = null
@@ -402,6 +446,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isAdjustTrackMode.value = false
         _selectedAdjustTrack.value = null
         _selectedAdjustVertexIdx.value = null
+        _isDragAllVerticesMode.value = false
         _liveAdjustDistance.value = null
         _isAdjustStraightenActive.value = false
         _adjustStraightenStartIdx.value = null

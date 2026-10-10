@@ -26,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -372,6 +373,8 @@ fun TrackAdjustmentBottomBar(
     trackName: String,
     pointsCount: Int,
     distanceMeters: Double,
+    isDragAllVertices: Boolean = false,
+    onToggleDragAllVertices: (Boolean) -> Unit = {},
     selectedTolerance: Double = 5.0,
     onToleranceChanged: (Double) -> Unit = {},
     onSimplify: () -> Unit = {},
@@ -395,10 +398,10 @@ fun TrackAdjustmentBottomBar(
         elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
         modifier = modifier
             .fillMaxWidth()
-            .padding(10.dp)
+            .padding(8.dp)
             .testTag("track_adjustment_bottom_bar")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             // Header: Titre, métriques et boutons d'action d'historique
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -408,9 +411,9 @@ fun TrackAdjustmentBottomBar(
                     imageVector = Icons.Default.Edit,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Modification tracé : $trackName",
@@ -430,7 +433,7 @@ fun TrackAdjustmentBottomBar(
                 if (onResetOriginal != null) {
                     IconButton(
                         onClick = onResetOriginal,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -453,7 +456,7 @@ fun TrackAdjustmentBottomBar(
                 IconButton(
                     onClick = onUndo,
                     enabled = canUndo,
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -471,84 +474,158 @@ fun TrackAdjustmentBottomBar(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Zone d'état / Guide interactif
-            if (selectedVertexIdx != null) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFFEF3C7),
-                    modifier = Modifier.fillMaxWidth()
+            // Ligne 1 : Modes de glissement (Sommet unique / Tous les sommets)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Glissement :",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                FilterChip(
+                    selected = !isDragAllVertices,
+                    onClick = { onToggleDragAllVertices(false) },
+                    label = { Text("📍 Sommet par sommet", fontSize = 10.sp, fontWeight = if (!isDragAllVertices) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier.height(30.dp)
+                )
+
+                FilterChip(
+                    selected = isDragAllVertices,
+                    onClick = { onToggleDragAllVertices(true) },
+                    label = { Text("🌐 Tous les sommets", fontSize = 10.sp, fontWeight = if (isDragAllVertices) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier.height(30.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Ligne 2 : Outils Simplifier & Redresser
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Bouton Redresser
+                Button(
+                    onClick = onToggleStraighten,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isStraightenActive) Color(0xFFF59E0B) else MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = if (isStraightenActive) Color.Black else MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.NearMe,
-                            contentDescription = null,
-                            tint = Color(0xFFB45309),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Sommet #${selectedVertexIdx + 1} sélectionné",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF92400E),
-                            modifier = Modifier.weight(1f)
-                        )
+                    Icon(Icons.Default.LinearScale, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = if (isStraightenActive) "📏 Redresser actif" else "📏 Redresser",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-                        if (pointsCount > 2 && onDeleteSelectedVertex != null) {
-                            OutlinedButton(
-                                onClick = onDeleteSelectedVertex,
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                ),
-                                contentPadding = ButtonDefaults.TextButtonContentPadding,
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text("Supprimer", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                Spacer(modifier = Modifier.width(2.dp))
+
+                // Tolérances pour simplifier
+                val tolerances = listOf(3.0, 5.0, 10.0, 15.0, 20.0)
+                for (t in tolerances) {
+                    val isSelected = selectedTolerance == t
+                    OutlinedButton(
+                        onClick = { onToleranceChanged(t) },
+                        modifier = Modifier.weight(1f).height(30.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        Text("${t.toInt()}m", fontSize = 9.sp, fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal)
                     }
                 }
-            } else {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
+
+                // Bouton Simplifier
+                Button(
+                    onClick = onSimplify,
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🖐 Glissez directement un sommet avec le doigt sur la carte pour repositionner le tracé.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("✂ Simplifier", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Ligne 3 : Guide dynamique selon le mode actif
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isStraightenActive) Color(0xFFFEF3C7)
+                        else if (isDragAllVertices) Color(0xFFE0F2FE)
+                        else if (selectedVertexIdx != null) Color(0xFFFEF3C7)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val guideText = when {
+                        isStraightenActive -> if (straightenStartIdx == null) "📏 Touchez le 1er sommet (orange) à aligner" else "Sommet #${straightenStartIdx + 1} sélectionné. Touchez le 2ème sommet pour aligner."
+                        isDragAllVertices -> "🌐 Glissez n'importe quel sommet pour translater tout le tracé en bloc."
+                        selectedVertexIdx != null -> "📍 Sommet #${selectedVertexIdx + 1} sélectionné"
+                        else -> "🖐 Glissez un sommet pour modifier sa position."
+                    }
+                    val textColor = when {
+                        isStraightenActive -> Color(0xFF92400E)
+                        isDragAllVertices -> Color(0xFF0369A1)
+                        selectedVertexIdx != null -> Color(0xFF92400E)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Text(
+                        text = guideText,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1
+                    )
+
+                    if (!isStraightenActive && selectedVertexIdx != null && pointsCount > 2 && onDeleteSelectedVertex != null) {
+                        OutlinedButton(
+                            onClick = onDeleteSelectedVertex,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            contentPadding = ButtonDefaults.TextButtonContentPadding,
+                            modifier = Modifier.height(26.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(11.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("Supprimer", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Boutons principaux : Annuler & Valider
+            // Ligne 4 : Boutons principaux : Annuler & Valider
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = onCancel,
-                    modifier = Modifier.weight(1f).height(42.dp),
+                    modifier = Modifier.weight(1f).height(40.dp),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -559,7 +636,7 @@ fun TrackAdjustmentBottomBar(
                 Button(
                     onClick = onConfirm,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
-                    modifier = Modifier.weight(1.4f).height(42.dp),
+                    modifier = Modifier.weight(1.4f).height(40.dp),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))

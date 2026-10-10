@@ -128,10 +128,13 @@ fun OsmMapView(
     isAdjustTrackMode: Boolean = false,
     selectedAdjustTrack: StoredTrack? = null,
     selectedAdjustVertexIdx: Int? = null,
+    isDragAllVerticesMode: Boolean = false,
     isAdjustStraightenActive: Boolean = false,
     adjustStraightenStartIdx: Int? = null,
     onVertexDragged: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
     onVertexDragEnded: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
+    onAllVerticesDragged: ((deltaLat: Double, deltaLon: Double) -> Unit)? = null,
+    onAllVerticesDragEnded: ((deltaLat: Double, deltaLon: Double) -> Unit)? = null,
     onAdjustVertexClick: ((index: Int) -> Unit)? = null,
     onCancelPickOnMapMode: (() -> Unit)? = null,
     onUpdateStakingPosition: ((latitude: Double, longitude: Double) -> Unit)? = null,
@@ -259,7 +262,7 @@ fun OsmMapView(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isAdjustStraightenActive, adjustStraightenStartIdx
+        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx
     ) {
         mapView.overlays.clear()
 
@@ -363,18 +366,23 @@ fun OsmMapView(
                 }
                 mapView.overlays.add(polyline)
 
-                // Sommets en mode Modification du tracé (Glisser les sommets directement sur la carte)
+                // Sommets en mode Modification du tracé (Glisser sommet unique ou tous les sommets)
                 if (isAdjustTrackMode && selectedAdjustTrack?.id == track.id) {
+                    val adjustVertexMarkers = mutableListOf<Marker>()
+                    val initialTrackPoints = pts.map { GeoPoint(it.latitude, it.longitude) }
+
                     for ((idx, pt) in pts.withIndex()) {
-                        val isSelected = idx == selectedAdjustVertexIdx
+                        val isSelected = (idx == selectedAdjustVertexIdx) || (isAdjustStraightenActive && idx == adjustStraightenStartIdx)
                         val vertexMarker = object : Marker(mapView) {
                             private var isDraggingThis = false
                             private var downX = 0f
                             private var downY = 0f
+                            private var downGeoPoint: GeoPoint? = null
                             private val touchSlop = 6f * context.resources.displayMetrics.density
 
                             init {
                                 setAnchor(ANCHOR_CENTER, ANCHOR_CENTER)
+                                relatedObject = idx
                                 isDraggable = true
                             }
 
@@ -395,6 +403,9 @@ fun OsmMapView(
                                             isDraggingThis = false
                                             downX = event.x
                                             downY = event.y
+                                            val proj = mapView.projection
+                                            downGeoPoint = proj?.fromPixels(event.x.toInt(), event.y.toInt()) as? GeoPoint
+                                                ?: GeoPoint(position.latitude, position.longitude)
                                             mapView.parent?.requestDisallowInterceptTouchEvent(true)
                                             return true
                                         }
@@ -409,15 +420,37 @@ fun OsmMapView(
                                             mapView.parent?.requestDisallowInterceptTouchEvent(true)
                                             val proj = mapView.projection
                                             if (proj != null) {
-                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
-                                                position = geoPoint
-                                                val ptsList = polyline.actualPoints
-                                                if (idx in ptsList.indices) {
-                                                    ptsList[idx] = geoPoint
+                                                val currentGeo = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                if (isDragAllVerticesMode) {
+                                                    val startGeo = downGeoPoint ?: currentGeo
+                                                    val dLat = currentGeo.latitude - startGeo.latitude
+                                                    val dLon = currentGeo.longitude - startGeo.longitude
+                                                    val ptsList = polyline.actualPoints
+                                                    for (i in ptsList.indices) {
+                                                        if (i in initialTrackPoints.indices) {
+                                                            val initP = initialTrackPoints[i]
+                                                            ptsList[i] = GeoPoint(initP.latitude + dLat, initP.longitude + dLon)
+                                                        }
+                                                    }
                                                     polyline.setPoints(ptsList)
+                                                    for (m in adjustVertexMarkers) {
+                                                        val vIdx = (m.relatedObject as? Int) ?: continue
+                                                        if (vIdx in ptsList.indices) {
+                                                            m.position = ptsList[vIdx]
+                                                        }
+                                                    }
                                                     mapView.invalidate()
+                                                    onAllVerticesDragged?.invoke(dLat, dLon)
+                                                } else {
+                                                    position = currentGeo
+                                                    val ptsList = polyline.actualPoints
+                                                    if (idx in ptsList.indices) {
+                                                        ptsList[idx] = currentGeo
+                                                        polyline.setPoints(ptsList)
+                                                        mapView.invalidate()
+                                                    }
+                                                    onVertexDragged?.invoke(idx, currentGeo.latitude, currentGeo.longitude)
                                                 }
-                                                onVertexDragged?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
                                             }
                                             return true
                                         }
@@ -428,19 +461,20 @@ fun OsmMapView(
                                             isDraggingThis = false
                                             val proj = mapView.projection
                                             if (proj != null) {
-                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
-                                                position = geoPoint
-                                                val ptsList = polyline.actualPoints
-                                                if (idx in ptsList.indices) {
-                                                    ptsList[idx] = geoPoint
-                                                    polyline.setPoints(ptsList)
-                                                    mapView.invalidate()
+                                                val currentGeo = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                if (isDragAllVerticesMode) {
+                                                    val startGeo = downGeoPoint ?: currentGeo
+                                                    val dLat = currentGeo.latitude - startGeo.latitude
+                                                    val dLon = currentGeo.longitude - startGeo.longitude
+                                                    onAllVerticesDragEnded?.invoke(dLat, dLon)
+                                                } else {
+                                                    position = currentGeo
+                                                    onVertexDragEnded?.invoke(idx, currentGeo.latitude, currentGeo.longitude)
                                                 }
-                                                onVertexDragEnded?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
                                             }
                                             return true
                                         } else {
-                                            // Clic simple sans glissement : sélection/désélection du sommet
+                                            // Clic simple sans glissement : sélection/redressement/suppression
                                             onAdjustVertexClick?.invoke(idx)
                                             return true
                                         }
@@ -451,9 +485,15 @@ fun OsmMapView(
                                             isDraggingThis = false
                                             val proj = mapView.projection
                                             if (proj != null) {
-                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
-                                                position = geoPoint
-                                                onVertexDragEnded?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
+                                                val currentGeo = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                if (isDragAllVerticesMode) {
+                                                    val startGeo = downGeoPoint ?: currentGeo
+                                                    val dLat = currentGeo.latitude - startGeo.latitude
+                                                    val dLon = currentGeo.longitude - startGeo.longitude
+                                                    onAllVerticesDragEnded?.invoke(dLat, dLon)
+                                                } else {
+                                                    onVertexDragEnded?.invoke(idx, currentGeo.latitude, currentGeo.longitude)
+                                                }
                                             }
                                         }
                                         return true
@@ -466,6 +506,7 @@ fun OsmMapView(
                             title = "Sommet #${idx + 1}"
                             icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelected)
                         }
+                        adjustVertexMarkers.add(vertexMarker)
                         mapView.overlays.add(vertexMarker)
                     }
                 }
