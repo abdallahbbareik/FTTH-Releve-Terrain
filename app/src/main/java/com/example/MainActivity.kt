@@ -155,6 +155,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
     val isAdjustTrackMode by viewModel.isAdjustTrackMode.collectAsStateWithLifecycle()
     val selectedAdjustTrack by viewModel.selectedAdjustTrack.collectAsStateWithLifecycle()
+    val selectedAdjustVertexIdx by viewModel.selectedAdjustVertexIdx.collectAsStateWithLifecycle()
+    val liveAdjustDistance by viewModel.liveAdjustDistance.collectAsStateWithLifecycle()
     val adjustTolerance by viewModel.adjustTolerance.collectAsStateWithLifecycle()
     val isAdjustStraightenActive by viewModel.isAdjustStraightenActive.collectAsStateWithLifecycle()
     val adjustStraightenStartIdx by viewModel.adjustStraightenStartIdx.collectAsStateWithLifecycle()
@@ -381,22 +383,21 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     )
                 }
 
-                // Barre d'outils flottante : Mode Ajustement & Simplification de tracé (Fenêtre persistante)
+                // Barre d'outils flottante : Mode Modification de tracé (Fenêtre persistante jusqu'à validation)
                 if (isAdjustTrackMode && selectedAdjustTrack != null) {
                     val track = selectedAdjustTrack!!
                     val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
                     TrackAdjustmentBottomBar(
                         trackName = track.name,
                         pointsCount = pts.size,
-                        distanceMeters = track.totalDistanceMeters,
-                        selectedTolerance = adjustTolerance,
-                        onToleranceChanged = { tol -> viewModel.setAdjustTolerance(tol) },
-                        onSimplify = { viewModel.applyCurrentTrackSimplification() },
-                        isStraightenActive = isAdjustStraightenActive,
-                        onToggleStraighten = { viewModel.toggleAdjustStraightenMode() },
-                        straightenStartIdx = adjustStraightenStartIdx,
+                        distanceMeters = liveAdjustDistance ?: track.totalDistanceMeters,
                         canUndo = canUndoAdjust,
                         onUndo = { viewModel.undoLastAdjustAction() },
+                        selectedVertexIdx = selectedAdjustVertexIdx,
+                        onDeleteSelectedVertex = {
+                            selectedAdjustVertexIdx?.let { idx -> viewModel.deleteAdjustTrackVertex(idx) }
+                        },
+                        onResetOriginal = { viewModel.restoreOriginalTrack() },
                         onConfirm = { viewModel.confirmTrackAdjustment() },
                         onCancel = { viewModel.cancelTrackAdjustment() }
                     )
@@ -456,6 +457,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 isPickOnMapMode = isPickOnMapMode,
                 isAdjustTrackMode = isAdjustTrackMode,
                 selectedAdjustTrack = selectedAdjustTrack,
+                selectedAdjustVertexIdx = selectedAdjustVertexIdx,
                 isAdjustStraightenActive = isAdjustStraightenActive,
                 adjustStraightenStartIdx = adjustStraightenStartIdx,
                 onVertexDragged = { idx, lat, lon ->
@@ -465,7 +467,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     viewModel.updateAdjustTrackVertex(idx, lat, lon, isDragEnd = true)
                 },
                 onAdjustVertexClick = { idx ->
-                    viewModel.onAdjustVertexClicked(idx)
+                    viewModel.selectAdjustVertex(if (selectedAdjustVertexIdx == idx) null else idx)
                 },
                 onCancelPickOnMapMode = { viewModel.cancelPickOnMapMode() },
                 onUpdateStakingPosition = { lat, lon -> viewModel.updatePendingStakePosition(lat, lon) },

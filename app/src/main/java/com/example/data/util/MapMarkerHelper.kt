@@ -129,22 +129,29 @@ object MapMarkerHelper {
         return BitmapDrawable(context.resources, bitmap)
     }
 
-    fun createVertexDrawable(context: Context, number: Int, isSelected: Boolean): Drawable {
+    fun createVertexDrawable(context: Context, number: Int, isSelected: Boolean, sizeDp: Int = 28): Drawable {
         val density = context.resources.displayMetrics.density
-        val px = (24 * density).toInt()
+        val px = (sizeDp * density).toInt()
 
         val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val radius = px / 2f
 
+        // Draw shadow / outer halo for high visibility on both satellite and street map
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#40000000")
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(radius, radius, radius, haloPaint)
+
         val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isSelected) Color.parseColor("#EAB308") else Color.parseColor("#2563EB")
+            color = if (isSelected) Color.parseColor("#F59E0B") else Color.parseColor("#2563EB")
             style = Paint.Style.FILL
         }
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.STROKE
-            strokeWidth = 2f * density
+            strokeWidth = 2.5f * density
         }
 
         canvas.drawCircle(radius, radius, radius - (2f * density), circlePaint)
@@ -152,7 +159,7 @@ object MapMarkerHelper {
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (isSelected) Color.BLACK else Color.WHITE
-            textSize = 10f * density
+            textSize = 11f * density
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }

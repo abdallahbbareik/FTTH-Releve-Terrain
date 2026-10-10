@@ -127,6 +127,7 @@ fun OsmMapView(
     isPickOnMapMode: Boolean = false,
     isAdjustTrackMode: Boolean = false,
     selectedAdjustTrack: StoredTrack? = null,
+    selectedAdjustVertexIdx: Int? = null,
     isAdjustStraightenActive: Boolean = false,
     adjustStraightenStartIdx: Int? = null,
     onVertexDragged: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
@@ -258,7 +259,7 @@ fun OsmMapView(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, isAdjustStraightenActive, adjustStraightenStartIdx
+        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isAdjustStraightenActive, adjustStraightenStartIdx
     ) {
         mapView.overlays.clear()
 
@@ -362,48 +363,108 @@ fun OsmMapView(
                 }
                 mapView.overlays.add(polyline)
 
-                // Sommets en mode Ajustement & Simplification (Glisser les sommets & Redresser)
+                // Sommets en mode Modification du tracé (Glisser les sommets directement sur la carte)
                 if (isAdjustTrackMode && selectedAdjustTrack?.id == track.id) {
                     for ((idx, pt) in pts.withIndex()) {
-                        val vertexMarker = Marker(mapView).apply {
+                        val isSelected = idx == selectedAdjustVertexIdx
+                        val vertexMarker = object : Marker(mapView) {
+                            private var isDraggingThis = false
+                            private var downX = 0f
+                            private var downY = 0f
+                            private val touchSlop = 6f * context.resources.displayMetrics.density
+
+                            init {
+                                setAnchor(ANCHOR_CENTER, ANCHOR_CENTER)
+                                isDraggable = true
+                            }
+
+                            override fun hitTest(event: android.view.MotionEvent, mapView: MapView): Boolean {
+                                val pj = mapView.projection ?: return false
+                                val screenPt = pj.toPixels(position, null)
+                                val density = context.resources.displayMetrics.density
+                                val hitRadius = 32f * density // 32dp rayon = 64dp zone tactile
+                                val dx = event.x - screenPt.x
+                                val dy = event.y - screenPt.y
+                                return (dx * dx + dy * dy) <= (hitRadius * hitRadius)
+                            }
+
+                            override fun onTouchEvent(event: android.view.MotionEvent, mapView: MapView): Boolean {
+                                when (event.actionMasked) {
+                                    android.view.MotionEvent.ACTION_DOWN -> {
+                                        if (hitTest(event, mapView)) {
+                                            isDraggingThis = false
+                                            downX = event.x
+                                            downY = event.y
+                                            mapView.parent?.requestDisallowInterceptTouchEvent(true)
+                                            return true
+                                        }
+                                    }
+                                    android.view.MotionEvent.ACTION_MOVE -> {
+                                        val dx = event.x - downX
+                                        val dy = event.y - downY
+                                        if (!isDraggingThis && (dx * dx + dy * dy) > (touchSlop * touchSlop)) {
+                                            isDraggingThis = true
+                                        }
+                                        if (isDraggingThis) {
+                                            mapView.parent?.requestDisallowInterceptTouchEvent(true)
+                                            val proj = mapView.projection
+                                            if (proj != null) {
+                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                position = geoPoint
+                                                val ptsList = polyline.actualPoints
+                                                if (idx in ptsList.indices) {
+                                                    ptsList[idx] = geoPoint
+                                                    polyline.setPoints(ptsList)
+                                                    mapView.invalidate()
+                                                }
+                                                onVertexDragged?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
+                                            }
+                                            return true
+                                        }
+                                    }
+                                    android.view.MotionEvent.ACTION_UP -> {
+                                        mapView.parent?.requestDisallowInterceptTouchEvent(false)
+                                        if (isDraggingThis) {
+                                            isDraggingThis = false
+                                            val proj = mapView.projection
+                                            if (proj != null) {
+                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                position = geoPoint
+                                                val ptsList = polyline.actualPoints
+                                                if (idx in ptsList.indices) {
+                                                    ptsList[idx] = geoPoint
+                                                    polyline.setPoints(ptsList)
+                                                    mapView.invalidate()
+                                                }
+                                                onVertexDragEnded?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
+                                            }
+                                            return true
+                                        } else {
+                                            // Clic simple sans glissement : sélection/désélection du sommet
+                                            onAdjustVertexClick?.invoke(idx)
+                                            return true
+                                        }
+                                    }
+                                    android.view.MotionEvent.ACTION_CANCEL -> {
+                                        mapView.parent?.requestDisallowInterceptTouchEvent(false)
+                                        if (isDraggingThis) {
+                                            isDraggingThis = false
+                                            val proj = mapView.projection
+                                            if (proj != null) {
+                                                val geoPoint = proj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                                position = geoPoint
+                                                onVertexDragEnded?.invoke(idx, geoPoint.latitude, geoPoint.longitude)
+                                            }
+                                        }
+                                        return true
+                                    }
+                                }
+                                return super.onTouchEvent(event, mapView)
+                            }
+                        }.apply {
                             position = GeoPoint(pt.latitude, pt.longitude)
                             title = "Sommet #${idx + 1}"
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            val isSelectedForStraighten = isAdjustStraightenActive && idx == adjustStraightenStartIdx
-                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelectedForStraighten)
-
-                            if (isAdjustStraightenActive) {
-                                isDraggable = false
-                                setOnMarkerClickListener { _, _ ->
-                                    onAdjustVertexClick?.invoke(idx)
-                                    true
-                                }
-                            } else {
-                                isDraggable = true
-                                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
-                                    override fun onMarkerDrag(marker: Marker) {
-                                        val ptsList = polyline.actualPoints
-                                        if (idx in ptsList.indices) {
-                                            ptsList[idx] = marker.position
-                                            polyline.setPoints(ptsList)
-                                            mapView.invalidate()
-                                        }
-                                        onVertexDragged?.invoke(idx, marker.position.latitude, marker.position.longitude)
-                                    }
-
-                                    override fun onMarkerDragEnd(marker: Marker) {
-                                        onVertexDragEnded?.invoke(idx, marker.position.latitude, marker.position.longitude)
-                                    }
-
-                                    override fun onMarkerDragStart(marker: Marker) {
-                                        // Début de glissement
-                                    }
-                                })
-                                setOnMarkerClickListener { _, _ ->
-                                    // Clic en mode glissement : rien à faire pour ne pas gêner
-                                    false
-                                }
-                            }
+                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelected)
                         }
                         mapView.overlays.add(vertexMarker)
                     }

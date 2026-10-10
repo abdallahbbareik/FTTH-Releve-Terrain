@@ -140,7 +140,6 @@ fun TrackDetailDialog(
     var customDiameterInput by remember { mutableStateOf("") }
     var showAddCustomDiameter by remember { mutableStateOf(false) }
 
-    var selectedTolerance by remember { mutableDoubleStateOf(5.0) } // Tolérance par défaut 5m
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
@@ -193,16 +192,6 @@ fun TrackDetailDialog(
             }
         }
     }
-
-    // Calcul de l'aperçu RDP
-    val previewSimplifiedPoints = remember(currentPoints, selectedTolerance) {
-        TrackGeometryHelper.simplifyRamerDouglasPeucker(currentPoints, selectedTolerance)
-    }
-
-    val pointsReducedCount = currentPoints.size - previewSimplifiedPoints.size
-    val pointsReducedPercent = if (currentPoints.isNotEmpty()) {
-        (pointsReducedCount.toDouble() / currentPoints.size.toDouble() * 100).toInt()
-    } else 0
 
     Dialog(
         onDismissRequest = {
@@ -804,7 +793,7 @@ fun TrackDetailDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // --- BOUTON MODIFIER / AJUSTER TRACE ---
+                // --- BOUTON MODIFIER LE TRACÉ (GLISSER LES SOMMETS) ---
                 Button(
                     onClick = {
                         val updated = buildUpdatedTrack()
@@ -815,13 +804,13 @@ fun TrackDetailDialog(
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 ) {
-                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Modifier/Ajuster Trace", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Modifier le tracé (Glisser sommets)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
 
                 // Aperçu photo plein écran

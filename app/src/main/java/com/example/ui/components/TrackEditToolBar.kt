@@ -372,14 +372,17 @@ fun TrackAdjustmentBottomBar(
     trackName: String,
     pointsCount: Int,
     distanceMeters: Double,
-    selectedTolerance: Double,
-    onToleranceChanged: (Double) -> Unit,
-    onSimplify: () -> Unit,
-    isStraightenActive: Boolean,
-    onToggleStraighten: () -> Unit,
-    straightenStartIdx: Int?,
-    canUndo: Boolean,
+    selectedTolerance: Double = 5.0,
+    onToleranceChanged: (Double) -> Unit = {},
+    onSimplify: () -> Unit = {},
+    isStraightenActive: Boolean = false,
+    onToggleStraighten: () -> Unit = {},
+    straightenStartIdx: Int? = null,
+    canUndo: Boolean = false,
     onUndo: () -> Unit,
+    selectedVertexIdx: Int? = null,
+    onDeleteSelectedVertex: (() -> Unit)? = null,
+    onResetOriginal: (() -> Unit)? = null,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
@@ -395,14 +398,14 @@ fun TrackAdjustmentBottomBar(
             .padding(10.dp)
             .testTag("track_adjustment_bottom_bar")
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Header: Titre, métriques et boutons d'action
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header: Titre, métriques et boutons d'action d'historique
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Default.AutoFixHigh,
+                    imageVector = Icons.Default.Edit,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp)
@@ -410,70 +413,59 @@ fun TrackAdjustmentBottomBar(
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Ajustement : $trackName",
+                        text = "Modification tracé : $trackName",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
                     Text(
-                        text = "📍 $pointsCount sommets · 📏 $distStr",
+                        text = "📍 $pointsCount sommets  •  📏 $distStr",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
-                // Bouton Annuler/Défaire (↶)
+                // Bouton Rétablir d'origine (🔄) si disponible
+                if (onResetOriginal != null) {
+                    IconButton(
+                        onClick = onResetOriginal,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Rétablir le tracé initial",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                // Bouton Annuler/Défaire dernière modif (↶)
                 IconButton(
                     onClick = onUndo,
                     enabled = canUndo,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (canUndo) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        color = if (canUndo) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                     ) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(
                                 Icons.Default.Undo,
-                                contentDescription = "Annuler la dernière action",
+                                contentDescription = "Annuler la dernière modification",
                                 tint = if (canUndo) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Bouton Valider (✓)
-                IconButton(
-                    onClick = onConfirm,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF16A34A)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Check, contentDescription = "Valider et enregistrer", tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Bouton Fermer/Annuler (✕)
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Close, contentDescription = "Fermer", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -481,88 +473,98 @@ fun TrackAdjustmentBottomBar(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Ligne Outil 1 : ✂ Tolérance & Simplifier
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                val tolerances = listOf(3.0, 5.0, 10.0, 15.0, 20.0)
-                for (t in tolerances) {
-                    val isSelected = selectedTolerance == t
-                    OutlinedButton(
-                        onClick = { onToleranceChanged(t) },
-                        modifier = Modifier.weight(1f).height(32.dp),
-                        contentPadding = ButtonDefaults.TextButtonContentPadding,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                        )
+            // Zone d'état / Guide interactif
+            if (selectedVertexIdx != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFFEF3C7),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("${t.toInt()}m", fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal)
+                        Icon(
+                            Icons.Default.NearMe,
+                            contentDescription = null,
+                            tint = Color(0xFFB45309),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Sommet #${selectedVertexIdx + 1} sélectionné",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF92400E),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (pointsCount > 2 && onDeleteSelectedVertex != null) {
+                            OutlinedButton(
+                                onClick = onDeleteSelectedVertex,
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                contentPadding = ButtonDefaults.TextButtonContentPadding,
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text("Supprimer", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
-
-                Button(
-                    onClick = onSimplify,
-                    modifier = Modifier.height(32.dp),
-                    contentPadding = ButtonDefaults.TextButtonContentPadding,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text("Simplifier", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🖐 Glissez directement un sommet avec le doigt sur la carte pour repositionner le tracé.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Ligne Outil 2 : 📏 Redresser & Astuce Glisser
+            // Boutons principaux : Annuler & Valider
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = onToggleStraighten,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isStraightenActive) Color(0xFFEAB308) else MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = if (isStraightenActive) Color.Black else MaterialTheme.colorScheme.onSecondaryContainer
-                    ),
-                    modifier = Modifier.height(34.dp),
-                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Icon(Icons.Default.LinearScale, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isStraightenActive) "📏 Redresser actif" else "📏 Redresser",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Annuler", fontSize = 12.sp)
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isStraightenActive) Color(0xFFFEF3C7) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.weight(1f).height(34.dp)
+                Button(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                    modifier = Modifier.weight(1.4f).height(42.dp),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        val guideText = if (isStraightenActive) {
-                            if (straightenStartIdx == null) "Touchez 1er sommet (orange)" else "Touchez 2ème sommet pour aligner"
-                        } else {
-                            "🖐 Glissez un sommet sur la carte"
-                        }
-                        Text(
-                            text = guideText,
-                            fontSize = 10.sp,
-                            fontWeight = if (isStraightenActive) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isStraightenActive) Color(0xFF92400E) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                    }
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Valider ($pointsCount pts)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
