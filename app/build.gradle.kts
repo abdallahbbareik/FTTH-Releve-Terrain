@@ -16,8 +16,9 @@ android {
     applicationId = "com.aistudio.ftthpiquetage.zkwx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 2
+    versionCode = 100 + githubRunNumber
+    versionName = "1.0.$githubRunNumber"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -31,7 +32,9 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
+      val rootKs = file("${rootDir}/debug.keystore")
+      val appKs = file("${projectDir}/debug.keystore")
+      storeFile = if (rootKs.exists()) rootKs else appKs
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"

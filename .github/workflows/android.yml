@@ -45,10 +45,12 @@ jobs:
         run: |
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
+            cp debug.keystore app/debug.keystore || true
           elif [ ! -f debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore -storepass android \
               -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
               -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            cp debug.keystore app/debug.keystore || true
           fi
 
       - name: Run Unit & Robolectric Tests
@@ -57,11 +59,16 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon -Dksp.incremental=false --stacktrace
 
+      - name: Prepare Named Release APK
+        run: |
+          mkdir -p release-apks
+          cp app/build/outputs/apk/debug/*.apk release-apks/OptiFTTH-v1.0.${{ github.run_number }}.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: optiftth-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: optiftth-debug-apk-build-${{ github.run_number }}
+          path: release-apks/*.apk
           retention-days: 14
 
       - name: Upload Test Reports
@@ -73,18 +80,21 @@ jobs:
           retention-days: 7
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref_name == 'main' || github.ref_name == 'master')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: Release v1.0.${{ github.run_number }}
+          name: OptiFTTH v1.0.${{ github.run_number }}
           body: |
-            ### 📱 Nouvelle version Releve-Terrain (Build #${{ github.run_number }})
+            ### 📱 Mise à jour OptiFTTH (Build #${{ github.run_number }})
+            - **Version Code Android :** ${{ github.run_number }}
             - **Commit :** ${{ github.sha }}
             - **Branche :** ${{ github.ref_name }}
             
-            Téléchargez le fichier `app-debug.apk` ci-dessous et installez-le directement sur votre smartphone Android.
-          files: app/build/outputs/apk/debug/*.apk
+            **Instructions d'installation :**
+            1. Téléchargez le fichier `.apk` ci-dessous (`OptiFTTH-v1.0.${{ github.run_number }}.apk`).
+            2. *Note importante :* Si vous aviez une ancienne version installée avant la configuration de cette clé, désinstallez-la une première fois. Ensuite, toutes les futures versions se mettront à jour directement sans perte de données.
+          files: release-apks/*.apk
           draft: false
           prerelease: false
         env:
