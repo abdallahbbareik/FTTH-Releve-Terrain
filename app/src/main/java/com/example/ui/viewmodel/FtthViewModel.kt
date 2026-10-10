@@ -73,17 +73,17 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentProject = MutableStateFlow(docStorage.currentProject)
     val currentProject: StateFlow<String> = _currentProject.asStateFlow()
 
-    private val _allProjects = MutableStateFlow<List<ProjectInfo>>(docStorage.listAllProjects())
+    private val _allProjects = MutableStateFlow<List<ProjectInfo>>(emptyList())
     val allProjects: StateFlow<List<ProjectInfo>> = _allProjects.asStateFlow()
 
     // Entités en mémoire synchronisées avec les fichiers JSON du projet actif
-    private val _rawNodes = MutableStateFlow<List<FtthNodeEntity>>(docStorage.loadNodes())
+    private val _rawNodes = MutableStateFlow<List<FtthNodeEntity>>(emptyList())
     val rawNodes: StateFlow<List<FtthNodeEntity>> = _rawNodes.asStateFlow()
 
-    private val _rawLinks = MutableStateFlow<List<FtthLinkEntity>>(docStorage.loadLinks())
+    private val _rawLinks = MutableStateFlow<List<FtthLinkEntity>>(emptyList())
     val rawLinks: StateFlow<List<FtthLinkEntity>> = _rawLinks.asStateFlow()
 
-    private val _allTracks = MutableStateFlow<List<StoredTrack>>(docStorage.loadTracks())
+    private val _allTracks = MutableStateFlow<List<StoredTrack>>(emptyList())
     val allTracks: StateFlow<List<StoredTrack>> = _allTracks.asStateFlow()
 
     // Trace GPS Automatique en direct
@@ -707,16 +707,21 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
         // Restauration et synchronisation automatique des projets et entités depuis Documents/Releve-Terrain
         viewModelScope.launch(Dispatchers.IO) {
+            _isLoading.value = true
+            delay(200)
             val projects = docStorage.listAllProjects()
-            _allProjects.value = projects
             val curProj = docStorage.currentProject
-            _currentProject.value = curProj
             val nodes = docStorage.loadNodes(curProj)
             val links = docStorage.loadLinks(curProj)
             val tracks = docStorage.loadTracks(curProj)
-            _rawNodes.value = nodes
-            _rawLinks.value = links
-            _allTracks.value = tracks
+            withContext(Dispatchers.Main) {
+                _allProjects.value = projects
+                _currentProject.value = curProj
+                _rawNodes.value = nodes
+                _rawLinks.value = links
+                _allTracks.value = tracks
+                _isLoading.value = false
+            }
             if (nodes.isNotEmpty() || tracks.isNotEmpty() || links.isNotEmpty()) {
                 _bannerMessage.value = "Données chargées : ${nodes.size} nœuds, ${tracks.size} infra_lineaire, ${links.size} câbles ($curProj)"
             }
