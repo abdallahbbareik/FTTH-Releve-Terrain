@@ -2,31 +2,30 @@ name: Android CI & Build Workflow
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "**" ]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  ACTIONS_RUNNER_FORCE_NODE24: "true"
-
 jobs:
   build:
     name: Build & Test OptiFTTH
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -36,22 +35,26 @@ jobs:
 
       - name: Create Mock .env File
         run: |
-          cp .env.example .env || touch .env
+          cp .env.example .env 2>/dev/null || touch .env
 
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew
 
-      - name: Restore Debug Keystore
+      - name: Restore Fixed Debug Keystore
         run: |
+          mkdir -p ~/.android
           if [ -f debug.keystore.base64 ]; then
+            echo "Restoring from debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore
-            cp debug.keystore app/debug.keystore || true
-          elif [ ! -f debug.keystore ]; then
-            keytool -genkeypair -v -keystore debug.keystore -storepass android \
-              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
-              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-            cp debug.keystore app/debug.keystore || true
+          elif [ -f debug.keystore ]; then
+            echo "Using existing debug.keystore..."
+          else
+            echo "Using embedded persistent debug key..."
+            echo "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" | base64 -d > debug.keystore
           fi
+          # Placer la cle debug aux 3 emplacements pour AGP
+          cp -f debug.keystore app/debug.keystore || true
+          cp -f debug.keystore ~/.android/debug.keystore || true
 
       - name: Run Unit & Robolectric Tests
         run: ./gradlew testDebugUnitTest --no-daemon -Dksp.incremental=false --stacktrace
@@ -80,20 +83,20 @@ jobs:
           retention-days: 7
 
       - name: Create GitHub Release
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref_name == 'main' || github.ref_name == 'master')
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.${{ github.run_number }}
-          name: OptiFTTH v1.1.${{ github.run_number }}
+          tag_name: v1.0.${{ github.run_number }}
+          name: OptiFTTH v1.0.${{ github.run_number }}
           body: |
             ### 📱 Mise à jour OptiFTTH (Build #${{ github.run_number }})
             - **Version Code Android :** ${{ github.run_number }}
             - **Commit :** ${{ github.sha }}
             - **Branche :** ${{ github.ref_name }}
-            
+
             **Instructions d'installation :**
-            1. Téléchargez le fichier `.apk` ci-dessous (`OptiFTTH-v1.0.${{ github.run_number }}.apk`).
-            2. *Note importante :* Si vous aviez une ancienne version installée avant la configuration de cette clé, désinstallez-la une première fois. Ensuite, toutes les futures versions se mettront à jour directement sans perte de données.
+            1. Téléchargez l'APK ci-dessous (`OptiFTTH-v1.0.${{ github.run_number }}.apk`).
+            2. Installez-le : les mises à jour s'appliquent directement sans désinstaller ni perdre de données grâce à la signature fixe.
           files: release-apks/*.apk
           draft: false
           prerelease: false
