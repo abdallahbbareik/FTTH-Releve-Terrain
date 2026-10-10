@@ -373,8 +373,6 @@ fun TrackAdjustmentBottomBar(
     trackName: String,
     pointsCount: Int,
     distanceMeters: Double,
-    isDragAllVertices: Boolean = false,
-    onToggleDragAllVertices: (Boolean) -> Unit = {},
     selectedTolerance: Double = 5.0,
     onToleranceChanged: (Double) -> Unit = {},
     onSimplify: () -> Unit = {},
@@ -474,36 +472,6 @@ fun TrackAdjustmentBottomBar(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Ligne 1 : Modes de glissement (Sommet unique / Tous les sommets)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "Glissement :",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                FilterChip(
-                    selected = !isDragAllVertices,
-                    onClick = { onToggleDragAllVertices(false) },
-                    label = { Text("📍 Sommet par sommet", fontSize = 10.sp, fontWeight = if (!isDragAllVertices) FontWeight.Bold else FontWeight.Normal) },
-                    modifier = Modifier.height(30.dp)
-                )
-
-                FilterChip(
-                    selected = isDragAllVertices,
-                    onClick = { onToggleDragAllVertices(true) },
-                    label = { Text("🌐 Tous les sommets", fontSize = 10.sp, fontWeight = if (isDragAllVertices) FontWeight.Bold else FontWeight.Normal) },
-                    modifier = Modifier.height(30.dp)
-                )
-            }
-
             Spacer(modifier = Modifier.height(6.dp))
 
             // Ligne 2 : Outils Simplifier & Redresser
@@ -565,12 +533,10 @@ fun TrackAdjustmentBottomBar(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Ligne 3 : Guide dynamique selon le mode actif
+            // Guide dynamique et actions sur le sommet sélectionné
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = if (isStraightenActive) Color(0xFFFEF3C7)
-                        else if (isDragAllVertices) Color(0xFFE0F2FE)
-                        else if (selectedVertexIdx != null) Color(0xFFFEF3C7)
+                color = if (isStraightenActive || selectedVertexIdx != null) Color(0xFFFEF3C7)
                         else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -582,14 +548,11 @@ fun TrackAdjustmentBottomBar(
                 ) {
                     val guideText = when {
                         isStraightenActive -> if (straightenStartIdx == null) "📏 Touchez le 1er sommet (orange) à aligner" else "Sommet #${straightenStartIdx + 1} sélectionné. Touchez le 2ème sommet pour aligner."
-                        isDragAllVertices -> "🌐 Glissez n'importe quel sommet pour translater tout le tracé en bloc."
-                        selectedVertexIdx != null -> "📍 Sommet #${selectedVertexIdx + 1} sélectionné"
-                        else -> "🖐 Glissez un sommet pour modifier sa position."
+                        selectedVertexIdx != null -> "📍 Sommet #${selectedVertexIdx + 1} sélectionné (glissez pour déplacer)"
+                        else -> "🖐 Glissez directement un sommet sur la carte pour modifier sa position."
                     }
                     val textColor = when {
-                        isStraightenActive -> Color(0xFF92400E)
-                        isDragAllVertices -> Color(0xFF0369A1)
-                        selectedVertexIdx != null -> Color(0xFF92400E)
+                        isStraightenActive || selectedVertexIdx != null -> Color(0xFF92400E)
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     Text(

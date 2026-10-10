@@ -392,8 +392,6 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         trackName = track.name,
                         pointsCount = pts.size,
                         distanceMeters = liveAdjustDistance ?: track.totalDistanceMeters,
-                        isDragAllVertices = isDragAllVerticesMode,
-                        onToggleDragAllVertices = { enabled -> viewModel.setDragAllVerticesMode(enabled) },
                         selectedTolerance = adjustTolerance,
                         onToleranceChanged = { tol -> viewModel.setAdjustTolerance(tol) },
                         onSimplify = { viewModel.applyCurrentTrackSimplification() },

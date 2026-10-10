@@ -146,6 +146,11 @@ fun TrackDetailDialog(
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
 
     val currentPoints = if (track.points.isNotEmpty()) track.points else track.rawPoints
+    var selectedTolerance by remember { mutableDoubleStateOf(track.toleranceMeters?.takeIf { it > 0.0 } ?: 5.0) }
+    val previewSimplifiedPoints = remember(currentPoints, selectedTolerance) {
+        TrackGeometryHelper.simplifyRamerDouglasPeucker(currentPoints, selectedTolerance)
+    }
+    val pointsReducedCount = (currentPoints.size - previewSimplifiedPoints.size).coerceAtLeast(0)
     val lengthMeters = track.totalDistanceMeters
     val distKm = lengthMeters / 1000.0
     val distStr = if (lengthMeters < 1000.0) "${lengthMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distKm)
@@ -793,24 +798,133 @@ fun TrackDetailDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // --- BOUTON MODIFIER LE TRACÉ (GLISSER LES SOMMETS) ---
-                Button(
-                    onClick = {
-                        val updated = buildUpdatedTrack()
-                        onSaveTrack(updated)
-                        onStartAdjustTrack(updated)
-                        onDismiss()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                // --- SECTION AJUSTEMENT & OUTILS DU TRACÉ ---
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth().testTag("track_tools_card")
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Modifier le tracé (Glisser sommets)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoFixHigh,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Ajustement & Outils du tracé",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Bouton principal : Modifier le tracé (Glisser les sommets sur la carte)
+                        Button(
+                            onClick = {
+                                val updated = buildUpdatedTrack()
+                                onSaveTrack(updated)
+                                onStartAdjustTrack(updated)
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Modifier le tracé (Glisser sommets sur carte)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Outil Simplification (RDP)
+                        Text(
+                            text = "✂ Simplification automatique (RDP) :",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val tolerances = listOf(3.0, 5.0, 10.0, 15.0, 20.0)
+                            for (t in tolerances) {
+                                val isSelected = selectedTolerance == t
+                                OutlinedButton(
+                                    onClick = { selectedTolerance = t },
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                ) {
+                                    Text("${t.toInt()}m", fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Aperçu : ${currentPoints.size} → ${previewSimplifiedPoints.size} sommets (-$pointsReducedCount sommets)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onApplySimplification(track.id, previewSimplifiedPoints, selectedTolerance)
+                                },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                enabled = pointsReducedCount > 0
+                            ) {
+                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Appliquer simplification", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            if (track.isSimplified || (track.rawPoints.isNotEmpty() && track.rawPoints.size != track.points.size)) {
+                                OutlinedButton(
+                                    onClick = { onRestoreOriginal(track.id) },
+                                    modifier = Modifier.height(38.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Rétablir initial", fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Outil Redresser tronçon
+                        OutlinedButton(
+                            onClick = {
+                                val updated = buildUpdatedTrack()
+                                onSaveTrack(updated)
+                                onStartStraightenMode(updated)
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth().height(38.dp)
+                        ) {
+                            Icon(Icons.Default.LinearScale, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("📏 Redresser un tronçon sur la carte", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
 
                 // Aperçu photo plein écran
