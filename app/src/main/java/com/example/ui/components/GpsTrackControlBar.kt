@@ -139,6 +139,22 @@ fun GpsTrackControlBar(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                         )
                     }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Badge rassurant : Arrière-plan & Écran éteint actif
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF16A34A).copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "🔒 En poche OK",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))

@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.annotation.DrawableRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.Build
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.R
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
@@ -38,6 +40,16 @@ object FtthNodeVisuals {
         FtthNodeType.VILLA -> ColorVilla
     }
 
+    @DrawableRes
+    fun getNodeDrawableRes(type: FtthNodeType): Int = when (type) {
+        FtthNodeType.POTEAU -> R.drawable.ic_node_poteau
+        FtthNodeType.CHAMBRE -> R.drawable.ic_node_chambre
+        FtthNodeType.BOITIER -> R.drawable.ic_node_boitier
+        FtthNodeType.SRO -> R.drawable.ic_node_sro
+        FtthNodeType.IMMEUBLE -> R.drawable.ic_node_immeuble
+        FtthNodeType.VILLA -> R.drawable.ic_node_villa
+    }
+
     fun getNodeIcon(type: FtthNodeType): ImageVector = when (type) {
         FtthNodeType.POTEAU -> Icons.Default.FiberManualRecord
         FtthNodeType.CHAMBRE -> Icons.Default.Layers
@@ -53,6 +65,18 @@ object FtthNodeVisuals {
         NodeStatus.A_POSER -> Color(0xFF16A34A)         // Green
         NodeStatus.A_REMPLACER -> Color(0xFFEA580C)     // Orange
         NodeStatus.A_DEPOSER -> Color(0xFFDC2626)       // Red
+        NodeStatus.RACCORDEE -> Color(0xFF16A34A)       // Green for Raccordée
+        NodeStatus.NON_RACCORDEE -> Color(0xFFEA580C)   // Orange for Non raccordée
+    }
+
+    fun getStatusDisplayLabel(status: NodeStatus, type: FtthNodeType? = null): String {
+        if (type == FtthNodeType.IMMEUBLE || type == FtthNodeType.VILLA) {
+            return when (status) {
+                NodeStatus.NON_RACCORDEE, NodeStatus.EN_CONSTRUCTION, NodeStatus.A_POSER, NodeStatus.A_DEPOSER, NodeStatus.A_REMPLACER -> "Non raccordée"
+                else -> "Raccordée"
+            }
+        }
+        return status.label
     }
 
     fun getConformityColor(etat: NodeConformity): Color = when (etat) {

@@ -5,9 +5,11 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.export.RealExportService
+import com.example.data.gps.GpsForegroundService
 import com.example.data.gps.GpsLocationData
 import com.example.data.gps.GpsLocationService
 import com.example.data.gps.GpsStatus
+import com.example.data.gps.GpsTrackingBridge
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
@@ -20,16 +22,20 @@ import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
+import com.example.ui.components.BlockingTaskState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 enum class MapLayerType(val label: String) {
     CADASTRE("Plan OpenStreetMap"),
@@ -119,6 +125,241 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _tempMoveNodePosition = MutableStateFlow<Pair<Double, Double>?>(null)
     val tempMoveNodePosition: StateFlow<Pair<Double, Double>?> = _tempMoveNodePosition.asStateFlow()
 
+    // Mode Ajustement & Simplification de tracé (Fenêtre flottante persistante)
+    private val _isAdjustTrackMode = MutableStateFlow(false)
+    val isAdjustTrackMode: StateFlow<Boolean> = _isAdjustTrackMode.asStateFlow()
+
+    private val _selectedAdjustTrack = MutableStateFlow<StoredTrack?>(null)
+    val selectedAdjustTrack: StateFlow<StoredTrack?> = _selectedAdjustTrack.asStateFlow()
+
+    private val _adjustTolerance = MutableStateFlow(5.0)
+    val adjustTolerance: StateFlow<Double> = _adjustTolerance.asStateFlow()
+
+    private val _isAdjustStraightenActive = MutableStateFlow(false)
+    val isAdjustStraightenActive: StateFlow<Boolean> = _isAdjustStraightenActive.asStateFlow()
+
+    private val _adjustStraightenStartIdx = MutableStateFlow<Int?>(null)
+    val adjustStraightenStartIdx: StateFlow<Int?> = _adjustStraightenStartIdx.asStateFlow()
+
+    private val _adjustHistory = mutableListOf<List<TrackPoint>>()
+    private val _canUndoAdjust = MutableStateFlow(false)
+    val canUndoAdjust: StateFlow<Boolean> = _canUndoAdjust.asStateFlow()
+
+    fun startTrackAdjustment(track: StoredTrack) {
+        _isAdjustTrackMode.value = true
+        _selectedAdjustTrack.value = track
+        _adjustTolerance.value = 5.0
+        _isAdjustStraightenActive.value = false
+        _adjustStraightenStartIdx.value = null
+        _adjustHistory.clear()
+        val curPts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+        _adjustHistory.add(curPts)
+        _canUndoAdjust.value = false
+
+        if (curPts.isNotEmpty()) {
+            val mid = curPts[curPts.size / 2]
+            _mapFocusTarget.value = Pair(mid.latitude, mid.longitude)
+        }
+        showBanner("Ajustement : Glissez un sommet, touchez Simplifier ou Redresser")
+    }
+
+    fun setAdjustTolerance(tolerance: Double) {
+        _adjustTolerance.value = tolerance
+    }
+
+    fun updateAdjustTrackVertex(index: Int, lat: Double, lon: Double, isDragEnd: Boolean = true) {
+        val track = _selectedAdjustTrack.value ?: return
+        val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
+        if (index in pts.indices) {
+            if (isDragEnd) {
+                _adjustHistory.add(pts.toList())
+                _canUndoAdjust.value = true
+            }
+            pts[index] = pts[index].copy(latitude = lat, longitude = lon)
+            val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+            val updated = track.copy(points = pts, totalDistanceMeters = dist)
+            _selectedAdjustTrack.value = updated
+
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == track.id }
+            if (idx >= 0) {
+                all[idx] = updated
+                _allTracks.value = all
+            }
+            if (isDragEnd) {
+                showBanner("Sommet #${index + 1} ajusté (${String.format(Locale.FRANCE, "%.1f m", dist)})")
+            }
+        }
+    }
+
+    fun applyCurrentTrackSimplification() {
+        val track = _selectedAdjustTrack.value ?: return
+        val currentPoints = if (track.points.isNotEmpty()) track.points else track.rawPoints
+        if (currentPoints.size <= 2) {
+            showBanner("Le tracé a déjà le nombre minimum de sommets")
+            return
+        }
+        _adjustHistory.add(currentPoints)
+        _canUndoAdjust.value = true
+
+        val simplified = TrackGeometryHelper.simplifyRamerDouglasPeucker(currentPoints, _adjustTolerance.value)
+        val reduced = currentPoints.size - simplified.size
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(simplified)
+        val updated = track.copy(
+            points = simplified,
+            isSimplified = true,
+            toleranceMeters = _adjustTolerance.value,
+            totalDistanceMeters = dist
+        )
+        _selectedAdjustTrack.value = updated
+        val all = _allTracks.value.toMutableList()
+        val idx = all.indexOfFirst { it.id == track.id }
+        if (idx >= 0) {
+            all[idx] = updated
+            _allTracks.value = all
+        }
+        showBanner("Tracé simplifié : ${currentPoints.size} → ${simplified.size} sommets (-$reduced sommets)")
+    }
+
+    fun toggleAdjustStraightenMode() {
+        val current = _isAdjustStraightenActive.value
+        _isAdjustStraightenActive.value = !current
+        _adjustStraightenStartIdx.value = null
+        if (!current) {
+            showBanner("Redresser : Touchez le sommet de départ (il devient orange), puis le sommet d'arrivée")
+        } else {
+            showBanner("Outil Redresser désactivé")
+        }
+    }
+
+    fun onAdjustVertexClicked(index: Int) {
+        if (!_isAdjustStraightenActive.value) return
+        val startIdx = _adjustStraightenStartIdx.value
+        if (startIdx == null) {
+            _adjustStraightenStartIdx.value = index
+            showBanner("Sommet de départ #${index + 1} sélectionné (orange). Touchez le sommet d'arrivée.")
+        } else if (startIdx == index) {
+            _adjustStraightenStartIdx.value = null
+            showBanner("Sélection annulée. Touchez le sommet de départ.")
+        } else {
+            val track = _selectedAdjustTrack.value ?: return
+            val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+            _adjustHistory.add(pts)
+            _canUndoAdjust.value = true
+
+            val (minIdx, maxIdx) = if (startIdx < index) Pair(startIdx, index) else Pair(index, startIdx)
+            val straightened = TrackGeometryHelper.straightenBetweenVertices(pts, minIdx, maxIdx)
+            val dist = TrackGeometryHelper.computeTotalDistanceMeters(straightened)
+            val updated = track.copy(points = straightened, totalDistanceMeters = dist)
+            _selectedAdjustTrack.value = updated
+
+            val all = _allTracks.value.toMutableList()
+            val tIdx = all.indexOfFirst { it.id == track.id }
+            if (tIdx >= 0) {
+                all[tIdx] = updated
+                _allTracks.value = all
+            }
+
+            _adjustStraightenStartIdx.value = null
+            _isAdjustStraightenActive.value = false
+            showBanner("Tronçon #${minIdx + 1} à #${maxIdx + 1} redressé en ligne droite !")
+        }
+    }
+
+    fun undoLastAdjustAction() {
+        if (_adjustHistory.isNotEmpty()) {
+            val prevPoints = _adjustHistory.removeAt(_adjustHistory.lastIndex)
+            val track = _selectedAdjustTrack.value ?: return
+            val dist = TrackGeometryHelper.computeTotalDistanceMeters(prevPoints)
+            val updated = track.copy(
+                points = prevPoints,
+                totalDistanceMeters = dist,
+                isSimplified = prevPoints.size < track.rawPoints.size
+            )
+            _selectedAdjustTrack.value = updated
+            val all = _allTracks.value.toMutableList()
+            val idx = all.indexOfFirst { it.id == track.id }
+            if (idx >= 0) {
+                all[idx] = updated
+                _allTracks.value = all
+            }
+            _canUndoAdjust.value = _adjustHistory.isNotEmpty()
+            _adjustStraightenStartIdx.value = null
+            showBanner("Action annulée ↶ (${prevPoints.size} sommets)")
+        } else {
+            restoreOriginalTrack()
+        }
+    }
+
+    fun restoreOriginalTrack() {
+        val track = _selectedAdjustTrack.value ?: return
+        if (track.rawPoints.isEmpty()) return
+        _adjustHistory.add(track.points)
+        _canUndoAdjust.value = true
+        val updated = track.copy(
+            points = track.rawPoints,
+            isSimplified = false,
+            totalDistanceMeters = TrackGeometryHelper.computeTotalDistanceMeters(track.rawPoints)
+        )
+        _selectedAdjustTrack.value = updated
+        val all = _allTracks.value.toMutableList()
+        val idx = all.indexOfFirst { it.id == track.id }
+        if (idx >= 0) {
+            all[idx] = updated
+            _allTracks.value = all
+        }
+        showBanner("Tracé d'origine rétabli (${track.rawPoints.size} sommets)")
+    }
+
+    fun cancelTrackAdjustment() {
+        if (_adjustHistory.isNotEmpty()) {
+            val initial = _adjustHistory.first()
+            val track = _selectedAdjustTrack.value
+            if (track != null) {
+                val restored = track.copy(
+                    points = initial,
+                    totalDistanceMeters = TrackGeometryHelper.computeTotalDistanceMeters(initial)
+                )
+                val all = _allTracks.value.toMutableList()
+                val idx = all.indexOfFirst { it.id == track.id }
+                if (idx >= 0) {
+                    all[idx] = restored
+                    _allTracks.value = all
+                    viewModelScope.launch(Dispatchers.IO) { docStorage.saveTracks(all) }
+                }
+            }
+        }
+        _isAdjustTrackMode.value = false
+        _selectedAdjustTrack.value = null
+        _isAdjustStraightenActive.value = false
+        _adjustStraightenStartIdx.value = null
+        _adjustHistory.clear()
+        _canUndoAdjust.value = false
+        showBanner("Modification annulée")
+    }
+
+    fun confirmTrackAdjustment() {
+        val track = _selectedAdjustTrack.value
+        if (track != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val all = _allTracks.value.toMutableList()
+                val idx = all.indexOfFirst { it.id == track.id }
+                if (idx >= 0) {
+                    all[idx] = track
+                    _allTracks.value = all
+                    docStorage.saveTracks(all)
+                }
+            }
+        }
+        _isAdjustTrackMode.value = false
+        _selectedAdjustTrack.value = null
+        _isAdjustStraightenActive.value = false
+        _adjustStraightenStartIdx.value = null
+        _adjustHistory.clear()
+        _canUndoAdjust.value = false
+        showBanner("Modifications du tracé enregistrées avec succès ✓")
+    }
+
     // Mode Déplacement de Sommet de Trajet sur la Carte
     private val _isMoveVertexMode = MutableStateFlow(false)
     val isMoveVertexMode: StateFlow<Boolean> = _isMoveVertexMode.asStateFlow()
@@ -191,6 +432,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _bannerMessage = MutableStateFlow<String?>(null)
     val bannerMessage: StateFlow<String?> = _bannerMessage.asStateFlow()
 
+    // Tâche bloquante avec barre de progression
+    private val _blockingTaskState = MutableStateFlow<BlockingTaskState?>(null)
+    val blockingTaskState: StateFlow<BlockingTaskState?> = _blockingTaskState.asStateFlow()
+
     // Journal d'activité local
     private val _syncLogs = MutableStateFlow<List<SyncLogEntity>>(emptyList())
     val syncLogs: StateFlow<List<SyncLogEntity>> = _syncLogs.asStateFlow()
@@ -237,10 +482,42 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     init {
         gpsService.start()
 
-        // Enregistrement automatique des points si trace GPS active
+        // Synchronisation bidirectionnelle avec GpsTrackingBridge pour la résilience totale en arrière-plan et écran éteint
+        if (GpsTrackingBridge.isTrackingRunning.value) {
+            _activeTrack.value = GpsTrackingBridge.activeTrack.value
+            _activeTrackPoints.value = GpsTrackingBridge.activeTrackPoints.value
+        }
+
+        viewModelScope.launch {
+            GpsTrackingBridge.activeTrack.collect { track ->
+                _activeTrack.value = track
+            }
+        }
+        viewModelScope.launch {
+            GpsTrackingBridge.activeTrackPoints.collect { pts ->
+                _activeTrackPoints.value = pts
+            }
+        }
+        viewModelScope.launch {
+            GpsTrackingBridge.stopRequested.collect {
+                stopAutoGpsTrack()
+            }
+        }
+
+        // Disparition automatique des messages de notification après exactement 2 secondes (2000 ms)
+        viewModelScope.launch {
+            _bannerMessage.collectLatest { msg ->
+                if (msg != null) {
+                    delay(2000L)
+                    _bannerMessage.value = null
+                }
+            }
+        }
+
+        // Fallback d'enregistrement si l'application est au premier plan et que le service n'a pas encore démarré
         viewModelScope.launch {
             userLocation.collect { loc ->
-                if (loc != null && _activeTrack.value != null) {
+                if (loc != null && _activeTrack.value != null && !GpsTrackingBridge.isTrackingRunning.value) {
                     recordActiveTrackPoint(loc)
                 }
             }
@@ -314,14 +591,36 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- GESTION DES NOEUDS (DOCUMENTS/RELEVE-TERRAIN/NOEUDS.JSON) ---
 
-    fun saveNode(node: FtthNodeEntity, isNew: Boolean = false, closeSheet: Boolean = true) {
+    fun saveNode(node: FtthNodeEntity, oldId: String? = null, isNew: Boolean = false, closeSheet: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) {
             val list = _rawNodes.value.toMutableList()
-            val idx = list.indexOfFirst { it.id == node.id }
+            val targetId = oldId ?: node.id
+            val idx = list.indexOfFirst { it.id == targetId }
             if (idx >= 0) {
                 list[idx] = node
             } else {
-                list.add(0, node)
+                val existingById = list.indexOfFirst { it.id == node.id }
+                if (existingById >= 0) {
+                    list[existingById] = node
+                } else {
+                    list.add(0, node)
+                }
+            }
+
+            // Si l'identifiant a été modifié, mettre à jour les liaisons (câbles) associées
+            if (oldId != null && oldId != node.id) {
+                val currentLinks = _rawLinks.value
+                val updatedLinks = currentLinks.map { link ->
+                    when {
+                        link.fromNodeId == oldId -> link.copy(fromNodeId = node.id)
+                        link.toNodeId == oldId -> link.copy(toNodeId = node.id)
+                        else -> link
+                    }
+                }
+                if (updatedLinks != currentLinks) {
+                    _rawLinks.value = updatedLinks
+                    docStorage.saveLinks(updatedLinks)
+                }
             }
 
             var createdAutoBoitier: FtthNodeEntity? = null
@@ -433,13 +732,29 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isManualTrackMode.value = true
         _manualTrackPoints.value = emptyList()
         _manualTrackPhotos.value = emptyList()
-        _bannerMessage.value = "Mode Tracé Manuel : Touchez la carte pour ajouter des sommets"
+        showBanner("Mode Tracé Manuel : Touchez un nœud ou la carte pour démarrer le tracé")
     }
 
     fun addManualTrackPoint(lat: Double, lon: Double) {
+        // Détection d'accrochage magnétique si un nœud existant est très proche (< 15 mètres)
+        val nearestNode = _rawNodes.value.minByOrNull {
+            TrackGeometryHelper.calculateDistanceMeters(it.latitude, it.longitude, lat, lon)
+        }
+        val isSnapped = nearestNode != null &&
+                TrackGeometryHelper.calculateDistanceMeters(nearestNode.latitude, nearestNode.longitude, lat, lon) <= 15.0
+
+        val targetLat = if (isSnapped) nearestNode!!.latitude else lat
+        val targetLon = if (isSnapped) nearestNode!!.longitude else lon
+
         val current = _manualTrackPoints.value.toMutableList()
-        current.add(TrackPoint(lat, lon))
+        current.add(TrackPoint(targetLat, targetLon))
         _manualTrackPoints.value = current
+
+        if (isSnapped) {
+            val node = nearestNode!!
+            val nameDisplay = if (node.name.isNotBlank()) " (${node.name})" else " (${node.type.label})"
+            showBanner("Tracé accroché au nœud ${node.id}$nameDisplay")
+        }
     }
 
     fun undoLastManualTrackPoint() {
@@ -526,12 +841,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         )
         _activeTrack.value = track
         _activeTrackPoints.value = emptyList()
-        _bannerMessage.value = "Enregistrement de l'infra linéaire GPS démarré"
+        GpsTrackingBridge.startSession(track)
+        GpsForegroundService.startTracking(getApplication(), name)
+        _bannerMessage.value = "Enregistrement infra linéaire démarré (actif en arrière-plan et écran verrouillé)"
     }
 
     fun addActiveTrackPhoto(photoPath: String) {
         val active = _activeTrack.value ?: return
-        val currentPhotos = active.photos.toMutableList()
         val userLoc = userLocation.value
         val lat = userLoc?.latitude ?: _activeTrackPoints.value.lastOrNull()?.latitude ?: 34.0
         val lon = userLoc?.longitude ?: _activeTrackPoints.value.lastOrNull()?.longitude ?: 9.5375
@@ -540,13 +856,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             latitude = lat,
             longitude = lon
         )
-        currentPhotos.add(photo)
-        val updated = active.copy(photos = currentPhotos)
-        _activeTrack.value = updated
-        _bannerMessage.value = "Photo géoréférencée ajoutée au tracé (${currentPhotos.size} photos)"
+        GpsTrackingBridge.addPhoto(photo)
+        val count = (_activeTrack.value?.photos?.size ?: 0)
+        _bannerMessage.value = "Photo géoréférencée ajoutée au tracé ($count photos)"
     }
 
     fun cancelActiveTrack() {
+        GpsForegroundService.stopTracking(getApplication())
+        GpsTrackingBridge.stopSession()
         _activeTrack.value = null
         _activeTrackPoints.value = emptyList()
         _bannerMessage.value = "Enregistrement du tracé annulé"
@@ -573,8 +890,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopAutoGpsTrack() {
         viewModelScope.launch(Dispatchers.IO) {
-            val active = _activeTrack.value ?: return@launch
-            val pts = _activeTrackPoints.value
+            val active = _activeTrack.value ?: GpsTrackingBridge.activeTrack.value ?: return@launch
+            GpsForegroundService.stopTracking(getApplication())
+            val pts = _activeTrackPoints.value.ifEmpty { GpsTrackingBridge.activeTrackPoints.value }
             val finished = active.copy(
                 endTime = System.currentTimeMillis(),
                 isActive = false,
@@ -582,6 +900,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 points = pts,
                 totalDistanceMeters = TrackGeometryHelper.computeTotalDistanceMeters(pts)
             )
+            GpsTrackingBridge.stopSession()
             val all = _allTracks.value.toMutableList()
             all.add(0, finished)
             _allTracks.value = all
@@ -848,7 +1167,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         toNode: FtthNodeEntity,
         cableType: String,
         installationType: String,
-        capacityFO: Int
+        capacityFO: Int,
+        associatedTrackId: String = ""
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             val dist = TrackGeometryHelper.calculateDistanceMeters(
@@ -864,6 +1184,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 installationType = installationType,
                 capacityFO = capacityFO,
                 lengthMeters = (dist * 10).toInt() / 10.0,
+                associatedTrackId = associatedTrackId,
                 status = NodeStatus.EXISTANT
             )
             val list = _rawLinks.value.toMutableList()
@@ -880,20 +1201,51 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     // --- DIALOGUES & ACTIONS INTERFACE ---
 
     fun selectNode(node: FtthNodeEntity?) {
-        if (_isCableDrawingMode.value && node != null) {
+        if (node == null) {
+            _selectedNode.value = null
+            return
+        }
+
+        // 1. Mode Tracé Manuel : accrochage immédiat du tracé au nœud (bloque l'ouverture de la fiche)
+        if (_isManualTrackMode.value) {
+            addManualTrackPoint(node.latitude, node.longitude)
+            val nameDisplay = if (node.name.isNotBlank()) " (${node.name})" else " (${node.type.label})"
+            showBanner("Tracé accroché au nœud ${node.id}$nameDisplay")
+            return
+        }
+
+        // 2. Mode Prise de Trace GPS Automatique : accrochage de la trace au nœud (bloque l'ouverture de la fiche)
+        if (_activeTrack.value != null) {
+            GpsTrackingBridge.addSnapPoint(node.latitude, node.longitude)
+            val nameDisplay = if (node.name.isNotBlank()) " (${node.name})" else " (${node.type.label})"
+            showBanner("Trace GPS accrochée au nœud ${node.id}$nameDisplay")
+            return
+        }
+
+        // 3. Mode Câblage
+        if (_isCableDrawingMode.value) {
             val first = _cableFirstNode.value
             if (first == null) {
                 _cableFirstNode.value = node
-                _bannerMessage.value = "Sélectionnez le second nœud à relier"
+                showBanner("Sélectionnez le second nœud à relier")
             } else if (first.id != node.id) {
                 _pendingLinkNodes.value = Pair(first, node)
                 _showConnectCableDialog.value = true
                 _cableFirstNode.value = null
                 _isCableDrawingMode.value = false
             }
-        } else {
-            _selectedNode.value = node
+            return
         }
+
+        // 4. Bloquer l'ouverture de la fiche si une autre action cartographique spécifique est en cours
+        if (_movingNode.value != null || _isMoveVertexMode.value || _isStraightenMode.value ||
+            _isPickOnMapMode.value || _pendingStakePosition.value != null
+        ) {
+            return
+        }
+
+        // 5. Mode Normal : ouverture de la fiche de consultation/modification du nœud
+        _selectedNode.value = node
     }
 
     fun openTrackDetail(track: StoredTrack) {
@@ -1061,18 +1413,53 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteProject(projectName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            docStorage.deleteProject(projectName)
-            val nextProject = docStorage.currentProject
-            _currentProject.value = nextProject
-            val nodes = docStorage.loadNodes(nextProject)
-            val links = docStorage.loadLinks(nextProject)
-            val tracks = docStorage.loadTracks(nextProject)
+            _blockingTaskState.value = BlockingTaskState(
+                isRunning = true,
+                title = "Suppression du projet",
+                message = "Préparation de la suppression de '$projectName'...",
+                progress = 0.10f
+            )
+            try {
+                docStorage.deleteProjectFast(projectName) { progress, message ->
+                    _blockingTaskState.value = BlockingTaskState(
+                        isRunning = true,
+                        title = "Suppression du projet",
+                        message = message,
+                        progress = progress
+                    )
+                }
 
-            _rawNodes.value = nodes
-            _rawLinks.value = links
-            _allTracks.value = tracks
-            _allProjects.value = docStorage.listAllProjects()
-            _bannerMessage.value = "Projet '$projectName' supprimé"
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression du projet",
+                    message = "Chargement des données du projet actif...",
+                    progress = 0.90f
+                )
+
+                val nextProject = docStorage.currentProject
+                _currentProject.value = nextProject
+                val nodes = docStorage.loadNodes(nextProject)
+                val links = docStorage.loadLinks(nextProject)
+                val tracks = docStorage.loadTracks(nextProject)
+
+                _rawNodes.value = nodes
+                _rawLinks.value = links
+                _allTracks.value = tracks
+                _allProjects.value = docStorage.listAllProjects()
+
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression terminée",
+                    message = "Projet '$projectName' supprimé avec succès.",
+                    progress = 1.0f
+                )
+                delay(300L)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _blockingTaskState.value = null
+                _bannerMessage.value = "Projet '$projectName' supprimé"
+            }
         }
     }
 
@@ -1096,7 +1483,12 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissExportDialog() { _showExportDialog.value = false }
     fun dismissConnectCableDialog() { _showConnectCableDialog.value = false }
     fun dismissBanner() { _bannerMessage.value = null }
-    fun showBanner(message: String) { _bannerMessage.value = message }
+    fun showBanner(message: String) {
+        if (_bannerMessage.value == message) {
+            _bannerMessage.value = null
+        }
+        _bannerMessage.value = message
+    }
 
     fun resetDemoData() {
         viewModelScope.launch(Dispatchers.IO) {

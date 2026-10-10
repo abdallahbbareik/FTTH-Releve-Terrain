@@ -38,11 +38,8 @@ enum class GpsStatus(val label: String) {
 
 class GpsLocationService(private val context: Context) {
 
-    private val _currentLocation = MutableStateFlow<GpsLocationData?>(null)
-    val currentLocation: StateFlow<GpsLocationData?> = _currentLocation.asStateFlow()
-
-    private val _gpsStatus = MutableStateFlow(GpsStatus.SEARCHING)
-    val gpsStatus: StateFlow<GpsStatus> = _gpsStatus.asStateFlow()
+    val currentLocation: StateFlow<GpsLocationData?> = _sharedLocation.asStateFlow()
+    val gpsStatus: StateFlow<GpsStatus> = _sharedGpsStatus.asStateFlow()
 
     private var fusedClient: FusedLocationProviderClient? = null
     private var locationCallback: LocationCallback? = null
@@ -60,7 +57,7 @@ class GpsLocationService(private val context: Context) {
     fun start() {
         if (isStarted) return
         if (!hasLocationPermission()) {
-            _gpsStatus.value = GpsStatus.NO_PERMISSION
+            _sharedGpsStatus.value = GpsStatus.NO_PERMISSION
             return
         }
 
@@ -69,9 +66,9 @@ class GpsLocationService(private val context: Context) {
                 locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
 
         if (!isGpsEnabled) {
-            _gpsStatus.value = GpsStatus.DISABLED
+            _sharedGpsStatus.value = GpsStatus.DISABLED
         } else {
-            _gpsStatus.value = GpsStatus.SEARCHING
+            _sharedGpsStatus.value = GpsStatus.SEARCHING
         }
 
         try {
@@ -113,8 +110,8 @@ class GpsLocationService(private val context: Context) {
             }
             @Deprecated("Deprecated in Java")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            override fun onProviderEnabled(provider: String) { _gpsStatus.value = GpsStatus.SEARCHING }
-            override fun onProviderDisabled(provider: String) { _gpsStatus.value = GpsStatus.DISABLED }
+            override fun onProviderEnabled(provider: String) { _sharedGpsStatus.value = GpsStatus.SEARCHING }
+            override fun onProviderDisabled(provider: String) { _sharedGpsStatus.value = GpsStatus.DISABLED }
         }
 
         try {
@@ -125,22 +122,12 @@ class GpsLocationService(private val context: Context) {
             }
             isStarted = true
         } catch (e: Exception) {
-            _gpsStatus.value = GpsStatus.DISABLED
+            _sharedGpsStatus.value = GpsStatus.DISABLED
         }
     }
 
     private fun updateLocation(loc: Location) {
-        val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0.0f
-        _currentLocation.value = GpsLocationData(
-            latitude = loc.latitude,
-            longitude = loc.longitude,
-            altitude = if (loc.hasAltitude()) loc.altitude else 0.0,
-            accuracy = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
-            speedKmh = speedKmh,
-            bearing = if (loc.hasBearing()) loc.bearing else 0.0f,
-            timestamp = loc.time
-        )
-        _gpsStatus.value = GpsStatus.FIXED
+        updateSharedLocation(loc)
     }
 
     fun stop() {
@@ -156,6 +143,30 @@ class GpsLocationService(private val context: Context) {
     }
 
     companion object {
+        private val _sharedLocation = MutableStateFlow<GpsLocationData?>(null)
+        val sharedLocation: StateFlow<GpsLocationData?> = _sharedLocation.asStateFlow()
+
+        private val _sharedGpsStatus = MutableStateFlow(GpsStatus.SEARCHING)
+        val sharedGpsStatus: StateFlow<GpsStatus> = _sharedGpsStatus.asStateFlow()
+
+        fun updateSharedLocation(loc: Location) {
+            val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0.0f
+            _sharedLocation.value = GpsLocationData(
+                latitude = loc.latitude,
+                longitude = loc.longitude,
+                altitude = if (loc.hasAltitude()) loc.altitude else 0.0,
+                accuracy = if (loc.hasAccuracy()) loc.accuracy else 10.0f,
+                speedKmh = speedKmh,
+                bearing = if (loc.hasBearing()) loc.bearing else 0.0f,
+                timestamp = loc.time
+            )
+            _sharedGpsStatus.value = GpsStatus.FIXED
+        }
+
+        fun updateSharedStatus(status: GpsStatus) {
+            _sharedGpsStatus.value = status
+        }
+
         fun calculateDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val results = FloatArray(1)
             Location.distanceBetween(lat1, lon1, lat2, lon2, results)

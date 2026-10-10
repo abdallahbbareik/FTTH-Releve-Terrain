@@ -1,9 +1,12 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -89,10 +93,12 @@ import androidx.compose.material.icons.filled.NearMe
 @Composable
 fun NodeDetailSheet(
     node: FtthNodeEntity,
+    existingNodes: List<FtthNodeEntity> = emptyList(),
     userLocation: GpsLocationData? = null,
+    currentProject: String = "projet01",
     onDismiss: () -> Unit,
-    onSave: (FtthNodeEntity) -> Unit,
-    onAutoSave: ((FtthNodeEntity) -> Unit)? = null,
+    onSave: (updated: FtthNodeEntity, oldId: String) -> Unit,
+    onAutoSave: ((updated: FtthNodeEntity, oldId: String) -> Unit)? = null,
     onDelete: (String) -> Unit,
     onStartMoveNodeOnMap: (FtthNodeEntity) -> Unit = {}
 ) {
@@ -108,9 +114,23 @@ fun NodeDetailSheet(
     var latitude by remember(node) { mutableDoubleStateOf(node.latitude) }
     var longitude by remember(node) { mutableDoubleStateOf(node.longitude) }
 
+    // Identifiant (éditable et unique)
+    var currentId by remember(node) { mutableStateOf(node.id) }
+    val isDuplicateId = remember(currentId, existingNodes) {
+        existingNodes.any { it.id.equals(currentId.trim(), ignoreCase = true) && it.id != node.id }
+    }
+
+    // Opérateur
+    var operator by remember(node) { mutableStateOf(node.operator) }
+    var isCustomOperator by remember(node) {
+        mutableStateOf(node.operator.isNotBlank() && !listOf("Tunisie Telecom", "Orange", "Ooredoo", "STEG").contains(node.operator))
+    }
+
     // Champs communs à tous les types
-    var name by remember(node) { mutableStateOf(node.name) }
     var status by remember(node) { mutableStateOf(node.status) }
+    var buildingName by remember(node) {
+        mutableStateOf(node.buildingName.ifBlank { if (node.name != node.id && (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA)) node.name else "" })
+    }
     var etat by remember(node) { mutableStateOf(node.etat) }
     var address by remember(node) { mutableStateOf(node.address) }
     var hasBoitierFtth by remember(node) { mutableStateOf(node.hasBoitierFtth) }
@@ -152,11 +172,23 @@ fun NodeDetailSheet(
     var isGeocoding by remember { mutableStateOf(false) }
 
     fun buildCurrentNode(currentPhotos: List<String> = photos): FtthNodeEntity {
+        val finalId = currentId.trim().ifEmpty { node.id }
+        val finalOp = if (node.type == FtthNodeType.POTEAU || node.type == FtthNodeType.CHAMBRE) operator.trim() else ""
+        val finalBuildingName = if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) buildingName.trim() else ""
+        val finalName = if (finalBuildingName.isNotBlank()) finalBuildingName else finalId
+        val finalStatus = if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) {
+            if (status == NodeStatus.NON_RACCORDEE || status == NodeStatus.EN_CONSTRUCTION || status == NodeStatus.A_POSER || status == NodeStatus.A_DEPOSER || status == NodeStatus.A_REMPLACER) NodeStatus.NON_RACCORDEE else NodeStatus.RACCORDEE
+        } else {
+            status
+        }
         return node.copy(
-            name = name,
+            id = finalId,
+            name = finalName,
+            buildingName = finalBuildingName,
+            operator = finalOp,
             latitude = latitude,
             longitude = longitude,
-            status = status,
+            status = finalStatus,
             etat = etat,
             address = address,
             hasBoitierFtth = if (node.type == FtthNodeType.BOITIER || node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
@@ -187,8 +219,10 @@ fun NodeDetailSheet(
     }
 
     fun triggerAutoSave(currentPhotos: List<String> = photos) {
-        val updated = buildCurrentNode(currentPhotos)
-        onAutoSave?.invoke(updated)
+        if (!isDuplicateId && currentId.isNotBlank()) {
+            val updated = buildCurrentNode(currentPhotos)
+            onAutoSave?.invoke(updated, node.id)
+        }
     }
 
     val takePictureLauncher = rememberLauncherForActivityResult(
@@ -251,10 +285,10 @@ fun NodeDetailSheet(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = FtthNodeVisuals.getNodeIcon(node.type),
+                            painter = painterResource(FtthNodeVisuals.getNodeDrawableRes(node.type)),
                             contentDescription = node.type.label,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(30.dp)
                         )
                     }
 
@@ -263,7 +297,11 @@ fun NodeDetailSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = node.id,
+                                text = if ((node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && buildingName.isNotBlank()) {
+                                    "${currentId.ifBlank { node.id }} • $buildingName"
+                                } else {
+                                    currentId.ifBlank { node.id }
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = FtthNodeVisuals.getNodeColor(node.type)
@@ -308,11 +346,18 @@ fun NodeDetailSheet(
                 Spacer(modifier = Modifier.height(6.dp))
                 if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(NodeStatus.EXISTANT to "Existante", NodeStatus.EN_CONSTRUCTION to "En construction").forEach { (st, lbl) ->
-                            val isSel = status == st
+                        listOf(NodeStatus.RACCORDEE to "Raccordée", NodeStatus.NON_RACCORDEE to "Non raccordée").forEach { (st, lbl) ->
+                            val isSel = if (st == NodeStatus.RACCORDEE) {
+                                status == NodeStatus.RACCORDEE || status == NodeStatus.EXISTANT
+                            } else {
+                                status == NodeStatus.NON_RACCORDEE || status == NodeStatus.EN_CONSTRUCTION || status == NodeStatus.A_POSER || status == NodeStatus.A_DEPOSER || status == NodeStatus.A_REMPLACER
+                            }
                             FilterChip(
                                 selected = isSel,
-                                onClick = { status = st },
+                                onClick = {
+                                    status = st
+                                    triggerAutoSave()
+                                },
                                 label = {
                                     Text(
                                         text = lbl,
@@ -472,18 +517,7 @@ fun NodeDetailSheet(
 
                             Button(
                                 onClick = {
-                                    onStartMoveNodeOnMap(
-                                        node.copy(
-                                            name = name,
-                                            latitude = latitude,
-                                            longitude = longitude,
-                                            status = status,
-                                            etat = etat,
-                                            address = address,
-                                            notes = notes,
-                                            photos = photos
-                                        )
-                                    )
+                                    onStartMoveNodeOnMap(buildCurrentNode())
                                     onDismiss()
                                 },
                                 modifier = Modifier.weight(1.2f)
@@ -498,16 +532,49 @@ fun NodeDetailSheet(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 3. NOM DU NŒUD
+                // 3. IDENTIFIANT DU NŒUD (Éditable et unique)
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Nom du nœud") },
+                    value = currentId,
+                    onValueChange = {
+                        currentId = it
+                        if (it.isNotBlank() && !existingNodes.any { other -> other.id.equals(it.trim(), ignoreCase = true) && other.id != node.id }) {
+                            triggerAutoSave()
+                        }
+                    },
+                    label = { Text("Identifiant") },
+                    isError = isDuplicateId || currentId.isBlank(),
+                    supportingText = {
+                        if (isDuplicateId) {
+                            Text("Cet identifiant est déjà utilisé par un autre nœud (doit être unique)", color = MaterialTheme.colorScheme.error)
+                        } else if (currentId.isBlank()) {
+                            Text("L'identifiant est obligatoire", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("node_name_input"),
+                        .testTag("node_id_input"),
                     singleLine = true
                 )
+
+                // Nom du bâtiment (Immeuble ou Villa seulement)
+                if (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = buildingName,
+                        onValueChange = {
+                            buildingName = it
+                            triggerAutoSave()
+                        },
+                        label = { Text("Nom du bâtiment") },
+                        placeholder = {
+                            Text(if (node.type == FtthNodeType.IMMEUBLE) "ex: Résidence Les Jardins" else "ex: Villa Jasmine")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("node_building_name_input"),
+                        singleLine = true
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -601,14 +668,78 @@ fun NodeDetailSheet(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 when (node.type) {
-                    // POTEAU : Nature (bois, métal, béton, composite, façade), Hauteur (7, 8, 9, 10)
+                    // POTEAU : Opérateur, Nature (bois, métal, béton, composite, façade), Hauteur (7, 8, 9, 10)
                     FtthNodeType.POTEAU -> {
+                        // Opérateur
+                        Text(text = "Opérateur :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val operatorOptions = listOf("Ooredoo", "Orange", "Tunisie Telecom", "STEG", "Autre")
+                        val knownOperators = listOf("Ooredoo", "Orange", "Tunisie Telecom", "STEG")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            operatorOptions.forEach { op ->
+                                val isSelected = if (op == "Autre") {
+                                    isCustomOperator || (operator.isNotBlank() && !knownOperators.contains(operator))
+                                } else {
+                                    !isCustomOperator && operator == op
+                                }
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (op == "Autre") {
+                                            isCustomOperator = true
+                                            if (knownOperators.contains(operator)) {
+                                                operator = ""
+                                            }
+                                        } else {
+                                            isCustomOperator = false
+                                            operator = op
+                                        }
+                                        triggerAutoSave()
+                                    },
+                                    label = { Text(op, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                        if (isCustomOperator || (operator.isNotBlank() && !knownOperators.contains(operator))) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = if (knownOperators.contains(operator)) "" else operator,
+                                onValueChange = {
+                                    operator = it
+                                    triggerAutoSave()
+                                },
+                                label = { Text("Nom de l'opérateur (Autre)") },
+                                placeholder = { Text("Saisissez le nom de l'opérateur") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Nature de l'appui (FlowRow pour que Façade soit toujours visible)
                         Text(text = "Nature de l'appui :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf(
+                                "bois" to "Bois",
+                                "métal" to "Métal",
+                                "béton" to "Béton",
+                                "composite" to "Composite",
+                                "façade" to "Façade"
+                            ).forEach { (nat, lbl) ->
+                                val isSelected = poleNature.equals(nat, ignoreCase = true) ||
+                                        (nat == "façade" && poleNature.equals("facade", ignoreCase = true))
                                 FilterChip(
-                                    selected = poleNature.equals(nat, ignoreCase = true),
+                                    selected = isSelected,
                                     onClick = {
                                         poleNature = nat
                                         triggerAutoSave()
@@ -634,8 +765,58 @@ fun NodeDetailSheet(
                         }
                     }
 
-                    // CHAMBRE : Type (L0T, L1T, L2T, L3T, L4T, 1/2 L4T, K1C, K2C, Autre)
+                    // CHAMBRE : Opérateur, Type (L0T, L1T, L2T, L3T, L4T, 1/2 L4T, K1C, K2C, Autre)
                     FtthNodeType.CHAMBRE -> {
+                        // Opérateur pour Chambre (Ooredoo, Orange, Tunisie Telecom, Autre)
+                        Text(text = "Opérateur :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val operatorOptions = listOf("Ooredoo", "Orange", "Tunisie Telecom", "Autre")
+                        val knownChambreOps = listOf("Ooredoo", "Orange", "Tunisie Telecom")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            operatorOptions.forEach { op ->
+                                val isSelected = if (op == "Autre") {
+                                    isCustomOperator || (operator.isNotBlank() && !knownChambreOps.contains(operator))
+                                } else {
+                                    !isCustomOperator && operator == op
+                                }
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (op == "Autre") {
+                                            isCustomOperator = true
+                                            if (knownChambreOps.contains(operator)) {
+                                                operator = ""
+                                            }
+                                        } else {
+                                            isCustomOperator = false
+                                            operator = op
+                                        }
+                                        triggerAutoSave()
+                                    },
+                                    label = { Text(op, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                        if (isCustomOperator || (operator.isNotBlank() && !knownChambreOps.contains(operator))) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = if (knownChambreOps.contains(operator)) "" else operator,
+                                onValueChange = {
+                                    operator = it
+                                    triggerAutoSave()
+                                },
+                                label = { Text("Nom de l'opérateur (Autre)") },
+                                placeholder = { Text("Saisissez le nom de l'opérateur") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         Text(text = "Type de chambre :", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
                         val chamberOptions = listOf("L0T", "L1T", "L2T", "L3T", "L4T", "1/2 L4T", "K1C", "K2C", "Autre")
@@ -1073,7 +1254,7 @@ fun NodeDetailSheet(
                             Button(
                                 onClick = {
                                     try {
-                                        val file = PhotoStorageManager.createNewPhotoFile(context, node.id)
+                                        val file = PhotoStorageManager.createNewPhotoFile(context, node.id, projectName = currentProject)
                                         tempCameraFile = file
                                         val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
                                         takePictureLauncher.launch(uri)
@@ -1293,37 +1474,11 @@ fun NodeDetailSheet(
 
                     Button(
                         onClick = {
-                            val updated = node.copy(
-                                name = name,
-                                latitude = latitude,
-                                longitude = longitude,
-                                status = status,
-                                etat = etat,
-                                address = address,
-                                hasBoitierFtth = if (node.type == FtthNodeType.BOITIER || node.type == FtthNodeType.VILLA || node.type == FtthNodeType.SRO) false else hasBoitierFtth,
-                                notes = notes,
-                                photos = photos,
-                                photoCount = photos.size,
-                                poleNature = poleNature,
-                                poleHeight = poleHeight,
-                                chamberType = chamberType,
-                                boitierType = boitierType,
-                                isSaturated = isSaturated,
-                                boitierSupport = boitierSupport,
-                                sroType = sroType,
-                                sroCapacity = sroCapacity,
-                                buildingFloors = buildingFloors,
-                                buildingDwellings = buildingDwellings,
-                                hasLocalTechnique = hasLocalTechnique,
-                                hasGaineMontante = hasGaineMontante,
-                                syndicAuthorization = syndicAuthorization,
-                                syndicContact = syndicContact,
-                                buildingConnectionMode = buildingConnectionMode,
-                                villaConnectionMode = villaConnectionMode
-                            )
-                            onSave(updated)
+                            val updated = buildCurrentNode()
+                            onSave(updated, node.id)
                             onDismiss()
                         },
+                        enabled = currentId.isNotBlank() && !isDuplicateId,
                         modifier = Modifier
                             .weight(1.5f)
                             .testTag("save_node_button")

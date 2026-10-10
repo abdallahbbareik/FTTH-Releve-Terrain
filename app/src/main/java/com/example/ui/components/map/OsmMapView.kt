@@ -64,6 +64,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.data.gps.GpsLocationData
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
+import com.example.data.local.FtthNodeType
 import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
@@ -124,6 +125,13 @@ fun OsmMapView(
     movingVertexIndex: Int? = null,
     tempVertexPosition: Pair<Double, Double>? = null,
     isPickOnMapMode: Boolean = false,
+    isAdjustTrackMode: Boolean = false,
+    selectedAdjustTrack: StoredTrack? = null,
+    isAdjustStraightenActive: Boolean = false,
+    adjustStraightenStartIdx: Int? = null,
+    onVertexDragged: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
+    onVertexDragEnded: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
+    onAdjustVertexClick: ((index: Int) -> Unit)? = null,
     onCancelPickOnMapMode: (() -> Unit)? = null,
     onUpdateStakingPosition: ((latitude: Double, longitude: Double) -> Unit)? = null,
     onLinkClick: ((FtthLinkEntity) -> Unit)? = null,
@@ -144,7 +152,7 @@ fun OsmMapView(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var currentLayer by remember { mutableStateOf(OsmLayerType.PLAN) }
+    var currentLayer by remember { mutableStateOf(OsmLayerType.SATELLITE_ESRI) }
     var mapOrientation by remember { mutableFloatStateOf(0f) }
 
     remember {
@@ -158,7 +166,7 @@ fun OsmMapView(
 
     val mapView = remember {
         MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(ESRI_WORLD_IMAGERY)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
@@ -228,8 +236,8 @@ fun OsmMapView(
 
     LaunchedEffect(currentLayer) {
         when (currentLayer) {
-            OsmLayerType.PLAN -> mapView.setTileSource(TileSourceFactory.MAPNIK)
             OsmLayerType.SATELLITE_ESRI -> mapView.setTileSource(ESRI_WORLD_IMAGERY)
+            OsmLayerType.PLAN -> mapView.setTileSource(TileSourceFactory.MAPNIK) 
         }
         mapView.invalidate()
     }
@@ -240,6 +248,7 @@ fun OsmMapView(
     val currentIsMoveVertexMode by rememberUpdatedState(isMoveVertexMode)
     val currentMovingVertexIndex by rememberUpdatedState(movingVertexIndex)
     val currentIsManualTrackMode by rememberUpdatedState(isManualTrackMode)
+    val currentOnNodeClick by rememberUpdatedState(onNodeClick)
     val currentOnMapClickForMove by rememberUpdatedState(onMapClickForMove)
     val currentOnManualTrackAddPoint by rememberUpdatedState(onManualTrackAddPoint)
     val currentOnUpdateStakingPosition by rememberUpdatedState(onUpdateStakingPosition)
@@ -249,7 +258,7 @@ fun OsmMapView(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode
+        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, isAdjustStraightenActive, adjustStraightenStartIdx
     ) {
         mapView.overlays.clear()
 
@@ -340,14 +349,65 @@ fun OsmMapView(
                         else -> android.graphics.Color.parseColor("#7C3AED")
                     }
                     title = "${track.name} [${track.type}] (${String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)})"
+                    val isCurrentAdjusted = isAdjustTrackMode && selectedAdjustTrack?.id == track.id
+                    if (isCurrentAdjusted) {
+                        outlinePaint.strokeWidth = 10f
+                    }
                     setOnClickListener { _, _, _ ->
-                        if (!isStraightenMode && !isMoveVertexMode) {
+                        if (!isStraightenMode && !isMoveVertexMode && !isAdjustTrackMode) {
                             onTrackClick?.invoke(track)
                             true
                         } else false
                     }
                 }
                 mapView.overlays.add(polyline)
+
+                // Sommets en mode Ajustement & Simplification (Glisser les sommets & Redresser)
+                if (isAdjustTrackMode && selectedAdjustTrack?.id == track.id) {
+                    for ((idx, pt) in pts.withIndex()) {
+                        val vertexMarker = Marker(mapView).apply {
+                            position = GeoPoint(pt.latitude, pt.longitude)
+                            title = "Sommet #${idx + 1}"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            val isSelectedForStraighten = isAdjustStraightenActive && idx == adjustStraightenStartIdx
+                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelectedForStraighten)
+
+                            if (isAdjustStraightenActive) {
+                                isDraggable = false
+                                setOnMarkerClickListener { _, _ ->
+                                    onAdjustVertexClick?.invoke(idx)
+                                    true
+                                }
+                            } else {
+                                isDraggable = true
+                                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                                    override fun onMarkerDrag(marker: Marker) {
+                                        val ptsList = polyline.actualPoints
+                                        if (idx in ptsList.indices) {
+                                            ptsList[idx] = marker.position
+                                            polyline.setPoints(ptsList)
+                                            mapView.invalidate()
+                                        }
+                                        onVertexDragged?.invoke(idx, marker.position.latitude, marker.position.longitude)
+                                    }
+
+                                    override fun onMarkerDragEnd(marker: Marker) {
+                                        onVertexDragEnded?.invoke(idx, marker.position.latitude, marker.position.longitude)
+                                    }
+
+                                    override fun onMarkerDragStart(marker: Marker) {
+                                        // Début de glissement
+                                    }
+                                })
+                                setOnMarkerClickListener { _, _ ->
+                                    // Clic en mode glissement : rien à faire pour ne pas gêner
+                                    false
+                                }
+                            }
+                        }
+                        mapView.overlays.add(vertexMarker)
+                    }
+                }
 
                 // Sommets en mode Redressement
                 if (isStraightenMode) {
@@ -484,12 +544,23 @@ fun OsmMapView(
         for (node in nodes) {
             val marker = Marker(mapView).apply {
                 position = GeoPoint(node.latitude, node.longitude)
-                title = "${node.id} • ${node.type.label}"
-                snippet = "${node.name}\n${node.address}"
+                title = when {
+                    (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.buildingName.isNotBlank() ->
+                        "${node.id} • ${node.buildingName}"
+                    (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.name.isNotBlank() && node.name != node.id ->
+                        "${node.id} • ${node.name}"
+                    node.operator.isNotBlank() -> "${node.id} • ${node.operator}"
+                    else -> "${node.id} • ${node.type.label}"
+                }
+                snippet = if (node.address.isNotBlank()) "${node.type.label}\n${node.address}" else node.type.label
                 icon = MapMarkerHelper.createNodeMarkerDrawable(context, node.type, node.etat)
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
-                    onNodeClick(node)
+                    if (currentIsManualTrackMode) {
+                        currentOnManualTrackAddPoint(node.latitude, node.longitude)
+                    } else {
+                        currentOnNodeClick(node)
+                    }
                     true
                 }
             }
@@ -503,7 +574,7 @@ fun OsmMapView(
                     position = GeoPoint(tempMoveNodePosition.first, tempMoveNodePosition.second)
                     title = "Nouvelle position pour ${movingNode.id}"
                     icon = MapMarkerHelper.createNodeMarkerDrawable(context, movingNode.type, movingNode.etat)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 }
                 mapView.overlays.add(tempMarker)
 

@@ -12,6 +12,7 @@ import com.example.data.local.SyncState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -483,8 +484,86 @@ class DocumentStorageManager(private val context: Context) {
         return true
     }
 
+    suspend fun deleteProjectFast(
+        projectName: String,
+        onProgress: suspend (progress: Float, message: String) -> Unit = { _, _ -> }
+    ): Boolean = withContext(Dispatchers.IO) {
+        val sanitized = sanitizeProjectName(projectName)
+        if (sanitized.isBlank()) return@withContext false
+
+        onProgress(0.15f, "Suppression des fichiers du projet '$sanitized'...")
+
+        // 1. Marquer immédiatement le projet comme supprimé (tombstone)
+        PublicStorageHelper.markProjectDeleted(context, sanitized)
+
+        // 2. Nettoyer les clés SharedPreferences pour ce projet
+        prefs.edit()
+            .remove("backup_nodes_json_$sanitized")
+            .remove("backup_tracks_json_$sanitized")
+            .remove("backup_links_json_$sanitized")
+            .apply()
+
+        onProgress(0.40f, "Suppression ciblée des répertoires...")
+
+        // 3. Supprimer sur tous les dossiers physiques connus
+        val targetDirs = listOf(
+            File(publicBaseDir, sanitized),
+            File(publicDownloadsDir, sanitized),
+            File(appExtBaseDir, sanitized),
+            File(internalBaseDir, sanitized),
+            File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
+            File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
+            File(File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
+            File(File(context.filesDir, PublicStorageHelper.DIR_NAME_LOWER), sanitized)
+        )
+
+        targetDirs.distinctBy { it.absolutePath }.forEach { dir ->
+            try {
+                if (dir.exists()) {
+                    dir.deleteRecursively()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        onProgress(0.70f, "Nettoyage du catalogue système...")
+
+        // 4. Supprimer via MediaStore (requête rapide optimisée)
+        try {
+            PublicStorageHelper.deletePublicProject(context, sanitized)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        onProgress(0.85f, "Actualisation de la sélection...")
+
+        // 5. Si c'était le projet courant, basculer sur un autre projet existant
+        if (_currentProject == sanitized) {
+            val remaining = listAllProjects().filter { it.name != sanitized }
+            if (remaining.isNotEmpty()) {
+                setCurrentProject(remaining.first().name)
+            } else {
+                _currentProject = "projet01"
+                prefs.edit().putString("active_project_name", "projet01").apply()
+                createProject("projet01", copyCurrent = false)
+            }
+        }
+
+        onProgress(1.0f, "Projet supprimé !")
+        true
+    }
+
     fun deleteProject(projectName: String): Boolean {
         val sanitized = sanitizeProjectName(projectName)
+
+        // Marquer tombstone et nettoyer prefs
+        PublicStorageHelper.markProjectDeleted(context, sanitized)
+        prefs.edit()
+            .remove("backup_nodes_json_$sanitized")
+            .remove("backup_tracks_json_$sanitized")
+            .remove("backup_links_json_$sanitized")
+            .apply()
 
         // 1. Supprimer sur tous les dossiers physiques
         listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
@@ -498,17 +577,10 @@ class DocumentStorageManager(private val context: Context) {
             }
         }
 
-        // 2. Supprimer via MediaStore et marquer tombstone
+        // 2. Supprimer via MediaStore
         PublicStorageHelper.deletePublicProject(context, sanitized)
 
-        // 3. Nettoyer les clés SharedPreferences pour ce projet
-        prefs.edit()
-            .remove("backup_nodes_json_$sanitized")
-            .remove("backup_tracks_json_$sanitized")
-            .remove("backup_links_json_$sanitized")
-            .apply()
-
-        // 4. Si c'était le projet courant, basculer sur un autre projet existant
+        // 3. Si c'était le projet courant, basculer sur un autre projet existant
         if (_currentProject == sanitized) {
             val remaining = listAllProjects().filter { it.name != sanitized }
             if (remaining.isNotEmpty()) {
@@ -1201,12 +1273,14 @@ class DocumentStorageManager(private val context: Context) {
     private fun nodeToJson(node: FtthNodeEntity): JSONObject = JSONObject().apply {
         put("id", node.id)
         put("name", node.name)
+        put("buildingName", node.buildingName)
         put("type", node.type.name)
         put("latitude", node.latitude)
         put("longitude", node.longitude)
         put("status", node.status.name)
         put("etat", node.etat.name)
         put("address", node.address)
+        put("operator", node.operator)
         put("hasBoitierFtth", node.hasBoitierFtth)
         put("notes", node.notes)
         put("technicianName", node.technicianName)
@@ -1256,12 +1330,14 @@ class DocumentStorageManager(private val context: Context) {
         return FtthNodeEntity(
             id = json.optString("id", "NODE-${System.currentTimeMillis() % 10000}"),
             name = json.optString("name", ""),
+            buildingName = json.optString("buildingName", ""),
             type = type,
             latitude = json.optDouble("latitude", 0.0),
             longitude = json.optDouble("longitude", 0.0),
             status = status,
             etat = etat,
             address = json.optString("address", ""),
+            operator = json.optString("operator", ""),
             hasBoitierFtth = json.optBoolean("hasBoitierFtth", false),
             notes = json.optString("notes", ""),
             photos = photosList,
@@ -1295,6 +1371,7 @@ class DocumentStorageManager(private val context: Context) {
         put("installationType", link.installationType)
         put("capacityFO", link.capacityFO)
         put("lengthMeters", link.lengthMeters)
+        put("associatedTrackId", link.associatedTrackId)
         put("status", link.status.name)
         put("updatedAt", link.updatedAt)
     }
@@ -1310,6 +1387,7 @@ class DocumentStorageManager(private val context: Context) {
             installationType = json.optString("installationType", "Aérien"),
             capacityFO = json.optInt("capacityFO", 12),
             lengthMeters = json.optDouble("lengthMeters", 0.0),
+            associatedTrackId = json.optString("associatedTrackId", ""),
             status = status,
             updatedAt = json.optLong("updatedAt", System.currentTimeMillis())
         )

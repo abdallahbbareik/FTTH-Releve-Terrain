@@ -1,25 +1,37 @@
 package com.example.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,19 +58,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
+import com.example.data.photo.PhotoStorageManager
 import com.example.data.util.AddressHelper
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.Locale
 
 @Composable
@@ -66,6 +83,8 @@ fun AddNodeDialog(
     latitude: Double,
     longitude: Double,
     existingNodesCount: Int,
+    existingNodes: List<FtthNodeEntity> = emptyList(),
+    currentProject: String = "projet01",
     onDismiss: () -> Unit,
     onNodeCreated: (FtthNodeEntity) -> Unit
 ) {
@@ -87,21 +106,43 @@ fun AddNodeDialog(
     }
 
     var nodeId by remember(generatedId) { mutableStateOf(generatedId) }
-    var name by remember(selectedType) {
-        mutableStateOf(
-            when (selectedType) {
-                FtthNodeType.POTEAU -> "Poteau Appui Aérien"
-                FtthNodeType.CHAMBRE -> "Chambre Trottoir"
-                FtthNodeType.BOITIER -> "Boîtier Optique"
-                FtthNodeType.SRO -> "Armoire SRO"
-                FtthNodeType.IMMEUBLE -> "Immeuble Collectif"
-                FtthNodeType.VILLA -> "Pavillon Individuel"
-            }
-        )
+    val isDuplicateId = remember(nodeId, existingNodes) {
+        existingNodes.any { it.id.equals(nodeId.trim(), ignoreCase = true) }
     }
+
+    var operator by remember { mutableStateOf("Ooredoo") }
+    var isCustomOperator by remember { mutableStateOf(false) }
+
+    // Photos du piquetage initial
+    var initialPhotos by remember { mutableStateOf<List<String>>(emptyList()) }
+    var tempCameraFile by remember { mutableStateOf<File?>(null) }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
+            val finalizedPath = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
+            initialPhotos = initialPhotos + finalizedPath
+        } else {
+            tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
+        }
+    }
+
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val savedPath = PhotoStorageManager.saveImportedPhoto(context, nodeId.ifBlank { "NOEUD" }, uri)
+            if (savedPath != null) {
+                initialPhotos = initialPhotos + savedPath
+            }
+        }
+    }
+
     var status by remember { mutableStateOf(NodeStatus.EXISTANT) }
     var etat by remember { mutableStateOf(NodeConformity.CONFORME) }
     var address by remember { mutableStateOf("") }
+    var buildingName by remember { mutableStateOf("") }
     var hasBoitierFtth by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
 
@@ -222,7 +263,18 @@ fun AddNodeDialog(
                                 Surface(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clickable { selectedType = t },
+                                        .clickable {
+                                            selectedType = t
+                                            if (t == FtthNodeType.IMMEUBLE || t == FtthNodeType.VILLA) {
+                                                if (status != NodeStatus.RACCORDEE && status != NodeStatus.NON_RACCORDEE) {
+                                                    status = NodeStatus.RACCORDEE
+                                                }
+                                            } else {
+                                                if (status == NodeStatus.RACCORDEE || status == NodeStatus.NON_RACCORDEE) {
+                                                    status = NodeStatus.EXISTANT
+                                                }
+                                            }
+                                        },
                                     shape = RoundedCornerShape(10.dp),
                                     color = if (isSelected) col.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                                     border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, col) else null
@@ -239,10 +291,10 @@ fun AddNodeDialog(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = FtthNodeVisuals.getNodeIcon(t),
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
+                                                painter = painterResource(FtthNodeVisuals.getNodeDrawableRes(t)),
+                                                contentDescription = t.label,
+                                                tint = Color.Unspecified,
+                                                modifier = Modifier.size(20.dp)
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
@@ -271,15 +323,15 @@ fun AddNodeDialog(
                 if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = status == NodeStatus.EXISTANT,
-                            onClick = { status = NodeStatus.EXISTANT },
-                            label = { Text("Existante", fontSize = 11.sp, maxLines = 1) },
+                            selected = status == NodeStatus.RACCORDEE || status == NodeStatus.EXISTANT,
+                            onClick = { status = NodeStatus.RACCORDEE },
+                            label = { Text("Raccordée", fontSize = 11.sp, maxLines = 1) },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
-                            selected = status == NodeStatus.EN_CONSTRUCTION,
-                            onClick = { status = NodeStatus.EN_CONSTRUCTION },
-                            label = { Text("En construction", fontSize = 11.sp, maxLines = 1) },
+                            selected = status == NodeStatus.NON_RACCORDEE || status == NodeStatus.EN_CONSTRUCTION,
+                            onClick = { status = NodeStatus.NON_RACCORDEE },
+                            label = { Text("Non raccordée", fontSize = 11.sp, maxLines = 1) },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -334,24 +386,91 @@ fun AddNodeDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Identifiant & Nom
+                // Identifiant (unique et obligatoire)
                 OutlinedTextField(
                     value = nodeId,
                     onValueChange = { nodeId = it },
-                    label = { Text("Code Identifiant (ex: $generatedId)") },
-                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Identifiant (ex: $generatedId)") },
+                    isError = isDuplicateId || nodeId.isBlank(),
+                    supportingText = {
+                        if (isDuplicateId) {
+                            Text("Cet identifiant existe déjà (doit être unique)", color = MaterialTheme.colorScheme.error)
+                        } else if (nodeId.isBlank()) {
+                            Text("L'identifiant est obligatoire", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_node_id_input"),
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Nom du bâtiment (Immeuble ou Villa seulement)
+                if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = buildingName,
+                        onValueChange = { buildingName = it },
+                        label = { Text("Nom du bâtiment") },
+                        placeholder = {
+                            Text(if (selectedType == FtthNodeType.IMMEUBLE) "ex: Résidence Les Jardins" else "ex: Villa Jasmine")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("add_node_building_name_input"),
+                        singleLine = true
+                    )
+                }
 
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Nom du nœud") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                // Opérateur pour Poteau et Chambre
+                if (selectedType == FtthNodeType.POTEAU || selectedType == FtthNodeType.CHAMBRE) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Opérateur :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    val operatorOptions = if (selectedType == FtthNodeType.POTEAU) {
+                        listOf("Ooredoo", "Orange", "Tunisie Telecom", "STEG", "Autre")
+                    } else {
+                        listOf("Ooredoo", "Orange", "Tunisie Telecom", "Autre")
+                    }
+                    val knownOperators = listOf("Ooredoo", "Orange", "Tunisie Telecom", "STEG")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        operatorOptions.forEach { op ->
+                            val isSelected = if (op == "Autre") {
+                                isCustomOperator || (operator.isNotBlank() && !knownOperators.contains(operator))
+                            } else {
+                                !isCustomOperator && operator == op
+                            }
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    if (op == "Autre") {
+                                        isCustomOperator = true
+                                        if (knownOperators.contains(operator)) {
+                                            operator = ""
+                                        }
+                                    } else {
+                                        isCustomOperator = false
+                                        operator = op
+                                    }
+                                },
+                                label = { Text(op, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                    if (isCustomOperator || (operator.isNotBlank() && !knownOperators.contains(operator))) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = if (knownOperators.contains(operator)) "" else operator,
+                            onValueChange = { operator = it },
+                            label = { Text("Nom de l'opérateur (Autre)") },
+                            placeholder = { Text("Saisissez le nom de l'opérateur") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -415,11 +534,24 @@ fun AddNodeDialog(
                 // Champs spécifiques
                 when (selectedType) {
                     FtthNodeType.POTEAU -> {
-                        Text(text = "Nature :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("bois" to "Bois", "métal" to "Métal", "béton" to "Béton", "composite" to "Composite", "façade" to "Façade").forEach { (nat, lbl) ->
+                        Text(text = "Nature de l'appui :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf(
+                                "bois" to "Bois",
+                                "métal" to "Métal",
+                                "béton" to "Béton",
+                                "composite" to "Composite",
+                                "façade" to "Façade"
+                            ).forEach { (nat, lbl) ->
+                                val isSelected = poleNature.equals(nat, ignoreCase = true) ||
+                                        (nat == "façade" && poleNature.equals("facade", ignoreCase = true))
                                 FilterChip(
-                                    selected = poleNature.equals(nat, ignoreCase = true),
+                                    selected = isSelected,
                                     onClick = { poleNature = nat },
                                     label = { Text(lbl, fontSize = 11.sp) }
                                 )
@@ -673,6 +805,106 @@ fun AddNodeDialog(
                     singleLine = true
                 )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // PHOTOS DU PIQUETAGE INITIAL (POUR TOUS LES NŒUDS)
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📷 Photos du nœud (${initialPhotos.size}) :",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val file = PhotoStorageManager.createNewPhotoFile(context, nodeId.ifBlank { "NOEUD" }, projectName = currentProject)
+                                tempCameraFile = file
+                                val uri = PhotoStorageManager.getUriForPhotoFile(context, file)
+                                takePictureLauncher.launch(uri)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Prendre photo", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            pickVisualMediaLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Galerie", fontSize = 12.sp)
+                    }
+                }
+
+                if (initialPhotos.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(initialPhotos) { photoPath ->
+                            val resolvedFile = PhotoStorageManager.resolvePhotoFile(context, photoPath)
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                AsyncImage(
+                                    model = resolvedFile,
+                                    contentDescription = "Photo piquetage",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.65f),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(2.dp)
+                                        .size(22.dp)
+                                        .clickable {
+                                            initialPhotos = initialPhotos.filter { it != photoPath }
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Supprimer photo",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Actions
@@ -689,17 +921,30 @@ fun AddNodeDialog(
 
                     Button(
                         onClick = {
+                            val finalId = nodeId.trim().ifEmpty { generatedId }
+                            val finalOp = if (selectedType == FtthNodeType.POTEAU || selectedType == FtthNodeType.CHAMBRE) operator.trim() else ""
+                            val finalBuildingName = if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) buildingName.trim() else ""
+                            val finalName = if (finalBuildingName.isNotBlank()) finalBuildingName else finalId
+                            val finalStatus = if (selectedType == FtthNodeType.IMMEUBLE || selectedType == FtthNodeType.VILLA) {
+                                if (status == NodeStatus.NON_RACCORDEE || status == NodeStatus.EN_CONSTRUCTION) NodeStatus.NON_RACCORDEE else NodeStatus.RACCORDEE
+                            } else {
+                                status
+                            }
                             val newNode = FtthNodeEntity(
-                                id = nodeId.trim().ifEmpty { generatedId },
+                                id = finalId,
                                 type = selectedType,
-                                name = name.trim().ifEmpty { selectedType.label },
+                                name = finalName,
+                                buildingName = finalBuildingName,
                                 latitude = latitude,
                                 longitude = longitude,
-                                status = status,
+                                status = finalStatus,
                                 etat = etat,
                                 address = address,
+                                operator = finalOp,
                                 hasBoitierFtth = if (selectedType == FtthNodeType.BOITIER || selectedType == FtthNodeType.VILLA || selectedType == FtthNodeType.SRO) false else hasBoitierFtth,
                                 notes = notes,
+                                photos = initialPhotos,
+                                photoCount = initialPhotos.size,
                                 poleNature = poleNature,
                                 poleHeight = poleHeight,
                                 chamberType = chamberType,
@@ -722,6 +967,7 @@ fun AddNodeDialog(
                             )
                             onNodeCreated(newNode)
                         },
+                        enabled = nodeId.isNotBlank() && !isDuplicateId,
                         modifier = Modifier
                             .weight(1.5f)
                             .testTag("confirm_create_node_button")

@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 
@@ -17,7 +19,7 @@ object MapMarkerHelper {
         context: Context,
         type: FtthNodeType,
         conformity: NodeConformity,
-        sizeDp: Int = 46
+        sizeDp: Int = 48
     ): Drawable {
         val density = context.resources.displayMetrics.density
         val px = (sizeDp * density).toInt()
@@ -25,49 +27,54 @@ object MapMarkerHelper {
         val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val baseColor = when (type) {
-            FtthNodeType.POTEAU -> Color.parseColor("#EA580C")   // Orange
-            FtthNodeType.CHAMBRE -> Color.parseColor("#16A34A")  // Vert
-            FtthNodeType.BOITIER -> Color.parseColor("#9333EA")  // Violet
-            FtthNodeType.SRO -> Color.parseColor("#DC2626")      // Rouge vif
-            FtthNodeType.IMMEUBLE -> Color.parseColor("#0284C7") // Bleu ciel
-            FtthNodeType.VILLA -> Color.parseColor("#DB2777")    // Rose
+        // Draw dedicated node icon directly without surrounding circle background
+        val iconRes = when (type) {
+            FtthNodeType.POTEAU -> R.drawable.ic_node_poteau
+            FtthNodeType.CHAMBRE -> R.drawable.ic_node_chambre
+            FtthNodeType.BOITIER -> R.drawable.ic_node_boitier
+            FtthNodeType.SRO -> R.drawable.ic_node_sro
+            FtthNodeType.IMMEUBLE -> R.drawable.ic_node_immeuble
+            FtthNodeType.VILLA -> R.drawable.ic_node_villa
         }
 
-        val radius = px / 2f
-        val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = baseColor
-            style = Paint.Style.FILL
+        val iconDrawable = ContextCompat.getDrawable(context, iconRes)
+        if (iconDrawable != null) {
+            iconDrawable.setBounds(0, 0, px, px)
+            iconDrawable.draw(canvas)
+        } else {
+            // Fallback letter if drawable not available
+            val radius = px / 2f
+            val baseColor = when (type) {
+                FtthNodeType.POTEAU -> Color.parseColor("#EA580C")
+                FtthNodeType.CHAMBRE -> Color.parseColor("#16A34A")
+                FtthNodeType.BOITIER -> Color.parseColor("#9333EA")
+                FtthNodeType.SRO -> Color.parseColor("#DC2626")
+                FtthNodeType.IMMEUBLE -> Color.parseColor("#0284C7")
+                FtthNodeType.VILLA -> Color.parseColor("#DB2777")
+            }
+            val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = baseColor
+                style = Paint.Style.FILL
+            }
+            canvas.drawCircle(radius, radius, radius - (3f * density), circlePaint)
+
+            val letter = when (type) {
+                FtthNodeType.POTEAU -> "P"
+                FtthNodeType.CHAMBRE -> "C"
+                FtthNodeType.BOITIER -> "B"
+                FtthNodeType.SRO -> "S"
+                FtthNodeType.IMMEUBLE -> "I"
+                FtthNodeType.VILLA -> "V"
+            }
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 14f * density
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+            }
+            val textY = radius - ((textPaint.descent() + textPaint.ascent()) / 2f)
+            canvas.drawText(letter, radius, textY, textPaint)
         }
-
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (conformity == NodeConformity.NON_CONFORME) Color.parseColor("#EF4444") else Color.WHITE
-            style = Paint.Style.STROKE
-            strokeWidth = 2.5f * density
-        }
-
-        canvas.drawCircle(radius, radius, radius - (3f * density), circlePaint)
-        canvas.drawCircle(radius, radius, radius - (3f * density), borderPaint)
-
-        // Draw initial letter
-        val letter = when (type) {
-            FtthNodeType.POTEAU -> "P"
-            FtthNodeType.CHAMBRE -> "C"
-            FtthNodeType.BOITIER -> "B"
-            FtthNodeType.SRO -> "S"
-            FtthNodeType.IMMEUBLE -> "I"
-            FtthNodeType.VILLA -> "V"
-        }
-
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 14f * density
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-
-        val textY = radius - ((textPaint.descent() + textPaint.ascent()) / 2f)
-        canvas.drawText(letter, radius, textY, textPaint)
 
         // Non-conforme alert dot if applicable
         if (conformity == NodeConformity.NON_CONFORME) {
@@ -75,7 +82,14 @@ object MapMarkerHelper {
                 color = Color.parseColor("#B91C1C")
                 style = Paint.Style.FILL
             }
-            canvas.drawCircle(px - (6f * density), 6f * density, 4f * density, alertPaint)
+            canvas.drawCircle(px - (6f * density), 6f * density, 4.5f * density, alertPaint)
+
+            val alertBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f * density
+            }
+            canvas.drawCircle(px - (6f * density), 6f * density, 4.5f * density, alertBorder)
         }
 
         return BitmapDrawable(context.resources, bitmap)

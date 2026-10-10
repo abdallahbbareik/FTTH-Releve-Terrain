@@ -16,8 +16,8 @@ object PublicStorageHelper {
     private const val FOLDER_DOCUMENTS_LOWER = "Documents/releve-terrain"
     private const val FOLDER_DOWNLOADS = "Download/Releve-Terrain"
     private const val FOLDER_DOWNLOADS_LOWER = "Download/releve-terrain"
-    private const val DIR_NAME = "Releve-Terrain"
-    private const val DIR_NAME_LOWER = "releve-terrain"
+    const val DIR_NAME = "Releve-Terrain"
+    const val DIR_NAME_LOWER = "releve-terrain"
     private const val PREFS_NAME = "ReleveTerrainDeletedProjects"
 
     private fun getDeletedProjects(context: Context): Set<String> {
@@ -626,21 +626,22 @@ object PublicStorageHelper {
             }
         }
 
-        // 3. MediaStore
+        // 3. MediaStore (requête combinée rapide)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver = context.contentResolver
                 val collection = MediaStore.Files.getContentUri("external")
-                listOf(
-                    "$FOLDER_DOCUMENTS_LOWER/$sanitized/",
-                    "$FOLDER_DOCUMENTS/$sanitized/",
-                    "$FOLDER_DOWNLOADS_LOWER/$sanitized/",
-                    "$FOLDER_DOWNLOADS/$sanitized/"
-                ).forEach { pathPrefix ->
-                    val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
-                    val selectionArgs = arrayOf("$pathPrefix%")
-                    resolver.delete(collection, selection, selectionArgs)
-                }
+                val selection = "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ? OR " +
+                        "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ? OR " +
+                        "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ? OR " +
+                        "${MediaStore.Files.FileColumns.RELATIVE_PATH} LIKE ?"
+                val selectionArgs = arrayOf(
+                    "$FOLDER_DOCUMENTS_LOWER/$sanitized/%",
+                    "$FOLDER_DOCUMENTS/$sanitized/%",
+                    "$FOLDER_DOWNLOADS_LOWER/$sanitized/%",
+                    "$FOLDER_DOWNLOADS/$sanitized/%"
+                )
+                resolver.delete(collection, selection, selectionArgs)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

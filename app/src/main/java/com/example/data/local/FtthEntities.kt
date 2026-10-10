@@ -17,7 +17,9 @@ enum class NodeStatus(val label: String) {
     EN_CONSTRUCTION("En construction"),
     A_POSER("À poser"),
     A_REMPLACER("À remplacer"),
-    A_DEPOSER("À déposer")
+    A_DEPOSER("À déposer"),
+    RACCORDEE("Raccordée"),
+    NON_RACCORDEE("Non raccordée")
 }
 
 enum class NodeConformity(val label: String) {
@@ -37,11 +39,13 @@ data class FtthNodeEntity(
     val id: String,
     val type: FtthNodeType,
     val name: String,
+    val buildingName: String = "",
     val latitude: Double,
     val longitude: Double,
     val status: NodeStatus = NodeStatus.EXISTANT,
     val etat: NodeConformity = NodeConformity.CONFORME,
     val address: String = "",
+    val operator: String = "", // Ooredoo, Orange, Tunisie Telecom, STEG (poteau), Autre
     val hasBoitierFtth: Boolean = false, // Non, Oui (sauf Boîtier, Villa et SRO)
     val notes: String = "", // Commentaire
     val technicianName: String = "Tech-01 (Moi)",
@@ -92,6 +96,7 @@ data class FtthLinkEntity(
     val installationType: String = "Aérien", // Aérien, Souterrain, Façade
     val capacityFO: Int = 24, // 144, 72, 48, 24, 12, 4
     val lengthMeters: Double = 45.0,
+    val associatedTrackId: String = "",
     val status: NodeStatus = NodeStatus.EXISTANT,
     val updatedAt: Long = System.currentTimeMillis()
 )

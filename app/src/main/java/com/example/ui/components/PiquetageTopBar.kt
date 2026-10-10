@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -350,10 +351,10 @@ fun PiquetageTopBar(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = FtthNodeVisuals.getNodeIcon(node.type),
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
+                                            painter = painterResource(FtthNodeVisuals.getNodeDrawableRes(node.type)),
+                                            contentDescription = node.type.label,
+                                            tint = Color.Unspecified,
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
@@ -367,7 +368,7 @@ fun PiquetageTopBar(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = node.name,
+                                                text = if (node.operator.isNotBlank()) "${node.type.label} (${node.operator})" else node.type.label,
                                                 fontSize = 12.sp,
                                                 color = Color(0xFFCBD5E1),
                                                 maxLines = 1

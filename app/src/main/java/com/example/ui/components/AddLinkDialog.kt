@@ -36,27 +36,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.FtthNodeEntity
 import com.example.data.repository.FtthRepository
+import com.example.data.storage.StoredTrack
 
 @Composable
 fun AddLinkDialog(
     fromNode: FtthNodeEntity,
     toNode: FtthNodeEntity,
+    availableTracks: List<StoredTrack> = emptyList(),
     onDismiss: () -> Unit,
-    onLinkCreated: (cableType: String, installationType: String, capacityFO: Int) -> Unit
+    onLinkCreated: (cableType: String, installationType: String, capacityFO: Int, associatedTrackId: String) -> Unit
 ) {
     var cableType by remember { mutableStateOf("Distribution") }
     var installationType by remember { mutableStateOf("Aérien") }
     var capacityFO by remember { mutableIntStateOf(24) }
+    var associatedTrackId by remember { mutableStateOf("") }
 
-    val distanceMeters = remember(fromNode, toNode) {
-        FtthRepository.calculateDistanceMeters(
-            fromNode.latitude, fromNode.longitude,
-            toNode.latitude, toNode.longitude
-        )
+    val selectedTrack = remember(associatedTrackId, availableTracks) {
+        availableTracks.firstOrNull { it.id == associatedTrackId }
+    }
+
+    val distanceMeters = remember(fromNode, toNode, selectedTrack) {
+        if (selectedTrack != null && selectedTrack.totalDistanceMeters > 0) {
+            selectedTrack.totalDistanceMeters
+        } else {
+            FtthRepository.calculateDistanceMeters(
+                fromNode.latitude, fromNode.longitude,
+                toNode.latitude, toNode.longitude
+            )
+        }
     }
 
     Dialog(
@@ -85,12 +97,12 @@ fun AddLinkDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Raccorder par câble fibre optique",
+                            text = "Ajouter Câble Fibre Optique",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Distance calculée : ${distanceMeters.toInt()} mètres",
+                            text = "Distance estimée : ${distanceMeters.toInt()} mètres" + if (selectedTrack != null) " (Suivie sur ${selectedTrack.name})" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
@@ -178,6 +190,41 @@ fun AddLinkDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Choix de la trace (non-linéaire) empruntée
+                Text(
+                    text = "Tracé de l'infrastructure support (Génie civil / Façade / Aérien) :",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Permet de faire suivre au câble le tracé réel non-linéaire de la conduite ou de la façade",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = associatedTrackId.isEmpty(),
+                        onClick = { associatedTrackId = "" },
+                        label = { Text("Direct (Ligne droite)") }
+                    )
+                    availableTracks.forEach { trk ->
+                        FilterChip(
+                            selected = associatedTrackId == trk.id,
+                            onClick = { associatedTrackId = trk.id },
+                            label = { Text("${trk.name} (${trk.type})") }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Capacity FO
                 Text(text = "Capacité du câble (Fibre Optique) :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
@@ -204,12 +251,12 @@ fun AddLinkDialog(
                         Text("Annuler")
                     }
                     Button(
-                        onClick = { onLinkCreated(cableType, installationType, capacityFO) },
+                        onClick = { onLinkCreated(cableType, installationType, capacityFO, associatedTrackId) },
                         modifier = Modifier
                             .weight(1.5f)
                             .testTag("confirm_create_cable_button")
                     ) {
-                        Text("Créer la liaison")
+                        Text("Ajouter le câble")
                     }
                 }
             }

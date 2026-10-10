@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -9,6 +10,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +66,7 @@ import coil.compose.AsyncImage
 import com.example.data.storage.TrackPhoto
 import com.example.ui.components.AddLinkDialog
 import com.example.ui.components.AddNodeDialog
+import com.example.ui.components.BlockingTaskDialog
 import com.example.ui.components.ExportReportDialog
 import com.example.ui.components.FilterLayerSheet
 import com.example.ui.components.GpsTrackControlBar
@@ -73,6 +80,7 @@ import com.example.ui.components.PhotoResolutionDialog
 import com.example.ui.components.PiquetageTopBar
 import com.example.ui.components.ProjectFolderDialog
 import com.example.ui.components.StraightenEditorBar
+import com.example.ui.components.TrackAdjustmentBottomBar
 import com.example.ui.components.SyncLogSheet
 import com.example.ui.components.SyncStatusBanner
 import com.example.ui.components.TrackDetailDialog
@@ -115,13 +123,15 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
 
     LaunchedEffect(Unit) {
         viewModel.reloadPersistedData()
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.CAMERA
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.CAMERA
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     val filteredNodes by viewModel.filteredNodes.collectAsStateWithLifecycle()
@@ -142,6 +152,13 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val isStraightenMode by viewModel.isStraightenMode.collectAsStateWithLifecycle()
     val selectedStraightenTrack by viewModel.selectedStraightenTrack.collectAsStateWithLifecycle()
     val selectedStraightenIndices by viewModel.selectedStraightenIndices.collectAsStateWithLifecycle()
+
+    val isAdjustTrackMode by viewModel.isAdjustTrackMode.collectAsStateWithLifecycle()
+    val selectedAdjustTrack by viewModel.selectedAdjustTrack.collectAsStateWithLifecycle()
+    val adjustTolerance by viewModel.adjustTolerance.collectAsStateWithLifecycle()
+    val isAdjustStraightenActive by viewModel.isAdjustStraightenActive.collectAsStateWithLifecycle()
+    val adjustStraightenStartIdx by viewModel.adjustStraightenStartIdx.collectAsStateWithLifecycle()
+    val canUndoAdjust by viewModel.canUndoAdjust.collectAsStateWithLifecycle()
 
     val movingNode by viewModel.movingNode.collectAsStateWithLifecycle()
     val tempMoveNodePosition by viewModel.tempMoveNodePosition.collectAsStateWithLifecycle()
@@ -198,17 +215,20 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val pendingLinkNodes by viewModel.pendingLinkNodes.collectAsStateWithLifecycle()
 
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
+    val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
 
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
-                movingNode != null || isMoveVertexMode || showFilterSheet || showSyncLogSheet ||
+                movingNode != null || isMoveVertexMode || isAdjustTrackMode || showFilterSheet || showSyncLogSheet ||
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
                 pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog
     ) {
         if (showPhotoResolutionDialog) {
             showPhotoResolutionDialog = false
+        } else if (isAdjustTrackMode) {
+            viewModel.cancelTrackAdjustment()
         } else if (selectedNode != null) {
             viewModel.selectNode(null)
         } else if (viewingTrackPhoto != null) {
@@ -280,7 +300,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
 
                 // Barre de contrôle GPS & Tracés
-                if (!isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode) {
+                if (!isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
                     GpsTrackControlBar(
                         gpsStatus = gpsStatus,
                         locationData = userLocation,
@@ -297,12 +317,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         onOpenTracksList = { viewModel.openTracksList() },
                         onOpenNodesList = { viewModel.openNodesList() },
                         onRequestGpsPermission = {
-                            permissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
+                            val perms = mutableListOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
                             )
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                            permissionLauncher.launch(perms.toTypedArray())
                         }
                     )
                 }
@@ -358,10 +380,31 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         onCancel = { viewModel.cancelStraightenMode() }
                     )
                 }
+
+                // Barre d'outils flottante : Mode Ajustement & Simplification de tracé (Fenêtre persistante)
+                if (isAdjustTrackMode && selectedAdjustTrack != null) {
+                    val track = selectedAdjustTrack!!
+                    val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                    TrackAdjustmentBottomBar(
+                        trackName = track.name,
+                        pointsCount = pts.size,
+                        distanceMeters = track.totalDistanceMeters,
+                        selectedTolerance = adjustTolerance,
+                        onToleranceChanged = { tol -> viewModel.setAdjustTolerance(tol) },
+                        onSimplify = { viewModel.applyCurrentTrackSimplification() },
+                        isStraightenActive = isAdjustStraightenActive,
+                        onToggleStraighten = { viewModel.toggleAdjustStraightenMode() },
+                        straightenStartIdx = adjustStraightenStartIdx,
+                        canUndo = canUndoAdjust,
+                        onUndo = { viewModel.undoLastAdjustAction() },
+                        onConfirm = { viewModel.confirmTrackAdjustment() },
+                        onCancel = { viewModel.cancelTrackAdjustment() }
+                    )
+                }
             }
         },
         floatingActionButton = {
-            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode) {
+            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.toggleCableDrawingMode() },
@@ -411,6 +454,19 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 movingVertexIndex = movingVertexIndex,
                 tempVertexPosition = tempVertexPosition,
                 isPickOnMapMode = isPickOnMapMode,
+                isAdjustTrackMode = isAdjustTrackMode,
+                selectedAdjustTrack = selectedAdjustTrack,
+                isAdjustStraightenActive = isAdjustStraightenActive,
+                adjustStraightenStartIdx = adjustStraightenStartIdx,
+                onVertexDragged = { idx, lat, lon ->
+                    viewModel.updateAdjustTrackVertex(idx, lat, lon, isDragEnd = false)
+                },
+                onVertexDragEnded = { idx, lat, lon ->
+                    viewModel.updateAdjustTrackVertex(idx, lat, lon, isDragEnd = true)
+                },
+                onAdjustVertexClick = { idx ->
+                    viewModel.onAdjustVertexClicked(idx)
+                },
                 onCancelPickOnMapMode = { viewModel.cancelPickOnMapMode() },
                 onUpdateStakingPosition = { lat, lon -> viewModel.updatePendingStakePosition(lat, lon) },
                 onLinkClick = { link -> viewModel.selectLinkForDetail(link) },
@@ -432,9 +488,17 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Notification dynamique
+            // Notification dynamique (disparaît automatiquement après 2 secondes)
             AnimatedVisibility(
                 visible = bannerMessage != null,
+                enter = fadeIn(animationSpec = tween(200)) + slideInVertically(
+                    animationSpec = tween(250),
+                    initialOffsetY = { -it }
+                ),
+                exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(
+                    animationSpec = tween(200),
+                    targetOffsetY = { -it }
+                ),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(16.dp)
@@ -480,10 +544,12 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             if (selectedNode != null) {
                 NodeDetailSheet(
                     node = selectedNode!!,
+                    existingNodes = rawNodes,
                     userLocation = userLocation,
+                    currentProject = currentProject,
                     onDismiss = { viewModel.selectNode(null) },
-                    onSave = { updated -> viewModel.saveNode(updated, closeSheet = true) },
-                    onAutoSave = { updated -> viewModel.saveNode(updated, closeSheet = false) },
+                    onSave = { updated, oldId -> viewModel.saveNode(updated, oldId = oldId, closeSheet = true) },
+                    onAutoSave = { updated, oldId -> viewModel.saveNode(updated, oldId = oldId, closeSheet = false) },
                     onDelete = { id -> viewModel.deleteNode(id) },
                     onStartMoveNodeOnMap = { nodeToMove -> viewModel.startMoveNode(nodeToMove) }
                 )
@@ -497,6 +563,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     latitude = initLat,
                     longitude = initLon,
                     existingNodesCount = rawNodes.size,
+                    existingNodes = rawNodes,
+                    currentProject = currentProject,
                     onDismiss = { viewModel.dismissAddNodeDialog() },
                     onNodeCreated = { newNode ->
                         viewModel.saveNode(newNode, isNew = true)
@@ -591,6 +659,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onRestoreOriginal = { id -> viewModel.restoreOriginalTrack(id) },
                     onStartStraightenMode = { t -> viewModel.startStraightenMode(t) },
                     onStartMoveVertexMode = { t -> viewModel.startMoveVertexMode(t) },
+                    onStartAdjustTrack = { t -> viewModel.startTrackAdjustment(t) },
                     onDeleteTrack = { id -> viewModel.deleteTrack(id) }
                 )
             }
@@ -685,13 +754,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     fromNode = pendingLinkNodes!!.first,
                     toNode = pendingLinkNodes!!.second,
                     onDismiss = { viewModel.dismissConnectCableDialog() },
-                    onLinkCreated = { cableType, installationType, capacityFO ->
+                    onLinkCreated = { cableType, installationType, capacityFO, associatedTrackId ->
                         viewModel.createFiberLink(
                             pendingLinkNodes!!.first,
                             pendingLinkNodes!!.second,
                             cableType,
                             installationType,
-                            capacityFO
+                            capacityFO,
+                            associatedTrackId
                         )
                     }
                 )
@@ -709,6 +779,11 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     },
                     onDismiss = { showPhotoResolutionDialog = false }
                 )
+            }
+
+            // Dialogue bloquant avec barre de progression pour les tâches lourdes (ex: suppression de projet)
+            if (blockingTaskState != null && blockingTaskState!!.isRunning) {
+                BlockingTaskDialog(state = blockingTaskState!!)
             }
         }
     }

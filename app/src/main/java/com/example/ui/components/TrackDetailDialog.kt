@@ -97,6 +97,7 @@ fun TrackDetailDialog(
     onRestoreOriginal: (trackId: String) -> Unit,
     onStartStraightenMode: (track: StoredTrack) -> Unit,
     onStartMoveVertexMode: (track: StoredTrack) -> Unit,
+    onStartAdjustTrack: (track: StoredTrack) -> Unit,
     onDeleteTrack: (trackId: String) -> Unit
 ) {
     val context = LocalContext.current
@@ -803,154 +804,24 @@ fun TrackDetailDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // --- 5. SECTION MODIFICATION MANUELLE & REDRESSEMENT ---
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(12.dp)
+                // --- BOUTON MODIFIER / AJUSTER TRACE ---
+                Button(
+                    onClick = {
+                        val updated = buildUpdatedTrack()
+                        onSaveTrack(updated)
+                        onStartAdjustTrack(updated)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = "Ajustement & Outils du tracé",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Bouton Déplacer un sommet
-                            OutlinedButton(
-                                onClick = {
-                                    onSaveTrack(buildUpdatedTrack())
-                                    onStartMoveVertexMode(track)
-                                    onDismiss()
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.NearMe, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Déplacer sommet", fontSize = 11.sp)
-                            }
-
-                            // Bouton Redresser entre 2 sommets
-                            Button(
-                                onClick = {
-                                    onSaveTrack(buildUpdatedTrack())
-                                    onStartStraightenMode(track)
-                                    onDismiss()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.LinearScale, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Ligne droite (rue)", fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // --- 6. SECTION SIMPLIFICATION ANTI-BRUIT GPS ---
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AutoFixHigh,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Simplifier après coup (Anti-Bruit)",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Text(
-                            text = "Supprime les petits zigzags et ne garde que les vrais changements de direction.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
-                        )
-
-                        // Chips tolérance
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val tolerances = listOf(3.0, 5.0, 10.0, 20.0)
-                            for (t in tolerances) {
-                                val isSelected = selectedTolerance == t
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { selectedTolerance = t },
-                                    label = { Text("${t.toInt()} m", fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Résultat d'aperçu avant validation
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = "Aperçu : ${currentPoints.size} pts ➔ ${previewSimplifiedPoints.size} sommets",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = "Gain : $pointsReducedCount points inutiles supprimés (-$pointsReducedPercent% de bruit).",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF16A34A)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    onApplySimplification(track.id, previewSimplifiedPoints, selectedTolerance)
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Valider la simplification", fontSize = 12.sp)
-                            }
-
-                            if (track.rawPoints.isNotEmpty() && track.isSimplified) {
-                                OutlinedButton(
-                                    onClick = { onRestoreOriginal(track.id) }
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Rétablir", fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
+                    Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Modifier/Ajuster Trace", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
 
                 // Aperçu photo plein écran

@@ -7,6 +7,7 @@ import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.GpsTrackEntity
 import com.example.data.local.GpsTrackPointEntity
+import com.example.ui.components.FtthNodeVisuals
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -56,12 +57,15 @@ object RealExportService {
 
             val properties = JSONObject()
             properties.put("id", node.id)
+            properties.put("name", node.name)
+            properties.put("buildingName", node.buildingName)
             properties.put("type", node.type.name)
             properties.put("typeLabel", node.type.label)
             properties.put("category", node.type.category)
-            properties.put("status", node.status.label)
+            properties.put("status", FtthNodeVisuals.getStatusDisplayLabel(node.status, node.type))
             properties.put("etat", node.etat.label)
             properties.put("address", node.address)
+            properties.put("operator", node.operator)
             properties.put("hasBoitierFtth", node.hasBoitierFtth)
             properties.put("notes", node.notes)
             properties.put("technician", node.technicianName)
@@ -179,17 +183,20 @@ object RealExportService {
         val sb = StringBuilder()
 
         // CSV Header (RFC 4180 with semicolon separator for French Excel)
-        sb.append("ID;TYPE;STATUT;CONFORMITE;LATITUDE;LONGITUDE;ADRESSE;BOITIER_FTTH;NATURE_APPUI;HAUTEUR;TYPE_CHAMBRE;TYPE_BOITIER;SATURE;SUPPORT_BOITIER;TYPE_SRO;CAPACITE_SRO;ETAGES;LOGEMENTS;LOCAL_TECH;GAINE_MONTANTE;AUTORISATION_SYNDIC;CONTACT_SYNDIC;RACCORDEMENT_IMMEUBLE;RACCORDEMENT_VILLA;COMMENTAIRE;TECHNICIEN;NB_PHOTOS;DATE\n")
+        sb.append("ID;NOM;NOM_BATIMENT;TYPE;STATUT;CONFORMITE;LATITUDE;LONGITUDE;ADRESSE;OPERATEUR;BOITIER_FTTH;NATURE_APPUI;HAUTEUR;TYPE_CHAMBRE;TYPE_BOITIER;SATURE;SUPPORT_BOITIER;TYPE_SRO;CAPACITE_SRO;ETAGES;LOGEMENTS;LOCAL_TECH;GAINE_MONTANTE;AUTORISATION_SYNDIC;CONTACT_SYNDIC;RACCORDEMENT_IMMEUBLE;RACCORDEMENT_VILLA;COMMENTAIRE;TECHNICIEN;NB_PHOTOS;DATE\n")
 
         for (node in nodes) {
             val cols = listOf(
                 escapeCsv(node.id),
+                escapeCsv(node.name),
+                escapeCsv(node.buildingName),
                 escapeCsv(node.type.label),
-                escapeCsv(node.status.label),
+                escapeCsv(FtthNodeVisuals.getStatusDisplayLabel(node.status, node.type)),
                 escapeCsv(node.etat.label),
                 node.latitude.toString(),
                 node.longitude.toString(),
                 escapeCsv(node.address),
+                escapeCsv(node.operator),
                 if (node.hasBoitierFtth) "Oui" else "Non",
                 escapeCsv(node.poleNature),
                 node.poleHeight.toString(),
@@ -241,11 +248,15 @@ object RealExportService {
         sb.append("      <name>Nœuds FTTH</name>\n")
 
         for (node in nodes) {
+            val displayName = if (node.buildingName.isNotBlank()) "${node.id} - ${node.buildingName}" else "${node.id} (${node.type.label})"
             sb.append("      <Placemark>\n")
-            sb.append("        <name>${escapeXml(node.id)} (${escapeXml(node.type.label)})</name>\n")
+            sb.append("        <name>${escapeXml(displayName)}</name>\n")
             sb.append("        <description><![CDATA[\n")
             sb.append("          <b>Type:</b> ${node.type.label}<br/>\n")
-            sb.append("          <b>Statut:</b> ${node.status.label}<br/>\n")
+            if (node.buildingName.isNotBlank()) {
+                sb.append("          <b>Bâtiment:</b> ${escapeXml(node.buildingName)}<br/>\n")
+            }
+            sb.append("          <b>Statut:</b> ${escapeXml(FtthNodeVisuals.getStatusDisplayLabel(node.status, node.type))}<br/>\n")
             sb.append("          <b>État:</b> ${node.etat.label}<br/>\n")
             sb.append("          <b>Adresse:</b> ${node.address}<br/>\n")
             sb.append("          <b>Boîtier FTTH:</b> ${if (node.hasBoitierFtth) "Oui" else "Non"}<br/>\n")

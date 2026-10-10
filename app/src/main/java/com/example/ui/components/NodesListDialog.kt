@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -223,10 +224,10 @@ fun NodesListDialog(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = FtthNodeVisuals.getNodeIcon(node.type),
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(20.dp)
+                                            painter = painterResource(FtthNodeVisuals.getNodeDrawableRes(node.type)),
+                                            contentDescription = node.type.label,
+                                            tint = Color.Unspecified,
+                                            modifier = Modifier.size(26.dp)
                                         )
                                     }
 
@@ -246,7 +247,7 @@ fun NodesListDialog(
                                                 color = FtthNodeVisuals.getStatusColor(node.status).copy(alpha = 0.15f)
                                             ) {
                                                 Text(
-                                                    text = node.status.label,
+                                                    text = FtthNodeVisuals.getStatusDisplayLabel(node.status, node.type),
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = FtthNodeVisuals.getStatusColor(node.status),
@@ -255,10 +256,21 @@ fun NodesListDialog(
                                             }
                                         }
 
+                                        val nodeDetailInfo = when {
+                                            (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.buildingName.isNotBlank() ->
+                                                node.buildingName
+                                            (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.name.isNotBlank() && node.name != node.id ->
+                                                node.name
+                                            node.operator.isNotBlank() -> "Opérateur : ${node.operator}"
+                                            node.type == FtthNodeType.POTEAU -> "Nature : ${node.poleNature.replaceFirstChar { it.uppercase() }} (${node.poleHeight}m)"
+                                            node.type == FtthNodeType.CHAMBRE -> "Chambre ${node.chamberType}"
+                                            else -> node.type.label
+                                        }
                                         Text(
-                                            text = node.name,
+                                            text = nodeDetailInfo,
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1
                                         )
 

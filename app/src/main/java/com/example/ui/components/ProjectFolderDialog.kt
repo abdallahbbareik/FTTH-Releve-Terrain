@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -739,21 +740,21 @@ private fun NodesListContent(
                             Surface(
                                 shape = CircleShape,
                                 color = FtthNodeVisuals.getNodeColor(node.type),
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(34.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = node.type.name.take(3),
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
+                                    Icon(
+                                        painter = painterResource(FtthNodeVisuals.getNodeDrawableRes(node.type)),
+                                        contentDescription = node.type.label,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${node.id} • ${node.name}",
+                                    text = if (node.operator.isNotBlank()) "${node.id} • ${node.operator}" else "${node.id} • ${node.type.label}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold
                                 )
