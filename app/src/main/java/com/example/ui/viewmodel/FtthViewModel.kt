@@ -244,12 +244,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _adjustHistory.add(pts.toList())
         _canUndoAdjust.value = true
 
-        val sel = _selectedAdjustVertexIdx.value
-        val insertIdx = if (sel != null && sel in pts.indices) {
-            sel + 1
-        } else {
-            TrackGeometryHelper.findBestInsertionIndex(pts, lat, lon)
-        }
+        val insertIdx = TrackGeometryHelper.findBestInsertionIndex(pts, lat, lon)
 
         val newPt = TrackPoint(latitude = lat, longitude = lon)
         if (insertIdx >= pts.size) {
