@@ -1,0 +1,7 @@
+<animated-vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_ab">
+    <target android:name="halo" android:animation="@animator/fibre_draw" />
+    <target android:name="fibre" android:animation="@animator/fibre_draw" />
+    <target android:name="pin" android:animation="@animator/pin_pop" />
+</animated-vector>
