@@ -129,7 +129,7 @@ object MapMarkerHelper {
         return BitmapDrawable(context.resources, bitmap)
     }
 
-    fun createVertexDrawable(context: Context, number: Int, isSelected: Boolean, sizeDp: Int = 28): Drawable {
+    fun createVertexDrawable(context: Context, number: Int, isSelected: Boolean, isDeleteMode: Boolean = false, sizeDp: Int = 28): Drawable {
         val density = context.resources.displayMetrics.density
         val px = (sizeDp * density).toInt()
 
@@ -145,7 +145,12 @@ object MapMarkerHelper {
         canvas.drawCircle(radius, radius, radius, haloPaint)
 
         val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isSelected) Color.parseColor("#F59E0B") else Color.parseColor("#2563EB")
+            color = when {
+                isDeleteMode && isSelected -> Color.parseColor("#DC2626")
+                isSelected -> Color.parseColor("#F59E0B")
+                isDeleteMode -> Color.parseColor("#EF4444")
+                else -> Color.parseColor("#2563EB")
+            }
             style = Paint.Style.FILL
         }
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

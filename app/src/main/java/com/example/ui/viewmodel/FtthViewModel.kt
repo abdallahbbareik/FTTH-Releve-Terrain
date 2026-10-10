@@ -148,6 +148,12 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedAdjustVertexIdx = MutableStateFlow<Int?>(null)
     val selectedAdjustVertexIdx: StateFlow<Int?> = _selectedAdjustVertexIdx.asStateFlow()
 
+    private val _isAdjustDeleteActive = MutableStateFlow(false)
+    val isAdjustDeleteActive: StateFlow<Boolean> = _isAdjustDeleteActive.asStateFlow()
+
+    private val _isAdjustAddActive = MutableStateFlow(false)
+    val isAdjustAddActive: StateFlow<Boolean> = _isAdjustAddActive.asStateFlow()
+
     private val _isDragAllVerticesMode = MutableStateFlow(false)
     val isDragAllVerticesMode: StateFlow<Boolean> = _isDragAllVerticesMode.asStateFlow()
 
@@ -197,6 +203,77 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         showBanner("Tracé entier déplacé (${pts.size} sommets translatés)")
     }
 
+    fun toggleAdjustDeleteMode() {
+        val sel = _selectedAdjustVertexIdx.value
+        if (sel != null) {
+            deleteAdjustTrackVertex(sel)
+            return
+        }
+        val current = _isAdjustDeleteActive.value
+        _isAdjustDeleteActive.value = !current
+        if (!current) {
+            _isAdjustAddActive.value = false
+            _isAdjustStraightenActive.value = false
+            showBanner("Mode Suppression : Touchez un sommet sur la carte pour le supprimer")
+        } else {
+            showBanner("Mode Suppression désactivé")
+        }
+    }
+
+    fun toggleAdjustAddMode() {
+        val current = _isAdjustAddActive.value
+        _isAdjustAddActive.value = !current
+        if (!current) {
+            _isAdjustDeleteActive.value = false
+            _isAdjustStraightenActive.value = false
+            val sel = _selectedAdjustVertexIdx.value
+            if (sel != null) {
+                showBanner("Mode Ajout actif : Touchez la carte pour insérer un sommet après le sommet #${sel + 1}")
+            } else {
+                showBanner("Mode Ajout actif : Touchez la carte sur le tracé pour insérer un nouveau sommet")
+            }
+        } else {
+            showBanner("Mode Ajout désactivé")
+        }
+    }
+
+    fun addAdjustTrackVertex(lat: Double, lon: Double) {
+        val track = _selectedAdjustTrack.value ?: return
+        val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
+
+        _adjustHistory.add(pts.toList())
+        _canUndoAdjust.value = true
+
+        val sel = _selectedAdjustVertexIdx.value
+        val insertIdx = if (sel != null && sel in pts.indices) {
+            sel + 1
+        } else {
+            TrackGeometryHelper.findBestInsertionIndex(pts, lat, lon)
+        }
+
+        val newPt = TrackPoint(latitude = lat, longitude = lon)
+        if (insertIdx >= pts.size) {
+            pts.add(newPt)
+        } else {
+            pts.add(insertIdx, newPt)
+        }
+
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+        val updated = track.copy(points = pts, totalDistanceMeters = dist)
+        _selectedAdjustTrack.value = updated
+        _liveAdjustDistance.value = null
+
+        val all = _allTracks.value.toMutableList()
+        val tIdx = all.indexOfFirst { it.id == track.id }
+        if (tIdx >= 0) {
+            all[tIdx] = updated
+            _allTracks.value = all
+        }
+
+        _selectedAdjustVertexIdx.value = insertIdx
+        showBanner("Sommet #${insertIdx + 1} inséré au tracé (${pts.size} sommets au total)")
+    }
+
     fun deleteAdjustTrackVertex(index: Int) {
         val track = _selectedAdjustTrack.value ?: return
         val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
@@ -233,6 +310,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _adjustTolerance.value = 5.0
         _isAdjustStraightenActive.value = false
         _adjustStraightenStartIdx.value = null
+        _isAdjustDeleteActive.value = false
+        _isAdjustAddActive.value = false
         _adjustHistory.clear()
         val curPts = if (track.points.isNotEmpty()) track.points else track.rawPoints
         _adjustHistory.add(curPts)
@@ -311,6 +390,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _isAdjustStraightenActive.value = !current
         _adjustStraightenStartIdx.value = null
         if (!current) {
+            _isAdjustDeleteActive.value = false
+            _isAdjustAddActive.value = false
             showBanner("Redresser : Touchez le sommet de départ (il devient orange), puis le sommet d'arrivée")
         } else {
             showBanner("Outil Redresser désactivé")
@@ -318,6 +399,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAdjustVertexClicked(index: Int) {
+        if (_isAdjustDeleteActive.value) {
+            deleteAdjustTrackVertex(index)
+            return
+        }
         if (!_isAdjustStraightenActive.value) return
         val startIdx = _adjustStraightenStartIdx.value
         if (startIdx == null) {
@@ -425,6 +510,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _liveAdjustDistance.value = null
         _isAdjustStraightenActive.value = false
         _adjustStraightenStartIdx.value = null
+        _isAdjustDeleteActive.value = false
+        _isAdjustAddActive.value = false
         _adjustHistory.clear()
         _canUndoAdjust.value = false
         showBanner("Modification annulée")
@@ -450,6 +537,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _liveAdjustDistance.value = null
         _isAdjustStraightenActive.value = false
         _adjustStraightenStartIdx.value = null
+        _isAdjustDeleteActive.value = false
+        _isAdjustAddActive.value = false
         _adjustHistory.clear()
         _canUndoAdjust.value = false
         showBanner("Modifications du tracé enregistrées avec succès ✓")

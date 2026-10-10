@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -379,6 +380,10 @@ fun TrackAdjustmentBottomBar(
     isStraightenActive: Boolean = false,
     onToggleStraighten: () -> Unit = {},
     straightenStartIdx: Int? = null,
+    isDeleteActive: Boolean = false,
+    onToggleDelete: () -> Unit = {},
+    isAddActive: Boolean = false,
+    onToggleAdd: () -> Unit = {},
     canUndo: Boolean = false,
     onUndo: () -> Unit,
     selectedVertexIdx: Int? = null,
@@ -480,6 +485,48 @@ fun TrackAdjustmentBottomBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Bouton Supprimer Sommet
+                Button(
+                    onClick = onToggleDelete,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isDeleteActive) Color(0xFFDC2626) else MaterialTheme.colorScheme.errorContainer,
+                        contentColor = if (isDeleteActive) Color.White else MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = if (isDeleteActive) "🗑 Suppr. actif" else "🗑 Supprimer",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(2.dp))
+
+                // Bouton Ajouter Sommet
+                Button(
+                    onClick = onToggleAdd,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isAddActive) Color(0xFF16A34A) else MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = if (isAddActive) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = if (isAddActive) "➕ Ajout actif" else "➕ Ajouter",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(2.dp))
+
                 // Bouton Redresser
                 Button(
                     onClick = onToggleStraighten,
@@ -491,10 +538,10 @@ fun TrackAdjustmentBottomBar(
                     contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
                     Icon(Icons.Default.LinearScale, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
                         text = if (isStraightenActive) "📏 Redresser actif" else "📏 Redresser",
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -547,11 +594,15 @@ fun TrackAdjustmentBottomBar(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val guideText = when {
+                        isDeleteActive -> "🗑 Mode Suppression : Touchez un sommet sur la carte pour le supprimer immédiatement."
+                        isAddActive -> "➕ Mode Ajout : Touchez la carte pour insérer un nouveau sommet sur le tracé."
                         isStraightenActive -> if (straightenStartIdx == null) "📏 Touchez le 1er sommet (orange) à aligner" else "Sommet #${straightenStartIdx + 1} sélectionné. Touchez le 2ème sommet pour aligner."
                         selectedVertexIdx != null -> "📍 Sommet #${selectedVertexIdx + 1} sélectionné (glissez pour déplacer)"
                         else -> "🖐 Glissez directement un sommet sur la carte pour modifier sa position."
                     }
                     val textColor = when {
+                        isDeleteActive -> Color(0xFF991B1B)
+                        isAddActive -> Color(0xFF166534)
                         isStraightenActive || selectedVertexIdx != null -> Color(0xFF92400E)
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }

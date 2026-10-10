@@ -132,6 +132,9 @@ fun OsmMapView(
     isDragAllVerticesMode: Boolean = false,
     isAdjustStraightenActive: Boolean = false,
     adjustStraightenStartIdx: Int? = null,
+    isAdjustDeleteActive: Boolean = false,
+    isAdjustAddActive: Boolean = false,
+    onAddVertexToAdjustTrack: ((latitude: Double, longitude: Double) -> Unit)? = null,
     onVertexDragged: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
     onVertexDragEnded: ((index: Int, lat: Double, lon: Double) -> Unit)? = null,
     onAllVerticesDragged: ((deltaLat: Double, deltaLon: Double) -> Unit)? = null,
@@ -258,12 +261,15 @@ fun OsmMapView(
     val currentOnManualTrackAddPoint by rememberUpdatedState(onManualTrackAddPoint)
     val currentOnUpdateStakingPosition by rememberUpdatedState(onUpdateStakingPosition)
     val currentOnMapLongClick by rememberUpdatedState(onMapLongClick)
+    val currentIsAdjustAddActive by rememberUpdatedState(isAdjustAddActive)
+    val currentOnAddVertexToAdjustTrack by rememberUpdatedState(onAddVertexToAdjustTrack)
 
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx
+        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx,
+        isAdjustDeleteActive, isAdjustAddActive
     ) {
         mapView.overlays.clear()
 
@@ -278,6 +284,10 @@ fun OsmMapView(
         val eventsReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null) {
+                    if (isAdjustTrackMode && currentIsAdjustAddActive) {
+                        currentOnAddVertexToAdjustTrack?.invoke(p.latitude, p.longitude)
+                        return true
+                    }
                     if (currentMovingNode != null || (currentIsMoveVertexMode && currentMovingVertexIndex != null)) {
                         currentOnMapClickForMove?.invoke(p.latitude, p.longitude)
                         return true
@@ -377,7 +387,7 @@ fun OsmMapView(
                             position = GeoPoint(pt.latitude, pt.longitude)
                             title = "Sommet #${idx + 1}"
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelected)
+                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelected, isDeleteMode = isAdjustDeleteActive)
                             isDraggable = false
                         }
                         adjustVertexMarkers.add(vertexMarker)

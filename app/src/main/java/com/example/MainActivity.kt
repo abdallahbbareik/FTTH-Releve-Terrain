@@ -161,6 +161,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val adjustTolerance by viewModel.adjustTolerance.collectAsStateWithLifecycle()
     val isAdjustStraightenActive by viewModel.isAdjustStraightenActive.collectAsStateWithLifecycle()
     val adjustStraightenStartIdx by viewModel.adjustStraightenStartIdx.collectAsStateWithLifecycle()
+    val isAdjustDeleteActive by viewModel.isAdjustDeleteActive.collectAsStateWithLifecycle()
+    val isAdjustAddActive by viewModel.isAdjustAddActive.collectAsStateWithLifecycle()
     val canUndoAdjust by viewModel.canUndoAdjust.collectAsStateWithLifecycle()
 
     val movingNode by viewModel.movingNode.collectAsStateWithLifecycle()
@@ -398,6 +400,10 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         isStraightenActive = isAdjustStraightenActive,
                         onToggleStraighten = { viewModel.toggleAdjustStraightenMode() },
                         straightenStartIdx = adjustStraightenStartIdx,
+                        isDeleteActive = isAdjustDeleteActive,
+                        onToggleDelete = { viewModel.toggleAdjustDeleteMode() },
+                        isAddActive = isAdjustAddActive,
+                        onToggleAdd = { viewModel.toggleAdjustAddMode() },
                         canUndo = canUndoAdjust,
                         onUndo = { viewModel.undoLastAdjustAction() },
                         selectedVertexIdx = selectedAdjustVertexIdx,
@@ -468,6 +474,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 isDragAllVerticesMode = isDragAllVerticesMode,
                 isAdjustStraightenActive = isAdjustStraightenActive,
                 adjustStraightenStartIdx = adjustStraightenStartIdx,
+                isAdjustDeleteActive = isAdjustDeleteActive,
+                isAdjustAddActive = isAdjustAddActive,
+                onAddVertexToAdjustTrack = { lat, lon -> viewModel.addAdjustTrackVertex(lat, lon) },
                 onVertexDragged = { idx, lat, lon ->
                     viewModel.updateAdjustTrackVertex(idx, lat, lon, isDragEnd = false)
                 },

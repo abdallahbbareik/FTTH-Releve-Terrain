@@ -162,4 +162,76 @@ object TrackGeometryHelper {
         total += calculateDistanceMeters(currLat, currLng, toLat, toLng)
         return total
     }
+
+    /**
+     * Trouve le meilleur index d'insertion pour un nouveau point (lat, lon) le long du tracé.
+     * Calcule la distance orthogonale/segmentaire minimale pour insérer le point dans le bon tronçon.
+     */
+    fun findBestInsertionIndex(points: List<TrackPoint>, lat: Double, lon: Double): Int {
+        if (points.isEmpty()) return 0
+        if (points.size == 1) return 1
+
+        val newPt = TrackPoint(latitude = lat, longitude = lon)
+        var bestIndex = points.size // défaut : fin du tracé
+        var minDistance = Double.MAX_VALUE
+
+        val distToFirst = calculateDistanceMeters(lat, lon, points.first().latitude, points.first().longitude)
+        val distToLast = calculateDistanceMeters(lat, lon, points.last().latitude, points.last().longitude)
+
+        // Parcourt chaque segment [i, i+1]
+        for (i in 0 until points.size - 1) {
+            val p1 = points[i]
+            val p2 = points[i + 1]
+            val d = distanceToSegmentMeters(newPt, p1, p2)
+            if (d < minDistance) {
+                minDistance = d
+                bestIndex = i + 1
+            }
+        }
+
+        // Si le point est encore plus proche du début avant le premier sommet
+        val seg0Dist = calculateDistanceMeters(points[0].latitude, points[0].longitude, points[1].latitude, points[1].longitude)
+        if (distToFirst < minDistance && distToFirst < distToLast) {
+            val d0to1 = calculateDistanceMeters(lat, lon, points[1].latitude, points[1].longitude)
+            if (d0to1 > seg0Dist) {
+                return 0
+            }
+        }
+
+        return bestIndex
+    }
+
+    /**
+     * Calcule la distance entre un point P et un segment AB (en mètres)
+     */
+    fun distanceToSegmentMeters(p: TrackPoint, a: TrackPoint, b: TrackPoint): Double {
+        val dAB = calculateDistanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+        if (dAB < 0.001) {
+            return calculateDistanceMeters(p.latitude, p.longitude, a.latitude, a.longitude)
+        }
+
+        // Projection vectorielle locale plane
+        val meanLatRad = Math.toRadians((a.latitude + b.latitude) / 2.0)
+        val xA = 0.0
+        val yA = 0.0
+        val xB = Math.toRadians(b.longitude - a.longitude) * 6371000.0 * cos(meanLatRad)
+        val yB = Math.toRadians(b.latitude - a.latitude) * 6371000.0
+        val xP = Math.toRadians(p.longitude - a.longitude) * 6371000.0 * cos(meanLatRad)
+        val yP = Math.toRadians(p.latitude - a.latitude) * 6371000.0
+
+        val dx = xB - xA
+        val dy = yB - yA
+        val denom = dx * dx + dy * dy
+        if (denom < 0.0001) return calculateDistanceMeters(p.latitude, p.longitude, a.latitude, a.longitude)
+
+        val t = ((xP - xA) * dx + (yP - yA) * dy) / denom
+        val clampedT = t.coerceIn(0.0, 1.0)
+
+        val projX = xA + clampedT * dx
+        val projY = yA + clampedT * dy
+
+        val distX = xP - projX
+        val distY = yP - projY
+        return sqrt(distX * distX + distY * distY)
+    }
 }
