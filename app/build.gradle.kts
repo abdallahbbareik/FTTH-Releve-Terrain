@@ -34,10 +34,18 @@ android {
     create("debugConfig") {
       val rootKs = file("${rootDir}/debug.keystore")
       val appKs = file("${projectDir}/debug.keystore")
-      storeFile = if (rootKs.exists()) rootKs else appKs
+      val homeKs = file("${System.getProperty("user.home")}/.android/debug.keystore")
+      storeFile = when {
+        rootKs.exists() -> rootKs
+        appKs.exists() -> appKs
+        homeKs.exists() -> homeKs
+        else -> rootKs
+      }
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
+      enableV1Signing = true
+      enableV2Signing = true
     }
   }
 
