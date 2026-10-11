@@ -11,9 +11,10 @@
 
     <!-- Splash système (Android 12+ et compat via core-splashscreen) -->
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">#062A3D</item>
+        <item name="windowSplashScreenBackground">#E3E8EB</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_ab</item>
-        <item name="windowSplashScreenIconBackgroundColor">#062A3D</item>
+        <item name="windowSplashScreenIconBackgroundColor">#E3E8EB</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="postSplashScreenTheme">@style/Theme.App</item>
     </style>
 

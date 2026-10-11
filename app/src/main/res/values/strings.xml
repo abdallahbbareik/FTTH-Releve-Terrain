@@ -5,4 +5,5 @@
     <string name="splash_loading">Démarrage de l\'application…</string>
     <string name="splash_loading_details">Chargement des projets et données topographiques…</string>
     <string name="loading_projects">Chargement des projets…</string>
+    <string name="loading_map_data">Carte et données topographiques</string>
 </resources>

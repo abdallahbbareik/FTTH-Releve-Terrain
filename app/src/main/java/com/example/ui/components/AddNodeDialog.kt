@@ -85,12 +85,13 @@ fun AddNodeDialog(
     existingNodesCount: Int,
     existingNodes: List<FtthNodeEntity> = emptyList(),
     currentProject: String = "projet01",
+    initialType: FtthNodeType = FtthNodeType.POTEAU,
     onDismiss: () -> Unit,
     onNodeCreated: (FtthNodeEntity) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var selectedType by remember { mutableStateOf(FtthNodeType.POTEAU) }
+    var selectedType by remember { mutableStateOf(initialType) }
 
     // Auto-generate suggested ID
     val generatedId = remember(selectedType, existingNodesCount) {

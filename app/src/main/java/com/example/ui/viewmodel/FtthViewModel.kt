@@ -937,10 +937,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         current.add(TrackPoint(targetLat, targetLon))
         _manualTrackPoints.value = current
 
+        val count = current.size
         if (isSnapped) {
             val node = nearestNode!!
             val nameDisplay = if (node.name.isNotBlank()) " (${node.name})" else " (${node.type.label})"
-            showBanner("Tracé accroché au nœud ${node.id}$nameDisplay")
+            showBanner("Point $count ajouté (aimanté au nœud ${node.id}$nameDisplay)")
+        } else {
+            showBanner("Point $count ajouté au tracé GC")
         }
     }
 
@@ -949,6 +952,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         if (current.isNotEmpty()) {
             current.removeAt(current.size - 1)
             _manualTrackPoints.value = current
+            showBanner("Dernier point retiré (${current.size} restants)")
         }
     }
 
@@ -967,11 +971,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _bannerMessage.value = "Photo ajoutée au tracé manuel (${currentPhotos.size} photos)"
     }
 
-    fun saveManualTrack(name: String = "Tracé Manuel ${System.currentTimeMillis() % 10000}") {
+    fun saveManualTrack(name: String = "Tracé GC ${System.currentTimeMillis() % 10000}") {
+        val pts = _manualTrackPoints.value
+        if (pts.size < 2) {
+            showBanner("Placez au moins 2 points sur la carte avant d'enregistrer le tracé GC")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val pts = _manualTrackPoints.value
-            if (pts.size < 2) return@launch
-
             val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
             val photos = _manualTrackPhotos.value
             val track = StoredTrack(
@@ -1001,7 +1007,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _manualTrackPoints.value = emptyList()
             _manualTrackPhotos.value = emptyList()
             _selectedTrackForDetail.value = track
-            _bannerMessage.value = "Infra linéaire '$name' (${pts.size} sommets, ${photos.size} photos) enregistrée. Fiche ouverte pour configuration."
+            _bannerMessage.value = "Tracé GC '$name' (${pts.size} sommets) enregistré avec succès."
         }
     }
 
@@ -1552,6 +1558,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _mapFocusTarget.value = Pair(node.latitude, node.longitude)
         _selectedNode.value = node
         _bannerMessage.value = "Zoom sur ${node.id} (${node.name})"
+    }
+
+    fun focusOnCoordinates(latitude: Double, longitude: Double) {
+        _mapFocusTarget.value = Pair(latitude, longitude)
     }
 
     fun clearMapFocusTarget() {

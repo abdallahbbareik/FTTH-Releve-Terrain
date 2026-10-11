@@ -66,7 +66,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.components.LoadingScreen
-import com.example.ui.components.SplashScreen
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -95,6 +94,16 @@ import com.example.ui.components.SyncStatusBanner
 import com.example.ui.components.TrackDetailDialog
 import com.example.ui.components.TracksListDialog
 import com.example.ui.components.WorkflowGuideDialog
+import com.example.ui.components.MapTopActionsBar
+import com.example.ui.components.CompactPiquetageTopBar
+import com.example.ui.components.PiquetageBottomPanel
+import com.example.ui.components.QuickStakeType
+import com.example.ui.components.GpsCoordinatesDialog
+import com.example.ui.components.LinksListDialog
+import com.example.ui.components.NodeCardSheet
+import com.example.data.local.FtthNodeType
+import com.example.ui.theme.TelecomCyan
+import com.example.ui.theme.TelecomNavy
 import com.example.ui.components.map.OsmMapView
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.FtthViewModel
@@ -105,7 +114,11 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
+        // Splash statique (système) : affiché au moins 1,5 s, puis place à l'application
+        var keepSplash = true
+        splash.setKeepOnScreenCondition { keepSplash }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ keepSplash = false }, 1500L)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -194,6 +207,11 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val showProjectFolderDialog by viewModel.showProjectFolderDialog.collectAsStateWithLifecycle()
     val selectedLinkForDetail by viewModel.selectedLinkForDetail.collectAsStateWithLifecycle()
 
+    var showGpsDetailsDialog by remember { mutableStateOf(false) }
+    var showLinksListDialog by remember { mutableStateOf(false) }
+    var selectedQuickStakeType by remember { mutableStateOf(QuickStakeType.POTEAU) }
+    var showFullNodeDetailSheet by remember { mutableStateOf(false) }
+
     var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
     var tempManualPhotoFile by remember { mutableStateOf<File?>(null) }
     var showPhotoResolutionDialog by remember { mutableStateOf(false) }
@@ -233,24 +251,17 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
-    var showSplash by remember { mutableStateOf(true) }
     var showLoader by remember { mutableStateOf(false) }
     var hasLoadedOnce by remember { mutableStateOf(false) }
 
-    // Splash : durée fixe, indépendante du chargement des données
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1800L)
-        showSplash = false
-    }
-
     // Écran de chargement : immédiat au démarrage, puis après 300 ms pour les rechargements (évite le clignotement)
-    LaunchedEffect(isLoading, showSplash) {
-        if (isLoading && !showSplash) {
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
             if (hasLoadedOnce) kotlinx.coroutines.delay(300L)
             showLoader = true
         } else {
             showLoader = false
-            if (!isLoading && !showSplash) hasLoadedOnce = true
+            hasLoadedOnce = true
         }
     }
 
@@ -259,9 +270,16 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 movingNode != null || isMoveVertexMode || isAdjustTrackMode || showFilterSheet || showSyncLogSheet ||
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
-                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog
+                pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog ||
+                showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet
     ) {
-        if (showPhotoResolutionDialog) {
+        if (showGpsDetailsDialog) {
+            showGpsDetailsDialog = false
+        } else if (showLinksListDialog) {
+            showLinksListDialog = false
+        } else if (showFullNodeDetailSheet) {
+            showFullNodeDetailSheet = false
+        } else if (showPhotoResolutionDialog) {
             showPhotoResolutionDialog = false
         } else if (isAdjustTrackMode) {
             viewModel.cancelTrackAdjustment()
@@ -305,174 +323,178 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-        topBar = {
-            Column {
-                PiquetageTopBar(
-                    currentProject = currentProject,
-                    searchQuery = searchQuery,
-                    totalNodesCount = rawNodes.size,
-                    matchingNodes = filteredNodes,
-                    currentPhotoResolutionMode = currentPhotoResolutionMode,
-                    onSearchQueryChange = { viewModel.updateSearchQuery(it) },
-                    onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
-                    onOpenFilters = { viewModel.openFilterSheet() },
-                    onOpenSyncLogs = { viewModel.openSyncLogSheet() },
-                    onOpenProjectFolder = { viewModel.openProjectFolder() },
-                    onOpenExport = { viewModel.openExportDialog() },
-                    onOpenWorkflowGuide = { showWorkflowGuide = true },
-                    onOpenPhotoResolutionConfig = { showPhotoResolutionDialog = true },
-                    onExportZip = { viewModel.exportCompleteZipAndShare(context) },
-                    onExportKmz = { viewModel.exportKmzAndShare(context) },
-                    onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) }
-                )
-
-                // Bandeau d'état : Stockage Local Documents/Releve-Terrain
-                SyncStatusBanner(
-                    currentProject = currentProject,
-                    nodesCount = rawNodes.size,
-                    linksCount = rawLinks.size,
-                    tracksCount = allTracks.size,
-                    onOpenLogs = { viewModel.openSyncLogSheet() },
-                    onOpenProjectFolder = { viewModel.openProjectFolder() }
-                )
-
-                // Barre de contrôle GPS & Tracés
-                if (!isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
-                    GpsTrackControlBar(
+            topBar = {
+                Column {
+                    // Barre du haut compacte : menu, projet (touche pour changer) et état GPS (point vert et ±3 m)
+                    CompactPiquetageTopBar(
+                        currentProject = currentProject,
+                        userLocation = userLocation,
                         gpsStatus = gpsStatus,
-                        locationData = userLocation,
-                        activeTrack = activeTrack,
-                        totalTracksCount = allTracks.size,
-                        totalNodesCount = rawNodes.size,
+                        searchQuery = searchQuery,
+                        matchingNodes = filteredNodes,
+                        onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                        onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
+                        onOpenProjectFolder = { viewModel.openProjectFolder() },
+                        onOpenGpsDetails = { showGpsDetailsDialog = true },
+                        onOpenFilters = { viewModel.openFilterSheet() },
+                        onOpenSyncLogs = { viewModel.openSyncLogSheet() },
+                        onOpenExport = { viewModel.openExportDialog() },
+                        onOpenWorkflowGuide = { showWorkflowGuide = true },
+                        onOpenPhotoResolutionConfig = { showPhotoResolutionDialog = true },
+                        onExportZip = { viewModel.exportCompleteZipAndShare(context) },
+                        onExportKmz = { viewModel.exportKmzAndShare(context) },
+                        onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) },
                         onStartAutoTrack = { viewModel.startAutoGpsTrack() },
-                        onStopAutoTrack = { viewModel.stopAutoGpsTrack() },
-                        onCancelActiveTrack = { viewModel.cancelActiveTrack() },
-                        onAddActiveTrackPhoto = { path -> viewModel.addActiveTrackPhoto(path) },
-                        onStartManualTrack = { viewModel.startManualTrack() },
-                        onPinAtGpsLocation = { viewModel.requestStakingAtGpsLocation() },
-                        onPinOnMapLocation = { viewModel.startPickOnMapMode() },
-                        onOpenTracksList = { viewModel.openTracksList() },
+                        onStartManualTrack = { viewModel.startManualTrack() }
+                    )
+
+                    // Barre d'outils flottante : Mode Déplacement de Nœud
+                    if (movingNode != null) {
+                        MoveNodeEditorBar(
+                            node = movingNode!!,
+                            tempPosition = tempMoveNodePosition,
+                            onConfirmMove = { viewModel.confirmMoveNode() },
+                            onCancel = { viewModel.cancelMoveNode() }
+                        )
+                    }
+
+                    // Barre d'outils flottante : Mode Déplacement de Sommet de Trajet
+                    if (isMoveVertexMode) {
+                        MoveVertexEditorBar(
+                            trackName = selectedTrackToMoveVertex?.name ?: "Trajet",
+                            vertexIndex = movingVertexIndex,
+                            tempPosition = tempVertexPosition,
+                            onConfirmMove = { viewModel.confirmMoveVertex() },
+                            onCancel = { viewModel.cancelMoveVertex() }
+                        )
+                    }
+
+                    // Barre d'outils flottante : Mode Tracé Manuel
+                    if (isManualTrackMode) {
+                        ManualTrackEditorBar(
+                            points = manualTrackPoints,
+                            photos = manualTrackPhotos,
+                            onAddPhoto = {
+                                try {
+                                    val file = com.example.data.photo.PhotoStorageManager.createNewPhotoFile(context, "MANUAL_TRACK")
+                                    tempManualPhotoFile = file
+                                    val uri = com.example.data.photo.PhotoStorageManager.getUriForPhotoFile(context, file)
+                                    manualTrackPhotoLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            },
+                            onUndoLastPoint = { viewModel.undoLastManualTrackPoint() },
+                            onSaveTrack = { viewModel.saveManualTrack() },
+                            onCancel = { viewModel.cancelManualTrack() }
+                        )
+                    }
+
+                    // Barre d'outils flottante : Mode Redresser entre 2 sommets
+                    if (isStraightenMode) {
+                        StraightenEditorBar(
+                            trackName = selectedStraightenTrack?.name ?: "Trajet",
+                            selectedIndices = selectedStraightenIndices,
+                            onApplyStraighten = { viewModel.applyStraightenBetweenVertices() },
+                            onCancel = { viewModel.cancelStraightenMode() }
+                        )
+                    }
+
+                    // Barre d'outils flottante : Mode Modification de tracé (Fenêtre persistante jusqu'à validation)
+                    if (isAdjustTrackMode && selectedAdjustTrack != null) {
+                        val track = selectedAdjustTrack!!
+                        val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                        TrackAdjustmentBottomBar(
+                            trackName = track.name,
+                            pointsCount = pts.size,
+                            distanceMeters = liveAdjustDistance ?: track.totalDistanceMeters,
+                            selectedTolerance = adjustTolerance,
+                            onToleranceChanged = { tol -> viewModel.setAdjustTolerance(tol) },
+                            onSimplify = { viewModel.applyCurrentTrackSimplification() },
+                            isStraightenActive = isAdjustStraightenActive,
+                            onToggleStraighten = { viewModel.toggleAdjustStraightenMode() },
+                            straightenStartIdx = adjustStraightenStartIdx,
+                            isDeleteActive = isAdjustDeleteActive,
+                            onToggleDelete = { viewModel.toggleAdjustDeleteMode() },
+                            isAddActive = isAdjustAddActive,
+                            onToggleAdd = { viewModel.toggleAdjustAddMode() },
+                            canUndo = canUndoAdjust,
+                            onUndo = { viewModel.undoLastAdjustAction() },
+                            selectedVertexIdx = selectedAdjustVertexIdx,
+                            onDeleteSelectedVertex = {
+                                selectedAdjustVertexIdx?.let { idx -> viewModel.deleteAdjustTrackVertex(idx) }
+                            },
+                            onResetOriginal = { viewModel.restoreOriginalTrack() },
+                            onConfirm = { viewModel.confirmTrackAdjustment() },
+                            onCancel = { viewModel.cancelTrackAdjustment() }
+                        )
+                    }
+                }
+            },
+            bottomBar = {
+                // Panneau du bas : compteurs (pastilles), choix du type (Poteau, Boîtier, Câble), gros bouton Piqueter et bouton Lier
+                if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
+                    PiquetageBottomPanel(
+                        nodesCount = rawNodes.size,
+                        tracksCount = allTracks.size,
+                        linksCount = rawLinks.size,
+                        selectedPointType = selectedQuickStakeType,
+                        onPointTypeSelected = { selectedQuickStakeType = it },
+                        onStake = {
+                            if (selectedQuickStakeType == QuickStakeType.CABLE) {
+                                viewModel.toggleCableDrawingMode()
+                            } else {
+                                viewModel.requestStakingAtGpsLocation()
+                            }
+                        },
+                        onLink = { viewModel.toggleCableDrawingMode() },
                         onOpenNodesList = { viewModel.openNodesList() },
-                        onRequestGpsPermission = {
-                            val perms = mutableListOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                        onOpenTracksList = { viewModel.openTracksList() },
+                        onOpenLinksList = { showLinksListDialog = true }
+                    )
+                } else if (isCableDrawingMode) {
+                    // Bandeau en mode liaison câble
+                    Surface(
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                        color = TelecomNavy,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (cableFirstNode == null) "Étape 1 : Touchez le 1er nœud sur la carte" else "Étape 2 : Touchez le 2ème nœud (${cableFirstNode?.id} sélectionné)",
+                                    color = TelecomCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "Tracé direct de câble optique entre 2 points",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp
+                                )
                             }
-                            permissionLauncher.launch(perms.toTypedArray())
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { viewModel.toggleCableDrawingMode() },
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Annuler", fontSize = 12.sp)
+                            }
                         }
-                    )
-                }
-
-                // Barre d'outils flottante : Mode Déplacement de Nœud
-                if (movingNode != null) {
-                    MoveNodeEditorBar(
-                        node = movingNode!!,
-                        tempPosition = tempMoveNodePosition,
-                        onConfirmMove = { viewModel.confirmMoveNode() },
-                        onCancel = { viewModel.cancelMoveNode() }
-                    )
-                }
-
-                // Barre d'outils flottante : Mode Déplacement de Sommet de Trajet
-                if (isMoveVertexMode) {
-                    MoveVertexEditorBar(
-                        trackName = selectedTrackToMoveVertex?.name ?: "Trajet",
-                        vertexIndex = movingVertexIndex,
-                        tempPosition = tempVertexPosition,
-                        onConfirmMove = { viewModel.confirmMoveVertex() },
-                        onCancel = { viewModel.cancelMoveVertex() }
-                    )
-                }
-
-                // Barre d'outils flottante : Mode Tracé Manuel
-                if (isManualTrackMode) {
-                    ManualTrackEditorBar(
-                        points = manualTrackPoints,
-                        photos = manualTrackPhotos,
-                        onAddPhoto = {
-                            try {
-                                val file = com.example.data.photo.PhotoStorageManager.createNewPhotoFile(context, "MANUAL_TRACK")
-                                tempManualPhotoFile = file
-                                val uri = com.example.data.photo.PhotoStorageManager.getUriForPhotoFile(context, file)
-                                manualTrackPhotoLauncher.launch(uri)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        },
-                        onUndoLastPoint = { viewModel.undoLastManualTrackPoint() },
-                        onSaveTrack = { viewModel.saveManualTrack() },
-                        onCancel = { viewModel.cancelManualTrack() }
-                    )
-                }
-
-                // Barre d'outils flottante : Mode Redresser entre 2 sommets
-                if (isStraightenMode) {
-                    StraightenEditorBar(
-                        trackName = selectedStraightenTrack?.name ?: "Trajet",
-                        selectedIndices = selectedStraightenIndices,
-                        onApplyStraighten = { viewModel.applyStraightenBetweenVertices() },
-                        onCancel = { viewModel.cancelStraightenMode() }
-                    )
-                }
-
-                // Barre d'outils flottante : Mode Modification de tracé (Fenêtre persistante jusqu'à validation)
-                if (isAdjustTrackMode && selectedAdjustTrack != null) {
-                    val track = selectedAdjustTrack!!
-                    val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
-                    TrackAdjustmentBottomBar(
-                        trackName = track.name,
-                        pointsCount = pts.size,
-                        distanceMeters = liveAdjustDistance ?: track.totalDistanceMeters,
-                        selectedTolerance = adjustTolerance,
-                        onToleranceChanged = { tol -> viewModel.setAdjustTolerance(tol) },
-                        onSimplify = { viewModel.applyCurrentTrackSimplification() },
-                        isStraightenActive = isAdjustStraightenActive,
-                        onToggleStraighten = { viewModel.toggleAdjustStraightenMode() },
-                        straightenStartIdx = adjustStraightenStartIdx,
-                        isDeleteActive = isAdjustDeleteActive,
-                        onToggleDelete = { viewModel.toggleAdjustDeleteMode() },
-                        isAddActive = isAdjustAddActive,
-                        onToggleAdd = { viewModel.toggleAdjustAddMode() },
-                        canUndo = canUndoAdjust,
-                        onUndo = { viewModel.undoLastAdjustAction() },
-                        selectedVertexIdx = selectedAdjustVertexIdx,
-                        onDeleteSelectedVertex = {
-                            selectedAdjustVertexIdx?.let { idx -> viewModel.deleteAdjustTrackVertex(idx) }
-                        },
-                        onResetOriginal = { viewModel.restoreOriginalTrack() },
-                        onConfirm = { viewModel.confirmTrackAdjustment() },
-                        onCancel = { viewModel.cancelTrackAdjustment() }
-                    )
+                    }
                 }
             }
-        },
-        floatingActionButton = {
-            if (!isCableDrawingMode && !isManualTrackMode && !isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExtendedFloatingActionButton(
-                        onClick = { viewModel.toggleCableDrawingMode() },
-                        icon = { Icon(Icons.Default.Timeline, contentDescription = null) },
-                        text = { Text("Lier Fibre", fontSize = 12.sp) },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.testTag("toggle_cable_fab")
-                    )
-
-                    ExtendedFloatingActionButton(
-                        onClick = { viewModel.requestStakingAtGpsLocation() },
-                        icon = { Icon(Icons.Default.AddLocationAlt, contentDescription = null) },
-                        text = { Text("Piqueter", fontWeight = FontWeight.Bold) },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.testTag("stake_at_gps_fab")
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
+        ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -549,6 +571,43 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 modifier = Modifier.fillMaxSize()
             )
 
+            // Sur l'écran en haut : Ajouter noeud, Créer GC, GC Auto, Filtre
+            if (!isStraightenMode && movingNode == null && !isMoveVertexMode && !isAdjustTrackMode) {
+                MapTopActionsBar(
+                    isPickOnMapActive = isPickOnMapMode || pendingStakePosition != null,
+                    isManualTrackActive = isManualTrackMode,
+                    isAutoTrackActive = activeTrack != null,
+                    isFilterActive = !filterState.showPoteaux || !filterState.showBoitiers || !filterState.showChambres || searchQuery.isNotBlank(),
+                    onAddNodeClick = {
+                        if (isPickOnMapMode || pendingStakePosition != null) {
+                            viewModel.cancelPickOnMapMode()
+                        } else {
+                            viewModel.startPickOnMapMode()
+                        }
+                    },
+                    onCreerGcClick = {
+                        if (isManualTrackMode) {
+                            viewModel.cancelManualTrack()
+                        } else {
+                            viewModel.startManualTrack()
+                        }
+                    },
+                    onGcAutoClick = {
+                        if (activeTrack != null) {
+                            viewModel.openTracksList()
+                        } else {
+                            viewModel.startAutoGpsTrack()
+                        }
+                    },
+                    onFilterClick = {
+                        viewModel.openFilterSheet()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+            }
+
             // Notification dynamique (disparaît automatiquement après 2 secondes)
             AnimatedVisibility(
                 visible = bannerMessage != null,
@@ -562,7 +621,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 ),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(16.dp)
+                    .padding(top = 58.dp, start = 16.dp, end = 16.dp)
             ) {
                 if (bannerMessage != null) {
                     Surface(
@@ -601,18 +660,52 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 }
             }
 
-            // Fiche détaillée du nœud (avec modification de position et déplacement)
-            if (selectedNode != null) {
+            // Fiche du point sélectionné sur la carte : nom, photo, notes, modifier et supprimer
+            if (selectedNode != null && !showFullNodeDetailSheet) {
+                NodeCardSheet(
+                    node = selectedNode!!,
+                    onDismiss = { viewModel.selectNode(null) },
+                    onSaveNotes = { notes ->
+                        val updated = selectedNode!!.copy(notes = notes, updatedAt = System.currentTimeMillis())
+                        viewModel.saveNode(updated, oldId = selectedNode!!.id, closeSheet = false)
+                    },
+                    onAddPhoto = { photoPath ->
+                        val updatedPhotos = selectedNode!!.photos + photoPath
+                        val updated = selectedNode!!.copy(photos = updatedPhotos, photoCount = updatedPhotos.size, updatedAt = System.currentTimeMillis())
+                        viewModel.saveNode(updated, oldId = selectedNode!!.id, closeSheet = false)
+                    },
+                    onDeletePhoto = { photoPath ->
+                        val updatedPhotos = selectedNode!!.photos.filter { it != photoPath }
+                        val updated = selectedNode!!.copy(photos = updatedPhotos, photoCount = updatedPhotos.size, updatedAt = System.currentTimeMillis())
+                        viewModel.saveNode(updated, oldId = selectedNode!!.id, closeSheet = false)
+                    },
+                    onOpenFullEdit = { showFullNodeDetailSheet = true },
+                    onDeleteNode = { id -> viewModel.deleteNode(id) },
+                    onMoveOnMap = { nodeToMove -> viewModel.startMoveNode(nodeToMove) }
+                )
+            }
+
+            // Fiche détaillée complète (ouverte via « Modifier »)
+            if (selectedNode != null && showFullNodeDetailSheet) {
                 NodeDetailSheet(
                     node = selectedNode!!,
                     existingNodes = rawNodes,
                     userLocation = userLocation,
                     currentProject = currentProject,
-                    onDismiss = { viewModel.selectNode(null) },
-                    onSave = { updated, oldId -> viewModel.saveNode(updated, oldId = oldId, closeSheet = true) },
+                    onDismiss = { showFullNodeDetailSheet = false },
+                    onSave = { updated, oldId ->
+                        viewModel.saveNode(updated, oldId = oldId, closeSheet = true)
+                        showFullNodeDetailSheet = false
+                    },
                     onAutoSave = { updated, oldId -> viewModel.saveNode(updated, oldId = oldId, closeSheet = false) },
-                    onDelete = { id -> viewModel.deleteNode(id) },
-                    onStartMoveNodeOnMap = { nodeToMove -> viewModel.startMoveNode(nodeToMove) }
+                    onDelete = { id ->
+                        viewModel.deleteNode(id)
+                        showFullNodeDetailSheet = false
+                    },
+                    onStartMoveNodeOnMap = { nodeToMove ->
+                        showFullNodeDetailSheet = false
+                        viewModel.startMoveNode(nodeToMove)
+                    }
                 )
             }
 
@@ -626,6 +719,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     existingNodesCount = rawNodes.size,
                     existingNodes = rawNodes,
                     currentProject = currentProject,
+                    initialType = selectedQuickStakeType.nodeType ?: FtthNodeType.POTEAU,
                     onDismiss = { viewModel.dismissAddNodeDialog() },
                     onNodeCreated = { newNode ->
                         viewModel.saveNode(newNode, isNew = true)
@@ -703,6 +797,29 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onDismiss = { viewModel.dismissLinkDetail() },
                     onSaveLink = { updated -> viewModel.saveLink(updated) },
                     onDeleteLink = { id -> viewModel.deleteLink(id) }
+                )
+            }
+
+            // Dialogue Coordonnées GPS (affiché au toucher de la pastille GPS)
+            if (showGpsDetailsDialog) {
+                GpsCoordinatesDialog(
+                    locationData = userLocation,
+                    gpsStatus = gpsStatus,
+                    onDismiss = { showGpsDetailsDialog = false }
+                )
+            }
+
+            // Dialogue Liste des Câbles (affiché au toucher de la pastille câble)
+            if (showLinksListDialog) {
+                LinksListDialog(
+                    links = rawLinks,
+                    nodes = rawNodes,
+                    onSelectLink = {
+                        showLinksListDialog = false
+                        viewModel.selectLinkForDetail(it)
+                    },
+                    onDeleteLink = { viewModel.deleteLink(it) },
+                    onDismiss = { showLinksListDialog = false }
                 )
             }
 
@@ -849,13 +966,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
         }
 
             // Écran de chargement des projets (fond fibre + loader)
-            if (showLoader && !showSplash) {
+            if (showLoader) {
                 LoadingScreen()
-            }
-
-            // Splash : logo animé + Relevé terrain FTTH
-            if (showSplash) {
-                SplashScreen()
             }
         }
     }

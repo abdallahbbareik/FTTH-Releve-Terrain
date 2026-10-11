@@ -834,27 +834,29 @@ fun OsmMapView(
         }
 
         // Boutons Flottants (Boussole / Flèche du Nord, Calque, Recentrage, Zoom)
+        // 3 boutons de carte : boussole, couches et recentrage (zoom +/- et plein écran retirés)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // 1. Boussole
             FloatingActionButton(
                 onClick = {
                     mapView.setMapOrientation(0f, true)
                     mapOrientation = 0f
                 },
                 modifier = Modifier
-                    .size(44.dp)
-                    .testTag("north_arrow_button"),
+                    .size(46.dp)
+                    .testTag("compass_button"),
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = Color(0xFFDC2626)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Navigation,
-                        contentDescription = "Réinitialiser au Nord",
+                        contentDescription = "Boussole (Orientation Nord)",
                         modifier = Modifier
                             .size(24.dp)
                             .rotate(-mapOrientation)
@@ -862,23 +864,25 @@ fun OsmMapView(
                 }
             }
 
+            // 2. Couches
             FloatingActionButton(
                 onClick = {
                     currentLayer = if (currentLayer == OsmLayerType.PLAN) OsmLayerType.SATELLITE_ESRI else OsmLayerType.PLAN
                 },
                 modifier = Modifier
-                    .size(44.dp)
-                    .testTag("switch_layer_button"),
+                    .size(46.dp)
+                    .testTag("layers_button"),
                 containerColor = if (currentLayer == OsmLayerType.SATELLITE_ESRI) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 contentColor = if (currentLayer == OsmLayerType.SATELLITE_ESRI) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
             ) {
                 Icon(
                     imageVector = Icons.Default.Layers,
-                    contentDescription = "Fond de carte Plan / Satellite",
-                    modifier = Modifier.size(20.dp)
+                    contentDescription = "Couches (Plan / Satellite)",
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
+            // 3. Recentrage
             FloatingActionButton(
                 onClick = {
                     if (userLocation != null) {
@@ -890,62 +894,16 @@ fun OsmMapView(
                     }
                 },
                 modifier = Modifier
-                    .size(44.dp)
-                    .testTag("recenter_gps_button"),
+                    .size(46.dp)
+                    .testTag("recenter_button"),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ) {
                 Icon(
                     imageVector = Icons.Default.MyLocation,
-                    contentDescription = "Ma position GPS",
-                    modifier = Modifier.size(20.dp)
+                    contentDescription = "Recentrage position GPS",
+                    modifier = Modifier.size(22.dp)
                 )
-            }
-
-            FloatingActionButton(
-                onClick = {
-                    if (nodes.isNotEmpty()) {
-                        val minLat = nodes.minOf { it.latitude }
-                        val maxLat = nodes.maxOf { it.latitude }
-                        val minLon = nodes.minOf { it.longitude }
-                        val maxLon = nodes.maxOf { it.longitude }
-                        val box = BoundingBox(maxLat + 0.001, maxLon + 0.001, minLat - 0.001, minLon - 0.001)
-                        mapView.zoomToBoundingBox(box, true, 80)
-                    }
-                },
-                modifier = Modifier
-                    .size(44.dp)
-                    .testTag("fit_bounds_button"),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CropFree,
-                    contentDescription = "Cadrer le réseau",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 3.dp,
-                modifier = Modifier.size(44.dp)
-            ) {
-                IconButton(onClick = { mapView.controller.zoomIn() }) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Zoom avant")
-                }
-            }
-
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 3.dp,
-                modifier = Modifier.size(44.dp)
-            ) {
-                IconButton(onClick = { mapView.controller.zoomOut() }) {
-                    Icon(imageVector = Icons.Default.Remove, contentDescription = "Zoom arrière")
-                }
             }
         }
     }
