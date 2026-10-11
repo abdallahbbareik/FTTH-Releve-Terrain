@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
 
-    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
-        <item name="android:windowBackground">@color/dark_background</item>
-        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/dark_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/ic_splash_ab_anim</item>
-        <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">1000</item>
+    <!-- Thème de l'application (après le splash) -->
+    <style name="Theme.App" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#062A3D</item>
+        <item name="android:statusBarColor">#062A3D</item>
+        <item name="android:navigationBarColor">#062A3D</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- Splash système (Android 12+ et compat via core-splashscreen) -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#062A3D</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_ab</item>
+        <item name="windowSplashScreenIconBackgroundColor">#062A3D</item>
+        <item name="postSplashScreenTheme">@style/Theme.App</item>
+    </style>
+
 </resources>

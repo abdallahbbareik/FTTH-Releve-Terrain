@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -21,6 +22,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,7 +65,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.ui.components.AnimatedFiberBackground
+import com.example.ui.components.LoadingScreen
+import com.example.ui.components.SplashScreen
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -102,6 +105,7 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -229,6 +233,26 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
+    var showSplash by remember { mutableStateOf(true) }
+    var showLoader by remember { mutableStateOf(false) }
+    var hasLoadedOnce by remember { mutableStateOf(false) }
+
+    // Splash : durée fixe, indépendante du chargement des données
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1800L)
+        showSplash = false
+    }
+
+    // Écran de chargement : immédiat au démarrage, puis après 300 ms pour les rechargements (évite le clignotement)
+    LaunchedEffect(isLoading, showSplash) {
+        if (isLoading && !showSplash) {
+            if (hasLoadedOnce) kotlinx.coroutines.delay(300L)
+            showLoader = true
+        } else {
+            showLoader = false
+            if (!isLoading && !showSplash) hasLoadedOnce = true
+        }
+    }
 
     BackHandler(
         enabled = selectedNode != null || isCableDrawingMode || isManualTrackMode || isStraightenMode ||
@@ -824,58 +848,14 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             }
         }
 
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(enabled = false) {},
-                    contentAlignment = Alignment.Center
-                ) {
-                    AnimatedFiberBackground()
-                    Card(
-                        modifier = Modifier
-                            .padding(32.dp)
-                            .testTag("loading_card"),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.ic_ftth_logo),
-                                contentDescription = "Logo FTTH",
-                                modifier = Modifier
-                                    .size(80.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.height(20.dp))
-                            Text(
-                                text = "Démarrage de l'application...",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Chargement des projets et données topographiques...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+            // Écran de chargement des projets (fond fibre + loader)
+            if (showLoader && !showSplash) {
+                LoadingScreen()
+            }
+
+            // Splash : logo animé + Relevé terrain FTTH
+            if (showSplash) {
+                SplashScreen()
             }
         }
     }

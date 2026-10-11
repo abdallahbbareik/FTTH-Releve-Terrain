@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Releve-Terrain</string>
+    <string name="splash_title">Relevé Terrain</string>
+    <string name="splash_subtitle">FTTH</string>
+    <string name="splash_loading">Démarrage de l\'application…</string>
+    <string name="splash_loading_details">Chargement des projets et données topographiques…</string>
+    <string name="loading_projects">Chargement des projets…</string>
 </resources>
