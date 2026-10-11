@@ -58,7 +58,7 @@ fun MapTopActionsBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 1. Ajouter noeud (ex-Pointer)
@@ -123,23 +123,23 @@ private fun TopActionButton(
     testTag: String,
     modifier: Modifier = Modifier
 ) {
-    // Arrière-plan transparent avec bordure nette
+    // Arrière-plan propre à chaque bouton (séparé) avec ombre et contour
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) activeColor else Color.Transparent,
+        targetValue = if (isActive) activeColor else Color.White.copy(alpha = 0.94f),
         label = "btn_bg"
     )
     val contentColor by animateColorAsState(
         targetValue = if (isActive) Color.White else TelecomNavy,
         label = "btn_content"
     )
-    val borderColor = if (isActive) activeColor else TelecomNavy
+    val borderColor = if (isActive) activeColor else TelecomNavy.copy(alpha = 0.35f)
 
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, borderColor),
-        shadowElevation = if (isActive) 3.dp else 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.2.dp, borderColor),
+        shadowElevation = if (isActive) 4.dp else 2.dp,
         modifier = modifier
             .height(38.dp)
             .testTag(testTag)
@@ -189,17 +189,17 @@ private fun TopIconOnlyButton(
     modifier: Modifier = Modifier
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) activeColor else Color.Transparent,
+        targetValue = if (isActive) activeColor else Color.White.copy(alpha = 0.94f),
         label = "btn_bg_icon"
     )
-    val borderColor = if (isActive) activeColor else TelecomNavy
+    val borderColor = if (isActive) activeColor else TelecomNavy.copy(alpha = 0.35f)
 
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, borderColor),
-        shadowElevation = if (isActive) 3.dp else 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.2.dp, borderColor),
+        shadowElevation = if (isActive) 4.dp else 2.dp,
         modifier = modifier
             .size(38.dp)
             .testTag(testTag)

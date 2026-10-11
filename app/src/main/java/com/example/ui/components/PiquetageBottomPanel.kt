@@ -78,27 +78,28 @@ fun PiquetageBottomPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Boutons d'action : Ajouter Cable , Piqueté ici (Arrière-plan transparent)
+            // Boutons d'action : Ajouter Cable , Piqueté ici (Chaque bouton avec son arrière-plan séparé)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Bouton Ajouter Cable (ex-Lier) - Arrière-plan transparent
+                // Bouton Ajouter Cable (ex-Lier) - Arrière-plan propre séparé
                 FilledTonalButton(
                     onClick = onLink,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Color.Transparent,
+                        containerColor = Color.White.copy(alpha = 0.95f),
                         contentColor = TelecomNavy
                     ),
+                    elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp),
                     modifier = Modifier
                         .weight(1.15f)
                         .height(50.dp)
-                        .border(1.5.dp, TelecomNavy, RoundedCornerShape(14.dp))
+                        .border(1.2.dp, TelecomNavy.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                         .testTag("link_secondary_button")
                 ) {
                     Icon(
@@ -115,24 +116,25 @@ fun PiquetageBottomPanel(
                     )
                 }
 
-                // Gros bouton Piqueté ici - Arrière-plan transparent
+                // Gros bouton Piqueté ici - Arrière-plan propre séparé
                 Button(
                     onClick = onStake,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = TelecomNavy
+                        containerColor = TelecomNavy.copy(alpha = 0.95f),
+                        contentColor = Color.White
                     ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 5.dp),
                     modifier = Modifier
                         .weight(1.85f)
                         .height(50.dp)
-                        .border(1.8.dp, TelecomNavy, RoundedCornerShape(14.dp))
+                        .border(1.5.dp, TelecomCyan.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
                         .testTag("stake_primary_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.AddLocationAlt,
                         contentDescription = null,
-                        tint = TelecomNavy,
+                        tint = TelecomCyan,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -140,7 +142,7 @@ fun PiquetageBottomPanel(
                         text = if (selectedPointType == QuickStakeType.CABLE) "Tracer Câble" else "Piqueté ici",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = TelecomNavy,
+                        color = Color.White,
                         letterSpacing = 0.5.sp
                     )
                 }

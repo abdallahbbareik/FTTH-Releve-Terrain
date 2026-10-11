@@ -243,22 +243,7 @@ fun CompactPiquetageTopBar(
                     }
                 }
 
-                // 2. Bouton Recherche direct devant le projet
-                IconButton(
-                    onClick = { isSearchActive = !isSearchActive },
-                    modifier = Modifier
-                        .size(38.dp)
-                        .testTag("top_search_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Rechercher",
-                        tint = if (isSearchActive) TelecomCyan else Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // 3. Projet (touche pour changer)
+                // 2. Projet (touche pour changer)
                 Surface(
                     onClick = onOpenProjectFolder,
                     shape = RoundedCornerShape(18.dp),
@@ -296,16 +281,31 @@ fun CompactPiquetageTopBar(
                     }
                 }
 
+                // 3. Bouton Recherche direct après le projet
+                IconButton(
+                    onClick = { isSearchActive = !isSearchActive },
+                    modifier = Modifier
+                        .size(38.dp)
+                        .testTag("top_search_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Rechercher",
+                        tint = if (isSearchActive) TelecomCyan else Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
                 Spacer(modifier = Modifier.weight(1f))
 
-                // 3. État GPS (point vert et ±3 m). Touche pour afficher les coordonnées
+                // 4. État GPS (décalé à gauche : point vert et ±3 m). Touche pour afficher les coordonnées
                 Surface(
                     onClick = onOpenGpsDetails,
                     shape = RoundedCornerShape(18.dp),
                     color = Color.White.copy(alpha = 0.12f),
                     border = androidx.compose.foundation.BorderStroke(1.dp, dotColor.copy(alpha = 0.4f)),
                     modifier = Modifier
-                        .padding(end = 4.dp)
+                        .padding(end = 28.dp)
                         .testTag("gps_status_pill")
                 ) {
                     Row(

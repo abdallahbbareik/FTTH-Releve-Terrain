@@ -277,10 +277,6 @@ fun OsmMapView(
         rotationGesture.isEnabled = true
         mapView.overlays.add(rotationGesture)
 
-        val compassOverlay = CompassOverlay(context, InternalCompassOrientationProvider(context), mapView)
-        compassOverlay.enableCompass()
-        mapView.overlays.add(compassOverlay)
-
         val eventsReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null) {
