@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.Note
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
@@ -90,6 +91,7 @@ fun TrackDetailDialog(
     userLocation: GpsLocationData?,
     onDismiss: () -> Unit,
     onSaveTrack: (updatedTrack: StoredTrack) -> Unit = {},
+    onAutoSave: (updatedTrack: StoredTrack) -> Unit = {},
     onUpdateTrackName: (trackId: String, newName: String) -> Unit = { _, _ -> },
     onAddTrackPhoto: (trackId: String, photoPath: String, lat: Double, lon: Double) -> Unit,
     onDeleteTrackPhoto: (trackId: String, photoId: String) -> Unit,
@@ -155,6 +157,8 @@ fun TrackDetailDialog(
     val distKm = lengthMeters / 1000.0
     val distStr = if (lengthMeters < 1000.0) "${lengthMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distKm)
 
+    var notesText by remember(track) { mutableStateOf(track.notes) }
+
     fun buildUpdatedTrack(): StoredTrack {
         val finalConduitType = if (conduitTypeChoice == "Autre") {
             if (customConduitType.isNotBlank()) customConduitType.trim() else "Autre"
@@ -168,7 +172,8 @@ fun TrackDetailDialog(
             conduitAudit = conduitAudit,
             conduitType = finalConduitType,
             conduitCount = conduitCount,
-            conduitDiameters = selectedDiameters.toList()
+            conduitDiameters = selectedDiameters.toList(),
+            notes = notesText
         )
     }
 
@@ -239,7 +244,7 @@ fun TrackDetailDialog(
                             trailingIcon = {
                                 IconButton(onClick = {
                                     onUpdateTrackName(track.id, trackName)
-                                    onSaveTrack(buildUpdatedTrack())
+                                    onAutoSave(buildUpdatedTrack())
                                     isEditingName = false
                                 }) {
                                     Icon(Icons.Default.Save, contentDescription = "Sauvegarder", tint = MaterialTheme.colorScheme.primary)
@@ -310,7 +315,7 @@ fun TrackDetailDialog(
                             selected = isSelected,
                             onClick = {
                                 selectedType = typeKey
-                                onSaveTrack(buildUpdatedTrack().copy(type = typeKey))
+                                onAutoSave(buildUpdatedTrack().copy(type = typeKey))
                             },
                             label = { Text(typeLabel, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp) },
                             colors = FilterChipDefaults.filterChipColors(
@@ -340,7 +345,7 @@ fun TrackDetailDialog(
                         selected = isConforme,
                         onClick = {
                             selectedEtat = "Conforme"
-                            onSaveTrack(buildUpdatedTrack().copy(etat = "Conforme"))
+                            onAutoSave(buildUpdatedTrack().copy(etat = "Conforme"))
                         },
                         leadingIcon = {
                             Surface(shape = CircleShape, color = Color(0xFF16A34A), modifier = Modifier.size(10.dp)) {}
@@ -358,7 +363,7 @@ fun TrackDetailDialog(
                         selected = isNonConforme,
                         onClick = {
                             selectedEtat = "Non conforme"
-                            onSaveTrack(buildUpdatedTrack().copy(etat = "Non conforme"))
+                            onAutoSave(buildUpdatedTrack().copy(etat = "Non conforme"))
                         },
                         leadingIcon = {
                             Surface(shape = CircleShape, color = Color(0xFFDC2626), modifier = Modifier.size(10.dp)) {}
@@ -408,7 +413,7 @@ fun TrackDetailDialog(
                                         selected = isSelected,
                                         onClick = {
                                             conduitAudit = auditOpt
-                                            onSaveTrack(buildUpdatedTrack().copy(conduitAudit = auditOpt))
+                                            onAutoSave(buildUpdatedTrack().copy(conduitAudit = auditOpt))
                                         },
                                         label = { Text(auditOpt, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
                                         leadingIcon = {
@@ -434,7 +439,7 @@ fun TrackDetailDialog(
                                         selected = isSelected,
                                         onClick = {
                                             conduitTypeChoice = tOpt
-                                            onSaveTrack(buildUpdatedTrack())
+                                            onAutoSave(buildUpdatedTrack())
                                         },
                                         label = { Text(tOpt, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
                                         modifier = Modifier.weight(1f)
@@ -447,7 +452,7 @@ fun TrackDetailDialog(
                                     value = customConduitType,
                                     onValueChange = {
                                         customConduitType = it
-                                        onSaveTrack(buildUpdatedTrack())
+                                        onAutoSave(buildUpdatedTrack())
                                     },
                                     label = { Text("Précisez le type de conduite (ex: Acier, Fonte, etc.)", fontSize = 11.sp) },
                                     singleLine = true,
@@ -468,7 +473,7 @@ fun TrackDetailDialog(
                                     onClick = {
                                         if (conduitCount > 1) {
                                             conduitCount--
-                                            onSaveTrack(buildUpdatedTrack().copy(conduitCount = conduitCount))
+                                            onAutoSave(buildUpdatedTrack().copy(conduitCount = conduitCount))
                                         }
                                     },
                                     modifier = Modifier.size(36.dp),
@@ -490,7 +495,7 @@ fun TrackDetailDialog(
                                 OutlinedButton(
                                     onClick = {
                                         conduitCount++
-                                        onSaveTrack(buildUpdatedTrack().copy(conduitCount = conduitCount))
+                                        onAutoSave(buildUpdatedTrack().copy(conduitCount = conduitCount))
                                     },
                                     modifier = Modifier.size(36.dp),
                                     contentPadding = ButtonDefaults.TextButtonContentPadding
@@ -528,7 +533,7 @@ fun TrackDetailDialog(
                                                 newSet.add(dia)
                                             }
                                             selectedDiameters = newSet
-                                            onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                            onAutoSave(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
                                         },
                                         label = { Text(dia, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
                                     )
@@ -542,7 +547,7 @@ fun TrackDetailDialog(
                                             val newSet = selectedDiameters.toMutableSet()
                                             newSet.remove(customDia)
                                             selectedDiameters = newSet
-                                            onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                            onAutoSave(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
                                         },
                                         trailingIcon = { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp)) },
                                         label = { Text(customDia, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
@@ -584,7 +589,7 @@ fun TrackDetailDialog(
                                                 selectedDiameters = newSet
                                                 customDiameterInput = ""
                                                 showAddCustomDiameter = false
-                                                onSaveTrack(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
+                                                onAutoSave(buildUpdatedTrack().copy(conduitDiameters = newSet.toList()))
                                             }
                                         },
                                         modifier = Modifier.height(48.dp)
@@ -793,6 +798,45 @@ fun TrackDetailDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // --- SECTION OBSERVATIONS / NOTES ---
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth().testTag("track_notes_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Note,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Observations / Notes du tracé",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = notesText,
+                            onValueChange = { notesText = it },
+                            placeholder = { Text("Ajouter une observation sur ce tracé (accès, fourreaux, contraintes...)", fontSize = 12.sp) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(86.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            maxLines = 3
+                        )
                     }
                 }
 

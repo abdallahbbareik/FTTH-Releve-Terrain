@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -219,10 +220,11 @@ fun NodeDetailSheet(
     }
 
     fun triggerAutoSave(currentPhotos: List<String> = photos) {
-        if (!isDuplicateId && currentId.isNotBlank()) {
-            val updated = buildCurrentNode(currentPhotos)
-            onAutoSave?.invoke(updated, node.id)
-        }
+        // Auto-save disabled to support manual saving
+        // if (!isDuplicateId && currentId.isNotBlank()) {
+        //     val updated = buildCurrentNode(currentPhotos)
+        //     onAutoSave?.invoke(updated, node.id)
+        // }
     }
 
     val takePictureLauncher = rememberLauncherForActivityResult(

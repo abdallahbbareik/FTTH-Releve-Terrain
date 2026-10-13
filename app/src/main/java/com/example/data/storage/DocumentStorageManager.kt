@@ -84,6 +84,7 @@ data class StoredTrack(
     val conduitType: String = "PEHD", // PEHD, PVC, Autre
     val conduitCount: Int = 1,
     val conduitDiameters: List<String> = listOf("Ø 40"), // Ø 30, Ø 40, Ø 50, Ø 80, Ø 100, etc.
+    val notes: String = "",
     val startTime: Long = System.currentTimeMillis(),
     val endTime: Long? = null,
     val totalDistanceMeters: Double = 0.0,
@@ -105,6 +106,7 @@ data class StoredTrack(
         val diaArr = JSONArray()
         conduitDiameters.forEach { diaArr.put(it) }
         put("conduitDiameters", diaArr)
+        put("notes", notes)
         put("startTime", startTime)
         put("endTime", endTime ?: JSONObject.NULL)
         put("totalDistanceMeters", totalDistanceMeters)
@@ -174,6 +176,7 @@ data class StoredTrack(
                 conduitType = json.optString("conduitType", "PEHD"),
                 conduitCount = json.optInt("conduitCount", 1),
                 conduitDiameters = diaList,
+                notes = json.optString("notes", ""),
                 startTime = json.optLong("startTime", System.currentTimeMillis()),
                 endTime = if (json.has("endTime") && !json.isNull("endTime")) json.optLong("endTime") else null,
                 totalDistanceMeters = json.optDouble("totalDistanceMeters", 0.0),

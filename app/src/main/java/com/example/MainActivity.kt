@@ -102,6 +102,7 @@ import com.example.ui.components.QuickStakeType
 import com.example.ui.components.GpsCoordinatesDialog
 import com.example.ui.components.LinksListDialog
 import com.example.ui.components.NodeCardSheet
+import com.example.ui.components.TrackCardSheet
 import com.example.data.local.FtthNodeType
 import com.example.ui.theme.TelecomCyan
 import com.example.ui.theme.TelecomNavy
@@ -212,6 +213,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     var showLinksListDialog by remember { mutableStateOf(false) }
     var selectedQuickStakeType by remember { mutableStateOf(QuickStakeType.POTEAU) }
     var showFullNodeDetailSheet by remember { mutableStateOf(false) }
+    val showFullTrackDetail by viewModel.showFullTrackDetail.collectAsStateWithLifecycle()
 
     var viewingTrackPhoto by remember { mutableStateOf<TrackPhoto?>(null) }
     var tempManualPhotoFile by remember { mutableStateOf<File?>(null) }
@@ -281,7 +283,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
                 pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog ||
-                showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet
+                showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet || showFullTrackDetail
     ) {
         if (showGpsDetailsDialog) {
             showGpsDetailsDialog = false
@@ -289,6 +291,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
             showLinksListDialog = false
         } else if (showFullNodeDetailSheet) {
             showFullNodeDetailSheet = false
+        } else if (showFullTrackDetail) {
+            viewModel.closeTrackDetail()
         } else if (showPhotoResolutionDialog) {
             showPhotoResolutionDialog = false
         } else if (isAdjustTrackMode) {
@@ -681,6 +685,16 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 NodeCardSheet(
                     node = selectedNode!!,
                     onDismiss = { viewModel.selectNode(null) },
+                    onSave = { notes, photos ->
+                        val updated = selectedNode!!.copy(
+                            notes = notes,
+                            photos = photos,
+                            photoCount = photos.size,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        viewModel.saveNode(updated, oldId = selectedNode!!.id, closeSheet = true)
+                        viewModel.selectNode(null)
+                    },
                     onSaveNotes = { notes ->
                         val updated = selectedNode!!.copy(notes = notes, updatedAt = System.currentTimeMillis())
                         viewModel.saveNode(updated, oldId = selectedNode!!.id, closeSheet = false)
@@ -711,6 +725,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onDismiss = { showFullNodeDetailSheet = false },
                     onSave = { updated, oldId ->
                         viewModel.saveNode(updated, oldId = oldId, closeSheet = true)
+                        viewModel.selectNode(null)
                         showFullNodeDetailSheet = false
                     },
                     onAutoSave = { updated, oldId -> viewModel.saveNode(updated, oldId = oldId, closeSheet = false) },
@@ -842,22 +857,66 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 )
             }
 
-            // Dialogue Fiche Trajet (Renommage, Type, État, Conduites, Photos, Simplification RDP, Déplacement sommet)
-            if (selectedTrackForDetail != null) {
-                TrackDetailDialog(
+            // Fiche ergonomique du tracé sélectionné sur la carte : nom, photos, notes, enregistrer, modifier, supprimer
+            if (selectedTrackForDetail != null && !showFullTrackDetail) {
+                TrackCardSheet(
                     track = selectedTrackForDetail!!,
                     userLocation = userLocation,
                     onDismiss = { viewModel.closeTrackDetail() },
-                    onSaveTrack = { updated -> viewModel.saveTrack(updated) },
+                    onSave = { updated ->
+                        viewModel.saveTrack(updated, closeDetail = true)
+                    },
+                    onSaveNotes = { notes ->
+                        val updated = selectedTrackForDetail!!.copy(notes = notes)
+                        viewModel.saveTrack(updated, closeDetail = false)
+                    },
+                    onAddTrackPhoto = { photoPath, lat, lon ->
+                        viewModel.addTrackPhoto(selectedTrackForDetail!!.id, photoPath, lat, lon)
+                    },
+                    onDeleteTrackPhoto = { photoId ->
+                        viewModel.deleteTrackPhoto(selectedTrackForDetail!!.id, photoId)
+                    },
+                    onOpenFullEdit = { viewModel.setFullTrackDetail(true) },
+                    onDeleteTrack = { id ->
+                        viewModel.deleteTrack(id)
+                    }
+                )
+            }
+
+            // Fiche d'information complète du tracé (ouverte à la création du tracé ou via « Modifier »)
+            if (selectedTrackForDetail != null && showFullTrackDetail) {
+                TrackDetailDialog(
+                    track = selectedTrackForDetail!!,
+                    userLocation = userLocation,
+                    onDismiss = {
+                        viewModel.closeTrackDetail()
+                    },
+                    onSaveTrack = { updated ->
+                        viewModel.saveTrack(updated, closeDetail = true)
+                    },
+                    onAutoSave = { updated ->
+                        viewModel.saveTrack(updated, closeDetail = false)
+                    },
                     onUpdateTrackName = { id, name -> viewModel.updateTrackName(id, name) },
                     onAddTrackPhoto = { id, path, lat, lon -> viewModel.addTrackPhoto(id, path, lat, lon) },
                     onDeleteTrackPhoto = { id, photoId -> viewModel.deleteTrackPhoto(id, photoId) },
                     onApplySimplification = { id, pts, tol -> viewModel.applyTrackSimplification(id, pts, tol) },
                     onRestoreOriginal = { id -> viewModel.restoreOriginalTrack(id) },
-                    onStartStraightenMode = { t -> viewModel.startStraightenMode(t) },
-                    onStartMoveVertexMode = { t -> viewModel.startMoveVertexMode(t) },
-                    onStartAdjustTrack = { t -> viewModel.startTrackAdjustment(t) },
-                    onDeleteTrack = { id -> viewModel.deleteTrack(id) }
+                    onStartStraightenMode = { t ->
+                        viewModel.closeTrackDetail()
+                        viewModel.startStraightenMode(t)
+                    },
+                    onStartMoveVertexMode = { t ->
+                        viewModel.closeTrackDetail()
+                        viewModel.startMoveVertexMode(t)
+                    },
+                    onStartAdjustTrack = { t ->
+                        viewModel.closeTrackDetail()
+                        viewModel.startTrackAdjustment(t)
+                    },
+                    onDeleteTrack = { id ->
+                        viewModel.deleteTrack(id)
+                    }
                 )
             }
 

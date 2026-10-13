@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Note
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -78,6 +79,7 @@ import java.util.Locale
 fun NodeCardSheet(
     node: FtthNodeEntity,
     onDismiss: () -> Unit,
+    onSave: (notes: String, photos: List<String>) -> Unit = { _, _ -> },
     onSaveNotes: (updatedNotes: String) -> Unit,
     onAddPhoto: (photoPath: String) -> Unit,
     onDeletePhoto: (photoPath: String) -> Unit,
@@ -89,6 +91,7 @@ fun NodeCardSheet(
     val context = LocalContext.current
 
     var notesText by remember(node) { mutableStateOf(node.notes) }
+    var currentPhotos by remember(node) { mutableStateOf(node.photos) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
     var tempCameraFile by remember { mutableStateOf<File?>(null) }
@@ -98,6 +101,7 @@ fun NodeCardSheet(
     ) { success ->
         if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
             val finalized = PhotoStorageManager.syncAndFinalizePhoto(context, tempCameraFile!!)
+            currentPhotos = currentPhotos + finalized
             onAddPhoto(finalized)
         } else {
             tempCameraFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
@@ -110,6 +114,7 @@ fun NodeCardSheet(
         if (uri != null) {
             val saved = PhotoStorageManager.saveImportedPhoto(context, node.id, uri)
             if (saved != null) {
+                currentPhotos = currentPhotos + saved
                 onAddPhoto(saved)
             }
         }
@@ -265,7 +270,7 @@ fun NodeCardSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Photos (${node.photos.size})",
+                            text = "Photos (${currentPhotos.size})",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -308,7 +313,7 @@ fun NodeCardSheet(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (node.photos.isEmpty()) {
+                    if (currentPhotos.isEmpty()) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
@@ -335,7 +340,7 @@ fun NodeCardSheet(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(node.photos) { path ->
+                            items(currentPhotos) { path ->
                                 Box(
                                     modifier = Modifier
                                         .size(80.dp)
@@ -387,10 +392,10 @@ fun NodeCardSheet(
                     )
                 }
 
-                // 4. Boutons Modifier et Supprimer
+                // 4. Boutons Enregistrer, Modifier et Supprimer
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Bouton Supprimer
                     OutlinedButton(
@@ -403,15 +408,32 @@ fun NodeCardSheet(
                             .testTag("delete_node_card_button")
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Supprimer", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Supprimer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    // Bouton Modifier (ouvre les détails techniques complets)
-                    Button(
+                    // Bouton Modifier (ouvre la fiche détaillée complète)
+                    OutlinedButton(
                         onClick = {
                             if (notesText != node.notes) onSaveNotes(notesText)
                             onOpenFullEdit()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1.1f)
+                            .height(48.dp)
+                            .testTag("edit_node_card_button")
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Modifier", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Bouton Enregistrer (sauvegarde notes & photos, et ferme la fenêtre)
+                    Button(
+                        onClick = {
+                            onSave(notesText, currentPhotos)
+                            onDismiss()
                         },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -419,13 +441,13 @@ fun NodeCardSheet(
                             contentColor = Color.White
                         ),
                         modifier = Modifier
-                            .weight(1.4f)
+                            .weight(1.3f)
                             .height(48.dp)
-                            .testTag("edit_node_card_button")
+                            .testTag("save_node_card_button")
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = TelecomCyan)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Modifier", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp), tint = TelecomCyan)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Enregistrer", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
 

@@ -564,6 +564,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedTrackForDetail = MutableStateFlow<StoredTrack?>(null)
     val selectedTrackForDetail: StateFlow<StoredTrack?> = _selectedTrackForDetail.asStateFlow()
 
+    private val _showFullTrackDetail = MutableStateFlow(false)
+    val showFullTrackDetail: StateFlow<Boolean> = _showFullTrackDetail.asStateFlow()
+
     private val _showTracksListDialog = MutableStateFlow(false)
     val showTracksListDialog: StateFlow<Boolean> = _showTracksListDialog.asStateFlow()
 
@@ -1014,8 +1017,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _isManualTrackMode.value = false
             _manualTrackPoints.value = emptyList()
             _manualTrackPhotos.value = emptyList()
+            // Le tracé est enregistré et validé sur la carte, la fiche d'information s'ouvre pour saisir les informations du tracé
             _selectedTrackForDetail.value = track
-            _bannerMessage.value = "Tracé GC '$name' (${pts.size} sommets) enregistré avec succès."
+            _showFullTrackDetail.value = true
+            _bannerMessage.value = "Tracé '${name}' (${pts.size} sommets) validé et enregistré sur la carte. Fiche d'information ouverte."
         }
     }
 
@@ -1154,8 +1159,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 docStorage.saveTracks(deduped)
 
                 withContext(Dispatchers.Main) {
+                    // Le tracé GPS est validé et enregistré sur la carte, la fiche d'information s'ouvre pour saisir les informations du tracé
                     _selectedTrackForDetail.value = finished
-                    _bannerMessage.value = "Trace GPS terminée (${pts.size} points, ${finished.photos.size} photos). Fiche ouverte pour configuration."
+                    _showFullTrackDetail.value = true
+                    _bannerMessage.value = "Trace GPS '${finished.name}' (${pts.size} pts) validée et enregistrée sur la carte. Fiche d'information ouverte."
                 }
             } finally {
                 isStoppingAutoTrack.set(false)
@@ -1163,7 +1170,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveTrack(updatedTrack: StoredTrack) {
+    fun saveTrack(updatedTrack: StoredTrack, closeDetail: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val all = _allTracks.value.toMutableList()
             val idx = all.indexOfFirst { it.id == updatedTrack.id }
@@ -1174,7 +1181,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             }
             _allTracks.value = all
             docStorage.saveTracks(all)
-            if (_selectedTrackForDetail.value?.id == updatedTrack.id) {
+            if (closeDetail) {
+                _selectedTrackForDetail.value = null
+                _showFullTrackDetail.value = false
+            } else if (_selectedTrackForDetail.value?.id == updatedTrack.id) {
                 _selectedTrackForDetail.value = updatedTrack
             }
             _bannerMessage.value = "Trajet '${updatedTrack.name}' (${updatedTrack.type}) mis à jour"
@@ -1406,6 +1416,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _allTracks.value = all
             docStorage.saveTracks(all)
             _selectedTrackForDetail.value = null
+            _showFullTrackDetail.value = false
             _bannerMessage.value = "Tracé supprimé"
         }
     }
@@ -1498,13 +1509,19 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _selectedNode.value = node
     }
 
-    fun openTrackDetail(track: StoredTrack) {
+    fun openTrackDetail(track: StoredTrack, fullEdit: Boolean = false) {
         _selectedTrackForDetail.value = track
+        _showFullTrackDetail.value = fullEdit
         _showTracksListDialog.value = false
+    }
+
+    fun setFullTrackDetail(show: Boolean) {
+        _showFullTrackDetail.value = show
     }
 
     fun closeTrackDetail() {
         _selectedTrackForDetail.value = null
+        _showFullTrackDetail.value = false
     }
 
     fun openTracksList() {
