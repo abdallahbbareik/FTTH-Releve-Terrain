@@ -22,10 +22,12 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -72,6 +74,8 @@ fun CompactPiquetageTopBar(
     gpsStatus: GpsStatus,
     searchQuery: String = "",
     matchingNodes: List<FtthNodeEntity> = emptyList(),
+    isDarkTheme: Boolean = false,
+    onToggleTheme: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
     onSelectNode: (FtthNodeEntity) -> Unit = {},
     onOpenProjectFolder: () -> Unit,
@@ -110,7 +114,7 @@ fun CompactPiquetageTopBar(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = TelecomNavy,
+        color = if (isDarkTheme) Color(0xFF0F172A) else TelecomNavy,
         shadowElevation = 4.dp
     ) {
         Column(
@@ -255,6 +259,36 @@ fun CompactPiquetageTopBar(
                                 onOpenWorkflowGuide()
                             }
                         )
+
+                        HorizontalDivider()
+
+                        // Thème de l'application (Mode clair / sombre)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (isDarkTheme) "Passer au Mode Clair" else "Passer au Mode Sombre",
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (isDarkTheme) "Thème actuel : Sombre" else "Thème actuel : Clair",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = null,
+                                    tint = if (isDarkTheme) Color(0xFFFACC15) else TelecomCyan
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onToggleTheme()
+                            }
+                        )
                     }
                 }
 
@@ -346,6 +380,34 @@ fun CompactPiquetageTopBar(
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
+
+                // Bouton direct Mode Clair / Sombre
+                Surface(
+                    onClick = onToggleTheme,
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color.White.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                    modifier = Modifier.testTag("theme_toggle_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = if (isDarkTheme) "Passer en mode clair" else "Passer en mode sombre",
+                            tint = if (isDarkTheme) Color(0xFFFACC15) else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (isDarkTheme) "Sombre" else "Clair",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
 
             // Barre de recherche dépliable si activée

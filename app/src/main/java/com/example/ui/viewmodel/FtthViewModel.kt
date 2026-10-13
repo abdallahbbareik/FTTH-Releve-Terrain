@@ -619,6 +619,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _bannerMessage = MutableStateFlow<String?>(null)
     val bannerMessage: StateFlow<String?> = _bannerMessage.asStateFlow()
 
+    private val _isDarkTheme = MutableStateFlow(docStorage.isDarkThemeEnabled(defaultTheme = false))
+    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
     // Tâche bloquante avec barre de progression
     private val _blockingTaskState = MutableStateFlow<BlockingTaskState?>(null)
     val blockingTaskState: StateFlow<BlockingTaskState?> = _blockingTaskState.asStateFlow()
@@ -1778,6 +1781,19 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _bannerMessage.value = null
         }
         _bannerMessage.value = message
+    }
+
+    fun toggleTheme() {
+        val newTheme = !_isDarkTheme.value
+        _isDarkTheme.value = newTheme
+        docStorage.setDarkThemeEnabled(newTheme)
+        _bannerMessage.value = if (newTheme) "Mode sombre activé" else "Mode clair activé"
+    }
+
+    fun setDarkTheme(enabled: Boolean) {
+        _isDarkTheme.value = enabled
+        docStorage.setDarkThemeEnabled(enabled)
+        _bannerMessage.value = if (enabled) "Mode sombre activé" else "Mode clair activé"
     }
 
     fun resetDemoData() {

@@ -124,15 +124,19 @@ private fun TopActionButton(
     modifier: Modifier = Modifier
 ) {
     // Arrière-plan propre à chaque bouton (séparé) avec ombre et contour
+    val defaultBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+    val defaultContent = MaterialTheme.colorScheme.onSurface
+    val defaultBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) activeColor else Color.White.copy(alpha = 0.94f),
+        targetValue = if (isActive) activeColor else defaultBg,
         label = "btn_bg"
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isActive) Color.White else TelecomNavy,
+        targetValue = if (isActive) Color.White else defaultContent,
         label = "btn_content"
     )
-    val borderColor = if (isActive) activeColor else TelecomNavy.copy(alpha = 0.35f)
+    val borderColor = if (isActive) activeColor else defaultBorder
 
     Surface(
         onClick = onClick,
@@ -161,7 +165,7 @@ private fun TopActionButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
-                    tint = if (isActive) activeIconColor else TelecomNavy,
+                    tint = if (isActive) activeIconColor else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
@@ -189,11 +193,14 @@ private fun TopIconOnlyButton(
     testTag: String,
     modifier: Modifier = Modifier
 ) {
+    val defaultBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+    val defaultBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) activeColor else Color.White.copy(alpha = 0.94f),
+        targetValue = if (isActive) activeColor else defaultBg,
         label = "btn_bg_icon"
     )
-    val borderColor = if (isActive) activeColor else TelecomNavy.copy(alpha = 0.35f)
+    val borderColor = if (isActive) activeColor else defaultBorder
 
     Surface(
         onClick = onClick,
@@ -209,7 +216,7 @@ private fun TopIconOnlyButton(
             Icon(
                 imageVector = icon,
                 contentDescription = "Filtre",
-                tint = if (isActive) activeIconColor else TelecomNavy,
+                tint = if (isActive) activeIconColor else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp)
             )
         }

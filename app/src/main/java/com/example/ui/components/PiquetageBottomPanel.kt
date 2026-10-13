@@ -96,21 +96,21 @@ fun PiquetageBottomPanel(
                     onClick = onLink,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Color.White.copy(alpha = 0.95f),
-                        contentColor = TelecomNavy
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     ),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp),
                     modifier = Modifier
                         .weight(1.2f)
                         .height(48.dp)
-                        .border(1.2.dp, TelecomNavy.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .border(1.2.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                         .testTag("link_secondary_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Timeline,
                         contentDescription = null,
-                        tint = TelecomNavy,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -128,15 +128,15 @@ fun PiquetageBottomPanel(
                     onClick = onStake,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = TelecomNavy.copy(alpha = 0.95f),
-                        contentColor = Color.White
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 5.dp),
                     modifier = Modifier
                         .weight(1.8f)
                         .height(48.dp)
-                        .border(1.5.dp, TelecomCyan.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                        .border(1.5.dp, MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(14.dp))
                         .testTag("stake_primary_button")
                 ) {
                     Icon(

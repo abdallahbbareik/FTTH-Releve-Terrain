@@ -235,6 +235,14 @@ class DocumentStorageManager(private val context: Context) {
         }
     }
 
+    fun isDarkThemeEnabled(defaultTheme: Boolean = false): Boolean {
+        return prefs.getBoolean("app_theme_dark", defaultTheme)
+    }
+
+    fun setDarkThemeEnabled(isDark: Boolean) {
+        prefs.edit().putBoolean("app_theme_dark", isDark).apply()
+    }
+
     // Répertoire principal préféré pour Releve-Terrain
     val baseDir: File
         get() {

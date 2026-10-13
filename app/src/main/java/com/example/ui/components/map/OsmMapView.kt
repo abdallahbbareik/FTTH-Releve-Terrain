@@ -155,6 +155,7 @@ fun OsmMapView(
     onTrackPhotoClick: ((TrackPhoto) -> Unit)? = null,
     mapFocusTarget: Pair<Double, Double>? = null,
     onMapFocusTargetConsumed: (() -> Unit)? = null,
+    isDarkTheme: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -242,10 +243,26 @@ fun OsmMapView(
         }
     }
 
-    LaunchedEffect(currentLayer) {
+    LaunchedEffect(currentLayer, isDarkTheme) {
         when (currentLayer) {
-            OsmLayerType.SATELLITE_ESRI -> mapView.setTileSource(ESRI_WORLD_IMAGERY)
-            OsmLayerType.PLAN -> mapView.setTileSource(TileSourceFactory.MAPNIK) 
+            OsmLayerType.SATELLITE_ESRI -> {
+                mapView.setTileSource(ESRI_WORLD_IMAGERY)
+                mapView.overlayManager.tilesOverlay.setColorFilter(null)
+            }
+            OsmLayerType.PLAN -> {
+                mapView.setTileSource(TileSourceFactory.MAPNIK)
+                if (isDarkTheme) {
+                    val matrix = android.graphics.ColorMatrix(floatArrayOf(
+                        -0.75f, 0f, 0f, 0f, 210f,
+                        0f, -0.75f, 0f, 0f, 210f,
+                        0f, 0f, -0.75f, 0f, 210f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
+                } else {
+                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+            }
         }
         mapView.invalidate()
     }

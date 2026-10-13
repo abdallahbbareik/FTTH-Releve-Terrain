@@ -124,16 +124,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                val viewModel: FtthViewModel = viewModel()
-                FtthMainScreen(viewModel = viewModel)
+            val viewModel: FtthViewModel = viewModel()
+            val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+            MyApplicationTheme(darkTheme = isDarkTheme) {
+                FtthMainScreen(viewModel = viewModel, isDarkTheme = isDarkTheme)
             }
         }
     }
 }
 
 @Composable
-fun FtthMainScreen(viewModel: FtthViewModel) {
+fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -346,6 +347,8 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         gpsStatus = gpsStatus,
                         searchQuery = searchQuery,
                         matchingNodes = filteredNodes,
+                        isDarkTheme = isDarkTheme,
+                        onToggleTheme = { viewModel.toggleTheme() },
                         onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                         onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
                         onOpenProjectFolder = { viewModel.openProjectFolder() },
@@ -584,6 +587,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 onTrackPhotoClick = { photo -> viewingTrackPhoto = photo },
                 mapFocusTarget = mapFocusTarget,
                 onMapFocusTargetConsumed = { viewModel.clearMapFocusTarget() },
+                isDarkTheme = isDarkTheme,
                 modifier = Modifier.fillMaxSize()
             )
 
