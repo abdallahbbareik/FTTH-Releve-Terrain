@@ -7,10 +7,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.FtthNodeType
@@ -78,13 +81,14 @@ fun PiquetageBottomPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .navigationBarsPadding()
+                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Boutons d'action : Ajouter Cable , Piqueté ici (Chaque bouton avec son arrière-plan séparé)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Bouton Ajouter Cable (ex-Lier) - Arrière-plan propre séparé
@@ -95,10 +99,11 @@ fun PiquetageBottomPanel(
                         containerColor = Color.White.copy(alpha = 0.95f),
                         contentColor = TelecomNavy
                     ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp),
                     modifier = Modifier
-                        .weight(1.15f)
-                        .height(50.dp)
+                        .weight(1.2f)
+                        .height(48.dp)
                         .border(1.2.dp, TelecomNavy.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                         .testTag("link_secondary_button")
                 ) {
@@ -106,13 +111,15 @@ fun PiquetageBottomPanel(
                         imageVector = Icons.Default.Timeline,
                         contentDescription = null,
                         tint = TelecomNavy,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Ajouter Cable",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -124,10 +131,11 @@ fun PiquetageBottomPanel(
                         containerColor = TelecomNavy.copy(alpha = 0.95f),
                         contentColor = Color.White
                     ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 5.dp),
                     modifier = Modifier
-                        .weight(1.85f)
-                        .height(50.dp)
+                        .weight(1.8f)
+                        .height(48.dp)
                         .border(1.5.dp, TelecomCyan.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
                         .testTag("stake_primary_button")
                 ) {
@@ -135,15 +143,17 @@ fun PiquetageBottomPanel(
                         imageVector = Icons.Default.AddLocationAlt,
                         contentDescription = null,
                         tint = TelecomCyan,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (selectedPointType == QuickStakeType.CABLE) "Tracer Câble" else "Piqueté ici",
-                        fontSize = 15.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.3.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

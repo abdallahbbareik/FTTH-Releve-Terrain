@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,7 +113,11 @@ fun CompactPiquetageTopBar(
         color = TelecomNavy,
         shadowElevation = 4.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -211,6 +216,16 @@ fun CompactPiquetageTopBar(
                             }
                         )
 
+                        // Dossier d'enregistrement sous Download
+                        DropdownMenuItem(
+                            text = { Text("Dossier d'enregistrement (Download)") },
+                            leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, tint = TelecomCyan) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenProjectFolder()
+                            }
+                        )
+
                         // Fichiers et journaux locaux
                         DropdownMenuItem(
                             text = { Text("Fichiers & Synchronisation") },
@@ -296,17 +311,15 @@ fun CompactPiquetageTopBar(
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // 4. État GPS (décalé à gauche : point vert et ±3 m). Touche pour afficher les coordonnées
+                // 4. État GPS décalé à gauche (point vert et précision). Touche pour afficher les coordonnées
                 Surface(
                     onClick = onOpenGpsDetails,
                     shape = RoundedCornerShape(18.dp),
                     color = Color.White.copy(alpha = 0.12f),
                     border = androidx.compose.foundation.BorderStroke(1.dp, dotColor.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .padding(end = 28.dp)
-                        .testTag("gps_status_pill")
+                    modifier = Modifier.testTag("gps_status_pill")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -331,6 +344,8 @@ fun CompactPiquetageTopBar(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
             }
 
             // Barre de recherche dépliable si activée

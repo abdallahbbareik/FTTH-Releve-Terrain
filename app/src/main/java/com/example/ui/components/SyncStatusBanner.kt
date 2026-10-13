@@ -70,7 +70,7 @@ fun SyncStatusBanner(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "• Documents/Releve-Terrain/$currentProject",
+                        text = "• Download/$currentProject",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF94A3B8),
                         fontSize = 10.sp

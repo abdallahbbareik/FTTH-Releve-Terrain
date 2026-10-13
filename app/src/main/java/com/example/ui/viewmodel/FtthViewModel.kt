@@ -36,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import android.location.Location
 
 enum class MapLayerType(val label: String) {
     CADASTRE("Plan OpenStreetMap"),
@@ -719,7 +721,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 _currentProject.value = curProj
                 _rawNodes.value = nodes
                 _rawLinks.value = links
-                _allTracks.value = tracks
+                _allTracks.value = tracks.distinctBy { it.id }
                 _isLoading.value = false
             }
             if (nodes.isNotEmpty() || tracks.isNotEmpty() || links.isNotEmpty()) {
@@ -999,9 +1001,15 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 isActive = false
             )
             val all = _allTracks.value.toMutableList()
-            all.add(0, track)
-            _allTracks.value = all
-            docStorage.saveTracks(all)
+            val existingIndex = all.indexOfFirst { it.id == track.id }
+            if (existingIndex >= 0) {
+                all[existingIndex] = track
+            } else {
+                all.add(0, track)
+            }
+            val deduped = all.distinctBy { it.id }
+            _allTracks.value = deduped
+            docStorage.saveTracks(deduped)
 
             _isManualTrackMode.value = false
             _manualTrackPoints.value = emptyList()
@@ -1019,7 +1027,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- TRACE GPS AUTOMATIQUE ---
 
+    private var autoTrackJob: kotlinx.coroutines.Job? = null
+    private val isStoppingAutoTrack = AtomicBoolean(false)
+
     fun startAutoGpsTrack(name: String = "Infra linéaire GPS ${System.currentTimeMillis() % 10000}") {
+        if (_activeTrack.value != null || GpsTrackingBridge.isTrackingRunning.value) {
+            _bannerMessage.value = "Un enregistrement de tracé GPS est déjà en cours"
+            return
+        }
         val track = StoredTrack(
             id = "INF-${System.currentTimeMillis()}",
             name = name,
@@ -1036,7 +1051,28 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _activeTrackPoints.value = emptyList()
         GpsTrackingBridge.startSession(track)
         GpsForegroundService.startTracking(getApplication(), name)
-        _bannerMessage.value = "Enregistrement infra linéaire démarré (actif en arrière-plan et écran verrouillé)"
+
+        // Enregistrer immédiatement un premier point
+        val initialLoc = userLocation.value ?: _mapFocusTarget.value?.let { GpsLocationData(it.first, it.second, 0.0, 5.0f, 0f, 0f, System.currentTimeMillis()) }
+            ?: GpsLocationData(34.0, 9.5375, 0.0, 10.0f, 0f, 0f, System.currentTimeMillis())
+        recordActiveTrackPoint(initialLoc)
+
+        // Ticker de secours en arrière-plan
+        autoTrackJob?.cancel()
+        autoTrackJob = viewModelScope.launch(Dispatchers.IO) {
+            while (_activeTrack.value != null) {
+                delay(1500L)
+                val loc = userLocation.value ?: _mapFocusTarget.value?.let { GpsLocationData(it.first, it.second, 0.0, 5.0f, 0f, 0f, System.currentTimeMillis()) }
+                    ?: GpsLocationData(34.0, 9.5375, 0.0, 10.0f, 0f, 0f, System.currentTimeMillis())
+                withContext(Dispatchers.Main) {
+                    if (_activeTrack.value != null) {
+                        recordActiveTrackPoint(loc)
+                    }
+                }
+            }
+        }
+
+        _bannerMessage.value = "Enregistrement GC Auto démarré (actif en continu)"
     }
 
     fun addActiveTrackPhoto(photoPath: String) {
@@ -1055,6 +1091,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelActiveTrack() {
+        autoTrackJob?.cancel()
+        autoTrackJob = null
         GpsForegroundService.stopTracking(getApplication())
         GpsTrackingBridge.stopSession()
         _activeTrack.value = null
@@ -1063,46 +1101,65 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun recordActiveTrackPoint(loc: GpsLocationData) {
-        val current = _activeTrackPoints.value.toMutableList()
-        if (current.isNotEmpty()) {
-            val last = current.last()
-            val d = TrackGeometryHelper.calculateDistanceMeters(last.latitude, last.longitude, loc.latitude, loc.longitude)
-            if (d < 1.0) return // Filtrer le bruit stationnaire < 1m
+        val location = Location("bridge").apply {
+            latitude = loc.latitude
+            longitude = loc.longitude
+            altitude = loc.altitude
+            accuracy = loc.accuracy
+            speed = loc.speedKmh / 3.6f
+            time = loc.timestamp
         }
-        val pt = TrackPoint(loc.latitude, loc.longitude, loc.altitude, loc.accuracy, loc.speedKmh, loc.timestamp)
-        current.add(pt)
-        _activeTrackPoints.value = current
-
-        val dist = TrackGeometryHelper.computeTotalDistanceMeters(current)
-        _activeTrack.value = _activeTrack.value?.copy(
-            totalDistanceMeters = dist,
-            rawPoints = current,
-            points = current
-        )
+        GpsTrackingBridge.onLocationReceived(location)
     }
 
     fun stopAutoGpsTrack() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = _activeTrack.value ?: GpsTrackingBridge.activeTrack.value ?: return@launch
-            GpsForegroundService.stopTracking(getApplication())
-            val pts = _activeTrackPoints.value.ifEmpty { GpsTrackingBridge.activeTrackPoints.value }
-            val finished = active.copy(
-                endTime = System.currentTimeMillis(),
-                isActive = false,
-                rawPoints = pts,
-                points = pts,
-                totalDistanceMeters = TrackGeometryHelper.computeTotalDistanceMeters(pts)
-            )
-            GpsTrackingBridge.stopSession()
-            val all = _allTracks.value.toMutableList()
-            all.add(0, finished)
-            _allTracks.value = all
-            docStorage.saveTracks(all)
+        if (!isStoppingAutoTrack.compareAndSet(false, true)) return
+        autoTrackJob?.cancel()
+        autoTrackJob = null
 
-            _activeTrack.value = null
-            _activeTrackPoints.value = emptyList()
-            _selectedTrackForDetail.value = finished
-            _bannerMessage.value = "Trace GPS terminée (${pts.size} points, ${finished.photos.size} photos). Fiche ouverte pour configuration."
+        val active = _activeTrack.value ?: GpsTrackingBridge.activeTrack.value
+        if (active == null) {
+            isStoppingAutoTrack.set(false)
+            return
+        }
+
+        val pts = _activeTrackPoints.value.ifEmpty { GpsTrackingBridge.activeTrackPoints.value }
+
+        // Retirer immédiatement l'état actif pour que l'UI et les coroutines voient l'arrêt
+        _activeTrack.value = null
+        _activeTrackPoints.value = emptyList()
+
+        GpsTrackingBridge.stopSession()
+        GpsForegroundService.stopTracking(getApplication())
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val finished = active.copy(
+                    endTime = System.currentTimeMillis(),
+                    isActive = false,
+                    rawPoints = pts,
+                    points = pts,
+                    totalDistanceMeters = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+                )
+
+                val all = _allTracks.value.toMutableList()
+                val existingIndex = all.indexOfFirst { it.id == finished.id }
+                if (existingIndex >= 0) {
+                    all[existingIndex] = finished
+                } else {
+                    all.add(0, finished)
+                }
+                val deduped = all.distinctBy { it.id }
+                _allTracks.value = deduped
+                docStorage.saveTracks(deduped)
+
+                withContext(Dispatchers.Main) {
+                    _selectedTrackForDetail.value = finished
+                    _bannerMessage.value = "Trace GPS terminée (${pts.size} points, ${finished.photos.size} photos). Fiche ouverte pour configuration."
+                }
+            } finally {
+                isStoppingAutoTrack.set(false)
+            }
         }
     }
 
@@ -1485,7 +1542,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.Main) {
                 _rawNodes.value = loadedNodes
                 _rawLinks.value = loadedLinks
-                _allTracks.value = loadedTracks
+                _allTracks.value = loadedTracks.distinctBy { it.id }
                 _isLoading.value = false
             }
         }
@@ -1569,6 +1626,20 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- GESTION DES PROJETS FTTH (Documents/Releve-Terrain/<projet>) ---
+
+    fun getStorageBasePath(): String {
+        return docStorage.baseDir.absolutePath
+    }
+
+    fun setStorageLocation(path: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            docStorage.setCustomStoragePath(path)
+            refreshProjectsList()
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "Emplacement de stockage défini : $path"
+            }
+        }
+    }
 
     fun refreshProjectsList() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1706,7 +1777,21 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportGeoJson(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val file = RealExportService.exportGeoJson(context, _rawNodes.value, _rawLinks.value)
+            val file = RealExportService.exportGeoJson(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
+            withContext(Dispatchers.Main) { onComplete(file) }
+        }
+    }
+
+    fun exportTracksGeoJson(context: Context, onComplete: (File) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = RealExportService.exportTracksGeoJson(context, _allTracks.value)
+            withContext(Dispatchers.Main) { onComplete(file) }
+        }
+    }
+
+    fun exportNodesByTypeZip(context: Context, onComplete: (File) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = RealExportService.exportNodesByTypeZip(context, _rawNodes.value)
             withContext(Dispatchers.Main) { onComplete(file) }
         }
     }
@@ -1720,29 +1805,29 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportKml(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val file = RealExportService.exportKml(context, _rawNodes.value, _rawLinks.value)
+            val file = RealExportService.exportKml(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) { onComplete(file) }
         }
     }
 
     fun exportKmz(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value)
+            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) { onComplete(file) }
         }
     }
 
     fun exportCompleteZip(context: Context, onComplete: (File) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value)
+            val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) { onComplete(file) }
         }
     }
 
     fun exportCompleteZipAndShare(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            _bannerMessage.value = "Génération du dossier ZIP complet en cours..."
-            val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value)
+            _bannerMessage.value = "Génération du dossier ZIP complet (toutes couches) en cours..."
+            val file = RealExportService.exportCompleteZip(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) {
                 _bannerMessage.value = "Dossier ZIP généré (${file.length() / 1024} Ko)"
                 RealExportService.shareFile(context, file, "application/zip", "Partager le dossier ZIP complet")
@@ -1752,8 +1837,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportKmzAndShare(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            _bannerMessage.value = "Génération du fichier KMZ Google Earth..."
-            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value)
+            _bannerMessage.value = "Génération du fichier KMZ Google Earth (toutes couches)..."
+            val file = RealExportService.exportKmz(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) {
                 _bannerMessage.value = "KMZ généré (${file.length() / 1024} Ko)"
                 RealExportService.shareFile(context, file, "application/vnd.google-earth.kmz", "Partager le fichier KMZ Google Earth")
@@ -1763,11 +1848,33 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun exportGeoJsonAndShare(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            _bannerMessage.value = "Génération du fichier GeoJSON SIG..."
-            val file = RealExportService.exportGeoJson(context, _rawNodes.value, _rawLinks.value)
+            _bannerMessage.value = "Génération du fichier GeoJSON SIG complet..."
+            val file = RealExportService.exportGeoJson(context, _rawNodes.value, _rawLinks.value, _allTracks.value)
             withContext(Dispatchers.Main) {
                 _bannerMessage.value = "GeoJSON généré (${file.length() / 1024} Ko)"
                 RealExportService.shareFile(context, file, "application/geo+json", "Partager le fichier GeoJSON SIG")
+            }
+        }
+    }
+
+    fun exportTracksGeoJsonAndShare(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Génération du fichier GeoJSON des trajets GPS..."
+            val file = RealExportService.exportTracksGeoJson(context, _allTracks.value)
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "GeoJSON trajets généré (${file.length() / 1024} Ko)"
+                RealExportService.shareFile(context, file, "application/geo+json", "Partager les trajets GPS GeoJSON")
+            }
+        }
+    }
+
+    fun exportNodesByTypeAndShare(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Génération des GeoJSON par type de nœud..."
+            val file = RealExportService.exportNodesByTypeZip(context, _rawNodes.value)
+            withContext(Dispatchers.Main) {
+                _bannerMessage.value = "GeoJSON par type générés (${file.length() / 1024} Ko)"
+                RealExportService.shareFile(context, file, "application/zip", "Partager les GeoJSON par type de nœud")
             }
         }
     }

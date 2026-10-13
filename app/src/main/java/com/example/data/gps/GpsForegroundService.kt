@@ -65,8 +65,13 @@ class GpsForegroundService : Service() {
         }
 
         when (intent.action) {
-            ACTION_STOP_TRACKING -> {
+            ACTION_STOP_FROM_NOTIFICATION -> {
                 GpsTrackingBridge.requestStopTracking()
+                stopForegroundTracking()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_STOP_TRACKING -> {
                 stopForegroundTracking()
                 stopSelf()
                 return START_NOT_STICKY
@@ -121,7 +126,7 @@ class GpsForegroundService : Service() {
         )
 
         val stopIntent = Intent(this, GpsForegroundService::class.java).apply {
-            action = ACTION_STOP_TRACKING
+            action = ACTION_STOP_FROM_NOTIFICATION
         }
         val pendingStop = PendingIntent.getService(
             this,
@@ -318,6 +323,7 @@ class GpsForegroundService : Service() {
 
         const val ACTION_START_TRACKING = "com.example.action.START_GPS_TRACKING"
         const val ACTION_STOP_TRACKING = "com.example.action.STOP_GPS_TRACKING"
+        const val ACTION_STOP_FROM_NOTIFICATION = "com.example.action.STOP_GPS_TRACKING_FROM_NOTIFICATION"
         const val ACTION_UPDATE_STATS = "com.example.action.UPDATE_STATS"
 
         const val EXTRA_TRACK_NAME = "extra_track_name"

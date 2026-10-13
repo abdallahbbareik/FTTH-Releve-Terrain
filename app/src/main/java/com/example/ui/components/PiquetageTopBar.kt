@@ -60,6 +60,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.text.TextStyle
+import com.example.data.gps.GpsLocationData
+import com.example.data.gps.GpsStatus
 import com.example.data.local.FtthNodeEntity
 import com.example.data.photo.PhotoResolutionMode
 
@@ -71,6 +73,12 @@ fun PiquetageTopBar(
     totalNodesCount: Int,
     matchingNodes: List<FtthNodeEntity> = emptyList(),
     currentPhotoResolutionMode: PhotoResolutionMode = PhotoResolutionMode.NATIVE,
+    gpsStatus: GpsStatus? = null,
+    locationData: GpsLocationData? = null,
+    totalTracksCount: Int = 0,
+    onOpenNodesList: () -> Unit = {},
+    onOpenTracksList: () -> Unit = {},
+    onRequestGpsPermission: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit,
     onSelectNode: (FtthNodeEntity) -> Unit = {},
     onOpenFilters: () -> Unit,

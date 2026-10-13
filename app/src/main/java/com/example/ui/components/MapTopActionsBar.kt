@@ -58,7 +58,7 @@ fun MapTopActionsBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 1. Ajouter noeud (ex-Pointer)
@@ -70,7 +70,7 @@ fun MapTopActionsBar(
                 activeIconColor = TelecomCyan,
                 onClick = onAddNodeClick,
                 testTag = "map_action_add_node",
-                modifier = Modifier.weight(1.15f)
+                modifier = Modifier.weight(1.35f)
             )
 
             // 2. Créer GC (ex-Infra-Lineaire : création manuelle)
@@ -95,7 +95,7 @@ fun MapTopActionsBar(
                 showPulse = isAutoTrackActive,
                 onClick = onGcAutoClick,
                 testTag = "map_action_gc_auto",
-                modifier = Modifier.weight(1.0f)
+                modifier = Modifier.weight(0.95f)
             )
 
             // 4. Filtre (sans mot filtre : icône seule)
@@ -145,7 +145,7 @@ private fun TopActionButton(
             .testTag(testTag)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp),
+            modifier = Modifier.padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -156,20 +156,21 @@ private fun TopActionButton(
                         .clip(CircleShape)
                         .background(Color.White)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(3.dp))
             } else {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
                     tint = if (isActive) activeIconColor else TelecomNavy,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(14.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(3.dp))
             }
 
             Text(
                 text = label,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
+                letterSpacing = (-0.2).sp,
                 fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                 color = contentColor,
                 maxLines = 1

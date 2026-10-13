@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -253,13 +254,22 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
     var showWorkflowGuide by remember { mutableStateOf(false) }
     var showLoader by remember { mutableStateOf(false) }
     var hasLoadedOnce by remember { mutableStateOf(false) }
+    var loadingStartTime by remember { mutableStateOf(0L) }
 
     // Écran de chargement : immédiat au démarrage, puis après 300 ms pour les rechargements (évite le clignotement)
     LaunchedEffect(isLoading) {
         if (isLoading) {
+            loadingStartTime = System.currentTimeMillis()
             if (hasLoadedOnce) kotlinx.coroutines.delay(300L)
             showLoader = true
         } else {
+            if (!hasLoadedOnce) {
+                val elapsed = System.currentTimeMillis() - loadingStartTime
+                val remaining = 1500L - elapsed
+                if (remaining > 0) {
+                    kotlinx.coroutines.delay(remaining)
+                }
+            }
             showLoader = false
             hasLoadedOnce = true
         }
@@ -458,7 +468,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                         color = TelecomNavy,
                         shadowElevation = 8.dp,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
                     ) {
                         Row(
                             modifier = Modifier
@@ -594,7 +606,7 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     },
                     onGcAutoClick = {
                         if (activeTrack != null) {
-                            viewModel.openTracksList()
+                            viewModel.stopAutoGpsTrack()
                         } else {
                             viewModel.startAutoGpsTrack()
                         }
@@ -658,6 +670,10 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                         }
                     }
                 }
+            }
+
+            if (showLoader) {
+                LoadingScreen(modifier = Modifier.fillMaxSize())
             }
 
             // Fiche du point sélectionné sur la carte : nom, photo, notes, modifier et supprimer
@@ -769,6 +785,9 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                     onDeleteLink = { viewModel.deleteLink(it) },
                     onExportZip = { viewModel.exportCompleteZipAndShare(context) },
                     onExportKmz = { viewModel.exportKmzAndShare(context) },
+                    onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) },
+                    currentStoragePath = viewModel.getStorageBasePath(),
+                    onSetStorageLocation = { viewModel.setStorageLocation(it) },
                     onDismiss = { viewModel.dismissProjectFolder() }
                 )
             }
@@ -913,7 +932,11 @@ fun FtthMainScreen(viewModel: FtthViewModel) {
                 ExportReportDialog(
                     nodes = rawNodes,
                     links = rawLinks,
+                    tracks = allTracks,
                     onExportGeoJson = { ctx, cb -> viewModel.exportGeoJson(ctx, cb) },
+                    onExportTracksGeoJson = { ctx, cb -> viewModel.exportTracksGeoJson(ctx, cb) },
+                    onExportNodesByType = { ctx, cb -> viewModel.exportNodesByTypeZip(ctx, cb) },
+                    onExportKmz = { ctx, cb -> viewModel.exportKmz(ctx, cb) },
                     onExportCsv = { ctx, cb -> viewModel.exportCsv(ctx, cb) },
                     onExportKml = { ctx, cb -> viewModel.exportKml(ctx, cb) },
                     onExportZip = { ctx, cb -> viewModel.exportCompleteZip(ctx, cb) },

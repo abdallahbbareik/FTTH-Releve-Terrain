@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -35,23 +39,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.ui.viewmodel.MapFilterState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun FilterLayerSheet(
     filterState: MapFilterState,
     onFilterChanged: (MapFilterState) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     var showPoteaux by remember(filterState) { mutableStateOf(filterState.showPoteaux) }
     var showChambres by remember(filterState) { mutableStateOf(filterState.showChambres) }
@@ -73,7 +79,7 @@ fun FilterLayerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp)
+                .padding(horizontal = 16.dp, vertical = 20.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             // Header
@@ -99,66 +105,69 @@ fun FilterLayerSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Statut Filter (Tous, À poser, À remplacer)
-            Text(
-                text = "Filtrer par statut :",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold
+    // Statut Filter (Tous, À poser, À remplacer, Raccordée, Non raccordée)
+    val statusOptions = listOf(
+        null to "Tous", 
+        NodeStatus.A_POSER to "À poser", 
+        NodeStatus.A_REMPLACER to "À remplacer",
+        NodeStatus.RACCORDEE to "Raccordée",
+        NodeStatus.NON_RACCORDEE to "Non raccordée"
+    )
+    Text(
+        text = "Statut",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    
+    // Improved Status Filter Layout
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        statusOptions.forEach { (st, label) ->
+            val isSelected = selectedStatus == st
+            androidx.compose.material3.FilterChip(
+                selected = isSelected,
+                onClick = { selectedStatus = st },
+                label = { Text(text = label, fontSize = 12.sp) }
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                FilterChip(
-                    selected = selectedStatus == null,
-                    onClick = { selectedStatus = null },
-                    label = { Text("Tous", fontSize = 11.sp) },
-                    modifier = Modifier.testTag("filter_status_all")
-                )
-                val targetStatuses = listOf(NodeStatus.A_POSER, NodeStatus.A_REMPLACER)
-                targetStatuses.forEach { st ->
-                    FilterChip(
-                        selected = selectedStatus == st,
-                        onClick = { selectedStatus = if (selectedStatus == st) null else st },
-                        label = { Text(st.label, fontSize = 11.sp) },
-                        modifier = Modifier.testTag("filter_status_${st.name.lowercase()}")
-                    )
-                }
-            }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(8.dp))
 
-            // Conformité Filter (Conforme, Non conforme)
-            Text(
-                text = "Filtrer par état :",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold
+    // Conformité Filter (Tous, Conforme, Non conforme)
+    val conformityOptions = listOf(null to "Tous", NodeConformity.CONFORME to "Conforme", NodeConformity.NON_CONFORME to "Non conf.")
+    Text(
+        text = "État",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    
+    // Improved Conformity Filter Layout
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        conformityOptions.forEach { (c, label) ->
+            val isSelected = selectedConformity == c
+            androidx.compose.material3.FilterChip(
+                selected = isSelected,
+                onClick = { selectedConformity = c },
+                label = { Text(text = label, fontSize = 12.sp) }
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                FilterChip(
-                    selected = selectedConformity == null,
-                    onClick = { selectedConformity = null },
-                    label = { Text("Tous", fontSize = 11.sp) }
-                )
-                NodeConformity.values().forEach { c ->
-                    FilterChip(
-                        selected = selectedConformity == c,
-                        onClick = { selectedConformity = if (selectedConformity == c) null else c },
-                        label = { Text(c.label, fontSize = 11.sp) }
-                    )
-                }
-            }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             HorizontalDivider()
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Entités visibles sur la carte (incluant infra linéaire)
             Text(
@@ -166,7 +175,7 @@ fun FilterLayerSheet(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             FilterCheckboxItem("Poteaux & Appuis aériens", showPoteaux, FtthNodeVisuals.getNodeColor(FtthNodeType.POTEAU)) { showPoteaux = it }
             FilterCheckboxItem("Chambres de tirage", showChambres, FtthNodeVisuals.getNodeColor(FtthNodeType.CHAMBRE)) { showChambres = it }
@@ -177,7 +186,7 @@ fun FilterLayerSheet(
             FilterCheckboxItem("Câbles fibres optiques", showCables, MaterialTheme.colorScheme.primary) { showCables = it }
             FilterCheckboxItem("Infra linéaire (Tracés)", showTracks, androidx.compose.ui.graphics.Color(0xFF0284C7)) { showTracks = it }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Actions
             Row(
@@ -241,23 +250,24 @@ private fun FilterCheckboxItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 8.dp), // Increased padding to provide more space
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
             shape = RoundedCornerShape(4.dp),
             color = color,
-            modifier = Modifier.size(12.dp)
+            modifier = Modifier.size(10.dp) // Slightly smaller color indicator
         ) {}
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall, // Smaller text
             modifier = Modifier.weight(1f)
         )
-        Checkbox(
+        Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.size(24.dp) // Adjust switch size if needed via scale
         )
     }
 }

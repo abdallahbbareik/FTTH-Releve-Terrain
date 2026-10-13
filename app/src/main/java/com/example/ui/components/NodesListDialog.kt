@@ -112,7 +112,7 @@ fun NodesListDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Documents/Releve-Terrain/noeuds.json",
+                            text = "Stockage sous Download (format .noeuds / noeuds.json)",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

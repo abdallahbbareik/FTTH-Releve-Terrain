@@ -108,47 +108,27 @@ object PhotoStorageManager {
     }
 
     /**
-     * Répertoire public Documents/releve-terrain/<projet>/photos/
+     * Répertoire public Download/<folderName>/<projet>/photos/
      */
     fun getPhotosDirectory(context: Context, projectName: String? = null): File {
         val proj = projectName ?: getProjectName(context)
+        val folderName = PublicStorageHelper.getDownloadFolderName(context)
 
-        // 1. Dossier public Documents/releve-terrain/<projet>/photos (et Releve-Terrain)
-        val docDirs = listOf(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "releve-terrain/$proj/photos"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain/$proj/photos")
-        )
-        for (pubDocs in docDirs) {
-            try {
-                if (!pubDocs.exists()) pubDocs.mkdirs()
-                if (pubDocs.exists() && pubDocs.canWrite()) {
-                    return pubDocs
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        // 1. Dossier public Download/<folderName>/<projet>/photos
+        val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "$folderName/$proj/photos")
+        try {
+            if (!downloadDir.exists()) downloadDir.mkdirs()
+            if (downloadDir.exists() && downloadDir.canWrite()) {
+                return downloadDir
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        // 2. Dossier public Download/releve-terrain/<projet>/photos
-        val downloadDirs = listOf(
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "releve-terrain/$proj/photos"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain/$proj/photos")
-        )
-        for (pubDown in downloadDirs) {
-            try {
-                if (!pubDown.exists()) pubDown.mkdirs()
-                if (pubDown.exists() && pubDown.canWrite()) {
-                    return pubDown
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // 3. Dossier externe sécurisé de l'application
-        val appExt = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "releve-terrain/$proj/photos")
-        if (!appExt.exists()) appExt.mkdirs()
-        return appExt
+        // 2. Dossier interne sécurisé de l'application
+        val appInternal = File(context.filesDir, "$folderName/$proj/photos")
+        if (!appInternal.exists()) appInternal.mkdirs()
+        return appInternal
     }
 
     /**

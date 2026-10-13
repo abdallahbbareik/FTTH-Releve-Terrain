@@ -210,24 +210,42 @@ class DocumentStorageManager(private val context: Context) {
     private var _currentProject: String = prefs.getString("active_project_name", "projet01") ?: "projet01"
     val currentProject: String get() = _currentProject
 
-    // Dossiers cibles sous Documents/Releve-Terrain et Download/Releve-Terrain
-    val publicBaseDir: File
-        get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
-
+    // Dossiers cibles sous Download/Releve-Terrain
     val publicDownloadsDir: File
         get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain")
 
     val appExtBaseDir: File
-        get() = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+        get() = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain")
 
     val internalBaseDir: File
         get() = File(context.filesDir, "Releve-Terrain")
 
+    fun getCustomStoragePath(): String? {
+        return prefs.getString("custom_storage_path", null)
+    }
+
+    fun setCustomStoragePath(path: String) {
+        val trimmed = path.trim()
+        if (trimmed.isNotBlank()) {
+            prefs.edit().putString("custom_storage_path", trimmed).apply()
+            ensureDirectoriesExist()
+        }
+    }
+
     // Répertoire principal préféré pour Releve-Terrain
     val baseDir: File
         get() {
+            val custom = getCustomStoragePath()
+            if (!custom.isNullOrBlank()) {
+                val customFile = File(custom)
+                try {
+                    if (!customFile.exists()) customFile.mkdirs()
+                    if (isWritable(customFile)) return customFile
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
             ensureDirectoriesExist()
-            if (isWritable(publicBaseDir)) return publicBaseDir
             if (isWritable(publicDownloadsDir)) return publicDownloadsDir
             if (isWritable(appExtBaseDir)) return appExtBaseDir
             return internalBaseDir
@@ -269,14 +287,14 @@ class DocumentStorageManager(private val context: Context) {
      */
     private fun migrateLegacyRootFilesIfNeeded() {
         try {
-            val rootNodesFile = File(publicBaseDir, "noeuds.json")
-            val rootLegacyPoints = File(publicBaseDir, "points.json")
-            val rootTracksFile = File(publicBaseDir, "infra_lineaire.json")
-            val rootLegacyTracks = File(publicBaseDir, "trajets.json")
-            val rootLinksFile = File(publicBaseDir, "cables.json")
-            val rootLegacyLinks = File(publicBaseDir, "liaisons.json")
+            val rootNodesFile = File(publicDownloadsDir, "noeuds.json")
+            val rootLegacyPoints = File(publicDownloadsDir, "points.json")
+            val rootTracksFile = File(publicDownloadsDir, "infra_lineaire.json")
+            val rootLegacyTracks = File(publicDownloadsDir, "trajets.json")
+            val rootLinksFile = File(publicDownloadsDir, "cables.json")
+            val rootLegacyLinks = File(publicDownloadsDir, "liaisons.json")
 
-            val project01Dir = File(publicBaseDir, "projet01")
+            val project01Dir = File(publicDownloadsDir, "projet01")
             val projNodesFile = File(project01Dir, "noeuds.json")
 
             val sourceNodes = when {
@@ -334,7 +352,7 @@ class DocumentStorageManager(private val context: Context) {
     }
 
     fun ensureDirectoriesExist() {
-        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 if (!base.exists()) base.mkdirs()
                 File(base, "photos").let { if (!it.exists()) it.mkdirs() }
@@ -348,7 +366,7 @@ class DocumentStorageManager(private val context: Context) {
 
     fun ensureProjectDirectoriesExist(projectName: String) {
         val sanitized = sanitizeProjectName(projectName)
-        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val projDir = File(base, sanitized)
                 if (!projDir.exists()) projDir.mkdirs()
@@ -375,7 +393,6 @@ class DocumentStorageManager(private val context: Context) {
 
     private fun getWritableDirectories(): List<File> {
         val list = mutableListOf<File>()
-        if (isWritable(publicBaseDir)) list.add(publicBaseDir)
         if (isWritable(publicDownloadsDir)) list.add(publicDownloadsDir)
         if (isWritable(appExtBaseDir)) list.add(appExtBaseDir)
         if (isWritable(internalBaseDir)) list.add(internalBaseDir)
@@ -387,27 +404,13 @@ class DocumentStorageManager(private val context: Context) {
     fun listAllProjects(): List<ProjectInfo> {
         val projectMap = mutableMapOf<String, Long>()
 
-        // 1. Scanner Documents/Releve-Terrain
-        try {
-            if (publicBaseDir.exists() && publicBaseDir.isDirectory) {
-                publicBaseDir.listFiles()?.forEach { file ->
-                    val lower = file.name.lowercase()
-                    if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
-                        projectMap[file.name] = file.lastModified()
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 2. Scanner Download/Releve-Terrain
+        // 1. Scanner Download/Releve-Terrain
         try {
             if (publicDownloadsDir.exists() && publicDownloadsDir.isDirectory) {
                 publicDownloadsDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
                     if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
-                        projectMap.putIfAbsent(file.name, file.lastModified())
+                        projectMap[file.name] = file.lastModified()
                     }
                 }
             }
@@ -507,13 +510,11 @@ class DocumentStorageManager(private val context: Context) {
 
         // 3. Supprimer sur tous les dossiers physiques connus
         val targetDirs = listOf(
-            File(publicBaseDir, sanitized),
             File(publicDownloadsDir, sanitized),
             File(appExtBaseDir, sanitized),
             File(internalBaseDir, sanitized),
-            File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
             File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
-            File(File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
+            File(File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), PublicStorageHelper.DIR_NAME_LOWER), sanitized),
             File(File(context.filesDir, PublicStorageHelper.DIR_NAME_LOWER), sanitized)
         )
 
@@ -566,7 +567,7 @@ class DocumentStorageManager(private val context: Context) {
             .apply()
 
         // 1. Supprimer sur tous les dossiers physiques
-        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val dir = File(base, sanitized)
                 if (dir.exists()) {
@@ -601,7 +602,7 @@ class DocumentStorageManager(private val context: Context) {
 
         ensureProjectDirectoriesExist(newSanitized)
 
-        listOf(publicBaseDir, publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
+        listOf(publicDownloadsDir, appExtBaseDir, internalBaseDir).forEach { base ->
             try {
                 val oldDir = File(base, oldSanitized)
                 val newDir = File(base, newSanitized)
@@ -659,7 +660,6 @@ class DocumentStorageManager(private val context: Context) {
             }
 
             val searchFiles = listOf(
-                File(publicBaseDir, relPath),
                 File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
@@ -788,7 +788,6 @@ class DocumentStorageManager(private val context: Context) {
             }
 
             val searchFiles = listOf(
-                File(publicBaseDir, relPath),
                 File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
@@ -907,14 +906,13 @@ class DocumentStorageManager(private val context: Context) {
                     for (i in 0 until jsonArray.length()) {
                         list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
                     }
-                    if (list.isNotEmpty()) return list
+                    if (list.isNotEmpty()) return list.distinctBy { it.id }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
 
             val searchFiles = listOf(
-                File(publicBaseDir, relPath),
                 File(publicDownloadsDir, relPath),
                 File(appExtBaseDir, relPath),
                 File(internalBaseDir, relPath)
@@ -930,7 +928,7 @@ class DocumentStorageManager(private val context: Context) {
                             for (i in 0 until jsonArray.length()) {
                                 list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
                             }
-                            if (list.isNotEmpty()) return list
+                            if (list.isNotEmpty()) return list.distinctBy { it.id }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -947,7 +945,7 @@ class DocumentStorageManager(private val context: Context) {
                 for (i in 0 until jsonArray.length()) {
                     list.add(StoredTrack.fromJson(jsonArray.getJSONObject(i)))
                 }
-                if (list.isNotEmpty()) return list
+                if (list.isNotEmpty()) return list.distinctBy { it.id }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -960,8 +958,9 @@ class DocumentStorageManager(private val context: Context) {
         val sanitized = sanitizeProjectName(project)
         ensureProjectDirectoriesExist(sanitized)
         try {
+            val dedupedTracks = tracks.distinctBy { it.id }
             val jsonArray = JSONArray()
-            tracks.forEach { jsonArray.put(it.toJson()) }
+            dedupedTracks.forEach { jsonArray.put(it.toJson()) }
             val jsonString = jsonArray.toString(2)
 
             PublicStorageHelper.savePublicDocument(context, "$sanitized/infra_lineaire.json", jsonString)
@@ -983,7 +982,7 @@ class DocumentStorageManager(private val context: Context) {
             prefs.edit().putString("backup_tracks_json_$sanitized", jsonString).apply()
 
             // Génération immédiate du GeoJSON dédié aux infras linéaires du projet
-            generateAndSaveTracksGeoJson(tracks, sanitized)
+            generateAndSaveTracksGeoJson(dedupedTracks, sanitized)
             if (updateGeoJson) generateAndSaveGeoJson(sanitized)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1064,6 +1063,45 @@ class DocumentStorageManager(private val context: Context) {
                     e.printStackTrace()
                 }
             }
+
+            // Génération et sauvegarde par type de nœud (Poteaux, Chambres, Boîtiers, SRO, Immeubles, Villas)
+            val grouped = nodes.groupBy { it.type }
+            for (type in FtthNodeType.values()) {
+                val list = grouped[type] ?: emptyList()
+                if (list.isEmpty()) continue
+                val typeRoot = JSONObject().apply {
+                    put("type", "FeatureCollection")
+                    put("name", "noeuds_${type.name.lowercase(Locale.ROOT)}")
+                    put("project", sanitized)
+                    put("nodeType", type.name)
+                    put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
+                    val tFeats = JSONArray()
+                    for (n in list) {
+                        val f = JSONObject().apply {
+                            put("type", "Feature")
+                            put("geometry", JSONObject().apply {
+                                put("type", "Point")
+                                put("coordinates", JSONArray().put(n.longitude).put(n.latitude))
+                            })
+                            put("properties", nodeToJson(n).apply { put("entity_type", "noeud") })
+                        }
+                        tFeats.put(f)
+                    }
+                    put("features", tFeats)
+                }
+                val typeJsonStr = typeRoot.toString(2)
+                val fileName = "noeuds_${type.name.lowercase(Locale.ROOT)}.geojson"
+                PublicStorageHelper.savePublicDocument(context, "$sanitized/$fileName", typeJsonStr)
+                for (dir in getWritableDirectories()) {
+                    try {
+                        val projDir = File(dir, sanitized)
+                        if (!projDir.exists()) projDir.mkdirs()
+                        File(projDir, fileName).writeText(typeJsonStr, Charsets.UTF_8)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -1083,7 +1121,8 @@ class DocumentStorageManager(private val context: Context) {
             root.put("updatedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
 
             val features = JSONArray()
-            for (track in tracks) {
+            val dedupedTracks = tracks.distinctBy { it.id }
+            for (track in dedupedTracks) {
                 val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
                 if (pts.size >= 2) {
                     val feat = JSONObject()
@@ -1296,11 +1335,13 @@ class DocumentStorageManager(private val context: Context) {
         put("boitierType", node.boitierType)
         put("isSaturated", node.isSaturated)
         put("boitierSupport", node.boitierSupport)
+        put("hasSplitter", node.hasSplitter)
         put("splitterType", node.splitterType)
         put("sroType", node.sroType)
         put("sroCapacity", node.sroCapacity)
         put("buildingFloors", node.buildingFloors)
         put("buildingDwellings", node.buildingDwellings)
+        put("buildingBoitiersEtage", node.buildingBoitiersEtage)
         put("hasLocalTechnique", node.hasLocalTechnique)
         put("hasGaineMontante", node.hasGaineMontante)
         put("syndicAuthorization", node.syndicAuthorization)
@@ -1349,11 +1390,13 @@ class DocumentStorageManager(private val context: Context) {
             boitierType = json.optString("boitierType", "PBO"),
             isSaturated = json.optBoolean("isSaturated", false),
             boitierSupport = json.optString("boitierSupport", "Façade"),
+            hasSplitter = json.optBoolean("hasSplitter", false),
             splitterType = json.optString("splitterType", "1:8"),
             sroType = json.optString("sroType", "Armoire"),
             sroCapacity = json.optString("sroCapacity", "160 FO"),
             buildingFloors = json.optInt("buildingFloors", 1),
             buildingDwellings = json.optInt("buildingDwellings", 1),
+            buildingBoitiersEtage = json.optInt("buildingBoitiersEtage", 0),
             hasLocalTechnique = json.optBoolean("hasLocalTechnique", false),
             hasGaineMontante = json.optBoolean("hasGaineMontante", false),
             syndicAuthorization = json.optString("syndicAuthorization", "Non"),

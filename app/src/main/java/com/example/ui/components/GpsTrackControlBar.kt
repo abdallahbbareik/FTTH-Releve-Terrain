@@ -73,6 +73,7 @@ fun GpsTrackControlBar(
     onOpenTracksList: () -> Unit,
     onOpenNodesList: () -> Unit,
     onRequestGpsPermission: () -> Unit,
+    showIdleControls: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current

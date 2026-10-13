@@ -829,13 +829,12 @@ fun OsmMapView(
             }
         }
 
-        // Boutons Flottants (Boussole / Flèche du Nord, Calque, Recentrage, Zoom)
-        // 3 boutons de carte : boussole, couches et recentrage (zoom +/- et plein écran retirés)
+        // Boutons Flottants (Boussole, Couches, Recentrage, Zoom +, Zoom -)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // 1. Boussole
             FloatingActionButton(
@@ -844,7 +843,7 @@ fun OsmMapView(
                     mapOrientation = 0f
                 },
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(44.dp)
                     .testTag("compass_button"),
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = Color(0xFFDC2626)
@@ -866,7 +865,7 @@ fun OsmMapView(
                     currentLayer = if (currentLayer == OsmLayerType.PLAN) OsmLayerType.SATELLITE_ESRI else OsmLayerType.PLAN
                 },
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(44.dp)
                     .testTag("layers_button"),
                 containerColor = if (currentLayer == OsmLayerType.SATELLITE_ESRI) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 contentColor = if (currentLayer == OsmLayerType.SATELLITE_ESRI) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
@@ -890,7 +889,7 @@ fun OsmMapView(
                     }
                 },
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(44.dp)
                     .testTag("recenter_button"),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -898,6 +897,38 @@ fun OsmMapView(
                 Icon(
                     imageVector = Icons.Default.MyLocation,
                     contentDescription = "Recentrage position GPS",
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // 4. Zoom (+)
+            FloatingActionButton(
+                onClick = { mapView.controller.zoomIn() },
+                modifier = Modifier
+                    .size(44.dp)
+                    .testTag("zoom_in_button"),
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Zoom avant (+)",
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // 5. Zoom (-)
+            FloatingActionButton(
+                onClick = { mapView.controller.zoomOut() },
+                modifier = Modifier
+                    .size(44.dp)
+                    .testTag("zoom_out_button"),
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Remove,
+                    contentDescription = "Zoom arrière (-)",
                     modifier = Modifier.size(22.dp)
                 )
             }
