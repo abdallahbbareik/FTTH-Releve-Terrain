@@ -3,7 +3,7 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // Brand Telecom Colors
-val TelecomNavy = Color(0xFF0A2540)
+val TelecomNavy = Color(0xFF1E3A8A) // softer, lighter professional navy/slate blue
 val TelecomBlue = Color(0xFF0284C7)
 val TelecomCyan = Color(0xFF06B6D4)
 val TelecomIndigo = Color(0xFF1E3A8A)
