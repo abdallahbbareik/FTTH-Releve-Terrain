@@ -114,7 +114,7 @@ fun CompactPiquetageTopBar(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (isDarkTheme) Color(0xFF0F172A) else TelecomNavy,
+        color = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFF0284C7),
         shadowElevation = 4.dp
     ) {
         Column(

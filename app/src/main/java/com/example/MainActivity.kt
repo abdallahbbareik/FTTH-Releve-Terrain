@@ -807,6 +807,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) },
                     currentStoragePath = viewModel.getStorageBasePath(),
                     onSetStorageLocation = { viewModel.setStorageLocation(it) },
+                    isDarkTheme = isDarkTheme,
                     onDismiss = { viewModel.dismissProjectFolder() }
                 )
             }

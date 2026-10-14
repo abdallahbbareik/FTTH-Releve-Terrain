@@ -99,8 +99,15 @@ fun ProjectFolderDialog(
     onExportGeoJson: () -> Unit = {},
     currentStoragePath: String = "",
     onSetStorageLocation: (String) -> Unit = {},
+    isDarkTheme: Boolean = false,
     onDismiss: () -> Unit
 ) {
+    val dialogBg = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFFAFAF8)
+    val borderColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFC5D0DC)
+    val cardBg = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF0F4F9)
+    val textColor = if (isDarkTheme) Color(0xFFF8FAFC) else Color(0xFF062A3D)
+    val secondaryTextColor = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF5B6B7B)
+
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Nœuds, 2: Infra, 3: Câbles
     var searchQuery by remember { mutableStateOf("") }
     var selectedTypeFilter by remember { mutableStateOf<FtthNodeType?>(null) }
@@ -126,11 +133,11 @@ fun ProjectFolderDialog(
     ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
-            color = Color(0xFFFAFAF8),
+            color = dialogBg,
             modifier = Modifier
                 .fillMaxWidth(0.96f)
                 .padding(vertical = 16.dp)
-                .border(3.dp, Color(0xFFC5D0DC), RoundedCornerShape(28.dp))
+                .border(3.dp, borderColor, RoundedCornerShape(28.dp))
                 .testTag("project_folder_dialog")
         ) {
             Column(
@@ -511,6 +518,7 @@ fun ProjectFolderDialog(
                             ProjectsListContent(
                                 currentProject = currentProject,
                                 projects = allProjects,
+                                isDarkTheme = isDarkTheme,
                                 onSelectProject = onSwitchProject,
                                 onRenameProject = { projName ->
                                     projectToRename = projName
@@ -862,6 +870,7 @@ fun ProjectFolderDialog(
 private fun ProjectsListContent(
     currentProject: String,
     projects: List<ProjectInfo>,
+    isDarkTheme: Boolean = false,
     onSelectProject: (String) -> Unit,
     onRenameProject: (String) -> Unit,
     onDeleteProject: (String) -> Unit
@@ -877,10 +886,10 @@ private fun ProjectsListContent(
                     .fillMaxWidth()
                     .clickable { if (!isCurrent) onSelectProject(proj.name) },
                 shape = RoundedCornerShape(18.dp),
-                color = if (isCurrent) Color(0xFFE8F5EC) else Color.White,
+                color = if (isCurrent) (if (isDarkTheme) Color(0xFF1B4D3E) else Color(0xFFE8F5EC)) else (if (isDarkTheme) Color(0xFF1E293B) else Color.White),
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (isCurrent) Color(0xFFB7E0C2) else Color(0xFFE2E8F0)
+                    if (isCurrent) (if (isDarkTheme) Color(0xFF2EAD4B) else Color(0xFFB7E0C2)) else (if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0))
                 )
             ) {
                 Row(
@@ -908,7 +917,7 @@ private fun ProjectsListContent(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .border(2.dp, Color(0xFFC5D0DC), CircleShape)
+                                .border(2.dp, if (isDarkTheme) Color(0xFF334155) else Color(0xFFC5D0DC), CircleShape)
                         )
                     }
 
@@ -921,7 +930,7 @@ private fun ProjectsListContent(
                                 text = proj.name,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF062A3D)
+                                color = if (isDarkTheme) Color(0xFFF8FAFC) else Color(0xFF062A3D)
                             )
                             if (isCurrent) {
                                 Surface(
@@ -941,7 +950,7 @@ private fun ProjectsListContent(
                         Text(
                             text = "${proj.nodesCount} nœuds · ${proj.tracksCount} infra · ${proj.linksCount} câbles",
                             fontSize = 12.sp,
-                            color = Color(0xFF5B6B7B)
+                            color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF5B6B7B)
                         )
                     }
 

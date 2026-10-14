@@ -97,7 +97,7 @@ fun PiquetageTopBar(
     Column(modifier = Modifier.fillMaxWidth()) {
         TopAppBar(
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = TelecomNavy,
+                containerColor = Color(0xFF0284C7),
                 titleContentColor = Color.White,
                 actionIconContentColor = Color.White
             ),
