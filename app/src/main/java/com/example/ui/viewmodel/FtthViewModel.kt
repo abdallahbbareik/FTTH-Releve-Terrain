@@ -1917,17 +1917,28 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             _bannerMessage.value = "Importation des données géospatiales en cours..."
             val result = com.example.data.import.RealImportService.importFromFile(context, uri)
-            if (result.nodes.isNotEmpty()) {
-                val currentNodes = _rawNodes.value.toMutableList()
-                currentNodes.addAll(result.nodes)
-                _rawNodes.value = currentNodes
-                docStorage.saveNodes(currentNodes)
+            val hasNodes = result.nodes.isNotEmpty()
+            val hasTracks = result.tracks.isNotEmpty()
+
+            if (hasNodes || hasTracks) {
+                if (hasNodes) {
+                    val currentNodes = _rawNodes.value.toMutableList()
+                    currentNodes.addAll(result.nodes)
+                    _rawNodes.value = currentNodes
+                    docStorage.saveNodes(currentNodes)
+                }
+                if (hasTracks) {
+                    val currentTracks = _allTracks.value.toMutableList()
+                    currentTracks.addAll(result.tracks)
+                    _allTracks.value = currentTracks
+                    docStorage.saveTracks(currentTracks)
+                }
                 withContext(Dispatchers.Main) {
                     _bannerMessage.value = result.message
                 }
             } else {
                 withContext(Dispatchers.Main) {
-                    _bannerMessage.value = if (result.message.isNotEmpty()) result.message else "Aucun nœud valide trouvé dans le fichier."
+                    _bannerMessage.value = if (result.message.isNotEmpty()) result.message else "Aucune donnée valide trouvée dans le fichier."
                 }
             }
         }

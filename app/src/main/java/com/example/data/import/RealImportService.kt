@@ -7,6 +7,9 @@ import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
+import com.example.data.storage.StoredTrack
+import com.example.data.storage.TrackPoint
+import com.example.data.util.TrackGeometryHelper
 import org.json.JSONArray
 import org.json.JSONObject
 import org.w3c.dom.Element
@@ -21,6 +24,7 @@ object RealImportService {
     data class ImportResult(
         val nodes: List<FtthNodeEntity>,
         val links: List<FtthLinkEntity>,
+        val tracks: List<StoredTrack>,
         val message: String
     )
 
@@ -37,7 +41,6 @@ object RealImportService {
             } else if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) {
                 importGeoJson(inputStream)
             } else {
-                // Tenter par défaut GeoJSON puis KML si échec
                 val content = inputStream.bufferedReader().use { it.readText() }
                 if (content.trim().startsWith("{")) {
                     parseGeoJsonString(content)
@@ -47,7 +50,7 @@ object RealImportService {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            ImportResult(emptyList(), emptyList(), "Erreur d'import : ${e.localizedMessage}")
+            ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'import : ${e.localizedMessage}")
         } finally {
             try { inputStream.close() } catch (_: Exception) {}
         }
@@ -84,7 +87,7 @@ object RealImportService {
         if (kmlContent != null) {
             return parseKmlString(kmlContent)
         }
-        return ImportResult(emptyList(), emptyList(), "Aucun fichier KML trouvé dans l'archive KMZ.")
+        return ImportResult(emptyList(), emptyList(), emptyList(), "Aucun fichier KML trouvé dans l'archive KMZ.")
     }
 
     private fun importKml(inputStream: InputStream): ImportResult {
@@ -94,6 +97,7 @@ object RealImportService {
 
     private fun parseKmlString(kml: String): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
+        val tracks = mutableListOf<StoredTrack>()
         try {
             val factory = DocumentBuilderFactory.newInstance()
             val builder = factory.newDocumentBuilder()
@@ -103,10 +107,10 @@ object RealImportService {
             val placemarks = doc.getElementsByTagName("Placemark")
             for (i in 0 until placemarks.length) {
                 val placemark = placemarks.item(i) as? Element ?: continue
-                val name = getElementValue(placemark, "name") ?: "Noeud-${i + 1}"
+                val name = getElementValue(placemark, "name") ?: "Objet-${i + 1}"
                 val description = getElementValue(placemark, "description") ?: ""
                 
-                // Extraire les propriétés ExtendedData
+                // Propriétés ExtendedData
                 val properties = mutableMapOf<String, String>()
                 val dataElements = placemark.getElementsByTagName("Data")
                 for (j in 0 until dataElements.length) {
@@ -118,33 +122,85 @@ object RealImportService {
                     }
                 }
 
-                // Coordonnées Point
-                val coordsText = getElementValue(placemark, "coordinates")
-                if (coordsText != null) {
-                    val parts = coordsText.trim().split(Regex("[,\\s]+"))
-                    if (parts.size >= 2) {
-                        val lon = parts[0].toDoubleOrNull() ?: 0.0
-                        val lat = parts[1].toDoubleOrNull() ?: 0.0
-                        if (lat != 0.0 || lon != 0.0) {
-                            val nodeType = determineNodeType(name, description, properties)
-                            nodes.add(createNodeFromAttributes(
-                                id = "IMP-KML-${System.currentTimeMillis()}-$i",
-                                type = nodeType,
-                                name = name,
-                                description = description,
-                                lat = lat,
-                                lon = lon,
-                                properties = properties
-                            ))
+                val lineStringEl = placemark.getElementsByTagName("LineString")
+                val pointEl = placemark.getElementsByTagName("Point")
+
+                if (lineStringEl.length > 0) {
+                    val lineEl = lineStringEl.item(0) as? Element
+                    val coordsText = lineEl?.let { getElementValue(it, "coordinates") } ?: getElementValue(placemark, "coordinates")
+                    if (coordsText != null) {
+                        val points = parseKmlCoordinates(coordsText)
+                        if (points.size >= 2) {
+                            val trackType = determineTrackType(name, description, properties)
+                            val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
+                            tracks.add(
+                                StoredTrack(
+                                    id = "IMP-KML-TRK-${System.currentTimeMillis()}-$i",
+                                    name = name,
+                                    type = trackType,
+                                    etat = "Conforme",
+                                    notes = description,
+                                    startTime = System.currentTimeMillis(),
+                                    endTime = System.currentTimeMillis(),
+                                    totalDistanceMeters = totalDist,
+                                    rawPoints = points,
+                                    points = points
+                                )
+                            )
+                        }
+                    }
+                } else if (pointEl.length > 0 || getElementValue(placemark, "coordinates") != null) {
+                    val coordsText = getElementValue(placemark, "coordinates")
+                    if (coordsText != null) {
+                        val parts = coordsText.trim().split(Regex("[,\\s]+"))
+                        if (parts.size >= 2) {
+                            val lon = parts[0].toDoubleOrNull() ?: 0.0
+                            val lat = parts[1].toDoubleOrNull() ?: 0.0
+                            if (lat != 0.0 || lon != 0.0) {
+                                val nodeType = determineNodeType(name, description, properties)
+                                nodes.add(createNodeFromAttributes(
+                                    id = "IMP-KML-NOD-${System.currentTimeMillis()}-$i",
+                                    type = nodeType,
+                                    name = name,
+                                    description = description,
+                                    lat = lat,
+                                    lon = lon,
+                                    properties = properties
+                                ))
+                            }
                         }
                     }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            return ImportResult(emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
         }
-        return ImportResult(nodes, emptyList(), "${nodes.size} nœuds importés avec succès (KML).")
+        val msg = buildString {
+            if (nodes.isNotEmpty()) append("${nodes.size} nœuds ")
+            if (tracks.isNotEmpty()) {
+                if (isNotEmpty()) append("et ")
+                append("${tracks.size} linéaires/trajets ")
+            }
+            append("importés avec succès (KML).")
+            if (isEmpty()) append("Aucun objet valide trouvé.")
+        }
+        return ImportResult(nodes, emptyList(), tracks, msg)
+    }
+
+    private fun parseKmlCoordinates(coordsText: String): List<TrackPoint> {
+        val points = mutableListOf<TrackPoint>()
+        val tokens = coordsText.trim().split(Regex("\\s+"))
+        for (token in tokens) {
+            val parts = token.split(",")
+            if (parts.size >= 2) {
+                val lon = parts[0].toDoubleOrNull() ?: continue
+                val lat = parts[1].toDoubleOrNull() ?: continue
+                val alt = if (parts.size >= 3) parts[2].toDoubleOrNull() ?: 0.0 else 0.0
+                points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+            }
+        }
+        return points
     }
 
     private fun getElementValue(parent: Element, tagName: String): String? {
@@ -163,6 +219,7 @@ object RealImportService {
 
     private fun parseGeoJsonString(jsonStr: String): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
+        val tracks = mutableListOf<StoredTrack>()
         try {
             val root = JSONObject(jsonStr)
             val features = if (root.has("features")) {
@@ -176,57 +233,128 @@ object RealImportService {
             for (i in 0 until features.length()) {
                 val feature = features.getJSONObject(i)
                 val geometry = feature.optJSONObject("geometry") ?: continue
-                val type = geometry.optString("type")
+                val geomType = geometry.optString("type")
                 val coords = geometry.optJSONArray("coordinates") ?: continue
 
-                var lon = 0.0
-                var lat = 0.0
-
-                if (type.equals("Point", ignoreCase = true) && coords.length() >= 2) {
-                    lon = coords.getDouble(0)
-                    lat = coords.getDouble(1)
-                } else if (type.equals("LineString", ignoreCase = true) && coords.length() > 0) {
-                    val pt = coords.getJSONArray(0)
-                    lon = pt.getDouble(0)
-                    lat = pt.getDouble(1)
-                } else if (type.equals("Polygon", ignoreCase = true) && coords.length() > 0) {
-                    val ring = coords.getJSONArray(0)
-                    if (ring.length() > 0) {
-                        val pt = ring.getJSONArray(0)
-                        lon = pt.getDouble(0)
-                        lat = pt.getDouble(1)
-                    }
+                val properties = feature.optJSONObject("properties") ?: JSONObject()
+                val propMap = mutableMapOf<String, String>()
+                val keys = properties.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    propMap[k] = properties.optString(k, "")
                 }
 
-                if (lat != 0.0 || lon != 0.0) {
-                    val properties = feature.optJSONObject("properties") ?: JSONObject()
-                    val propMap = mutableMapOf<String, String>()
-                    val keys = properties.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        propMap[k] = properties.optString(k, "")
+                val name = propMap["name"] ?: propMap["nom"] ?: propMap["ID"] ?: "Objet-${i + 1}"
+                val description = propMap["description"] ?: propMap["desc"] ?: ""
+
+                if (geomType.equals("Point", ignoreCase = true) && coords.length() >= 2) {
+                    val lon = coords.getDouble(0)
+                    val lat = coords.getDouble(1)
+                    if (lat != 0.0 || lon != 0.0) {
+                        val nodeType = determineNodeType(name, description, propMap)
+                        nodes.add(createNodeFromAttributes(
+                            id = "IMP-GEO-NOD-${System.currentTimeMillis()}-$i",
+                            type = nodeType,
+                            name = name,
+                            description = description,
+                            lat = lat,
+                            lon = lon,
+                            properties = propMap
+                        ))
                     }
-
-                    val name = propMap["name"] ?: propMap["nom"] ?: propMap["ID"] ?: "Noeud-${i + 1}"
-                    val description = propMap["description"] ?: propMap["desc"] ?: ""
-                    val nodeType = determineNodeType(name, description, propMap)
-
-                    nodes.add(createNodeFromAttributes(
-                        id = "IMP-GEO-${System.currentTimeMillis()}-$i",
-                        type = nodeType,
-                        name = name,
-                        description = description,
-                        lat = lat,
-                        lon = lon,
-                        properties = propMap
-                    ))
+                } else if (geomType.equals("LineString", ignoreCase = true) && coords.length() > 0) {
+                    val points = mutableListOf<TrackPoint>()
+                    for (j in 0 until coords.length()) {
+                        val ptArr = coords.getJSONArray(j)
+                        if (ptArr.length() >= 2) {
+                            val lon = ptArr.getDouble(0)
+                            val lat = ptArr.getDouble(1)
+                            val alt = if (ptArr.length() >= 3) ptArr.getDouble(2) else 0.0
+                            points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                        }
+                    }
+                    if (points.size >= 2) {
+                        val trackType = determineTrackType(name, description, propMap)
+                        val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
+                        tracks.add(
+                            StoredTrack(
+                                id = "IMP-GEO-TRK-${System.currentTimeMillis()}-$i",
+                                name = name,
+                                type = trackType,
+                                etat = "Conforme",
+                                notes = description,
+                                startTime = System.currentTimeMillis(),
+                                endTime = System.currentTimeMillis(),
+                                totalDistanceMeters = totalDist,
+                                rawPoints = points,
+                                points = points
+                            )
+                        )
+                    }
+                } else if (geomType.equals("MultiLineString", ignoreCase = true) && coords.length() > 0) {
+                    for (m in 0 until coords.length()) {
+                        val lineArr = coords.getJSONArray(m)
+                        val points = mutableListOf<TrackPoint>()
+                        for (j in 0 until lineArr.length()) {
+                            val ptArr = lineArr.getJSONArray(j)
+                            if (ptArr.length() >= 2) {
+                                val lon = ptArr.getDouble(0)
+                                val lat = ptArr.getDouble(1)
+                                val alt = if (ptArr.length() >= 3) ptArr.getDouble(2) else 0.0
+                                points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                            }
+                        }
+                        if (points.size >= 2) {
+                            val trackType = determineTrackType(name, description, propMap)
+                            val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
+                            tracks.add(
+                                StoredTrack(
+                                    id = "IMP-GEO-TRK-${System.currentTimeMillis()}-$i-$m",
+                                    name = "$name (${m + 1})",
+                                    type = trackType,
+                                    etat = "Conforme",
+                                    notes = description,
+                                    startTime = System.currentTimeMillis(),
+                                    endTime = System.currentTimeMillis(),
+                                    totalDistanceMeters = totalDist,
+                                    rawPoints = points,
+                                    points = points
+                                )
+                            )
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            return ImportResult(emptyList(), emptyList(), "Erreur d'analyse GeoJSON : ${e.localizedMessage}")
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse GeoJSON : ${e.localizedMessage}")
         }
-        return ImportResult(nodes, emptyList(), "${nodes.size} nœuds importés avec succès (GeoJSON).")
+        val msg = buildString {
+            if (nodes.isNotEmpty()) append("${nodes.size} nœuds ")
+            if (tracks.isNotEmpty()) {
+                if (isNotEmpty()) append("et ")
+                append("${tracks.size} linéaires/trajets ")
+            }
+            append("importés avec succès (GeoJSON).")
+            if (isEmpty()) append("Aucun objet valide trouvé.")
+        }
+        return ImportResult(nodes, emptyList(), tracks, msg)
+    }
+
+    private fun determineTrackType(name: String, description: String, properties: Map<String, String>): String {
+        val tKeys = listOf("track_type", "type", "category", "nature", "installation", "mode")
+        for (k in tKeys) {
+            val v = properties[k]?.lowercase() ?: continue
+            if (v.contains("aerien") || v.contains("aérien") || v.contains("aerial")) return "Aérien"
+            if (v.contains("facade") || v.contains("façade")) return "Façade"
+            if (v.contains("gc") || v.contains("souterrain") || v.contains("underground")) return "GC"
+        }
+        val combined = "$name $description".lowercase()
+        return when {
+            combined.contains("aerien") || combined.contains("aérien") -> "Aérien"
+            combined.contains("facade") || combined.contains("façade") -> "Façade"
+            else -> "GC"
+        }
     }
 
     private fun determineNodeType(name: String, description: String, properties: Map<String, String>): FtthNodeType {
