@@ -9,10 +9,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +33,10 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.LightMode
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -90,8 +99,16 @@ fun CompactPiquetageTopBar(
     onExportGeoJson: () -> Unit,
     onStartAutoTrack: () -> Unit = {},
     onStartManualTrack: () -> Unit = {},
+    onImportFile: (Uri) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val topBarImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onImportFile(uri)
+        }
+    }
     var menuExpanded by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
 
@@ -209,6 +226,20 @@ fun CompactPiquetageTopBar(
                         )
 
                         HorizontalDivider()
+
+                        // Importation KMZ / GeoJSON
+                        DropdownMenuItem(
+                            text = { Text("Importer KMZ ou GeoJSON", fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED)) },
+                            leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null, tint = Color(0xFF7C3AED)) },
+                            onClick = {
+                                menuExpanded = false
+                                try {
+                                    topBarImportLauncher.launch(arrayOf("*/*"))
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+                        )
 
                         // Exportation
                         DropdownMenuItem(
@@ -381,30 +412,30 @@ fun CompactPiquetageTopBar(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Bouton direct Mode Clair / Sombre
+                // Bouton compact Mode Clair / Sombre (on/off)
                 Surface(
                     onClick = onToggleTheme,
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color.White.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White.copy(alpha = 0.18f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
                     modifier = Modifier.testTag("theme_toggle_button")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                     ) {
                         Icon(
                             imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
                             contentDescription = if (isDarkTheme) "Passer en mode clair" else "Passer en mode sombre",
                             tint = if (isDarkTheme) Color(0xFFFACC15) else Color.White,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = if (isDarkTheme) "Sombre" else "Clair",
                             color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -412,47 +443,129 @@ fun CompactPiquetageTopBar(
 
             // Barre de recherche dépliable si activée
             AnimatedVisibility(visible = isSearchActive) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        placeholder = { Text("Rechercher POT-101, BTR...", color = Color(0xFF94A3B8), fontSize = 12.sp) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .testTag("compact_search_input"),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        textStyle = TextStyle(
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            cursorColor = TelecomCyan,
-                            focusedBorderColor = TelecomCyan,
-                            unfocusedBorderColor = Color(0xFF64748B),
-                            focusedContainerColor = Color(0xFF1E293B),
-                            unfocusedContainerColor = Color(0xFF1E293B)
-                        ),
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onSearchQueryChange("") }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Effacer", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            cursorBrush = SolidColor(TelecomCyan),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .testTag("compact_search_input"),
+                            decorationBox = { innerTextField ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            color = Color(0xFF1E293B),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (searchQuery.isNotEmpty()) TelecomCyan else Color(0xFF64748B),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (searchQuery.isEmpty()) {
+                                            Text(
+                                                text = "Rechercher (nom, ID, adresse)...",
+                                                color = Color(0xFF94A3B8),
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { onSearchQueryChange("") },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Effacer",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(onClick = { isSearchActive = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Fermer recherche", tint = Color.White)
+                        }
+                    }
+
+                    // Suggestions de recherche (autocomplétion)
+                    if (searchQuery.isNotBlank() && matchingNodes.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            matchingNodes.take(6).forEach { node ->
+                                Surface(
+                                    onClick = {
+                                        onSelectNode(node)
+                                        isSearchActive = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1E293B),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, TelecomCyan.copy(alpha = 0.7f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Place,
+                                            contentDescription = null,
+                                            tint = TelecomCyan,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "${node.id} (${node.name.ifBlank { node.type.label }})",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             }
                         }
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    IconButton(onClick = { isSearchActive = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Fermer recherche", tint = Color.White)
                     }
                 }
             }

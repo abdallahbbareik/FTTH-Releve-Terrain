@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -134,7 +135,7 @@ fun SyncLogSheet(
                     Switch(
                         checked = isLiveActive,
                         onCheckedChange = { onToggleLive() },
-                        modifier = Modifier.testTag("toggle_live_sync_switch")
+                        modifier = Modifier.scale(0.75f).testTag("toggle_live_sync_switch")
                     )
                 }
             }

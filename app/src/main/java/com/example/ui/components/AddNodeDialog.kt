@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -512,7 +513,7 @@ fun AddNodeDialog(
                                 Text(text = "Boîtier FTTH présent :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Text(text = if (hasBoitierFtth) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Switch(checked = hasBoitierFtth, onCheckedChange = { hasBoitierFtth = it })
+                                Switch(checked = hasBoitierFtth, onCheckedChange = { hasBoitierFtth = it }, modifier = Modifier.scale(0.75f))
                             }
                             if (hasBoitierFtth) {
                                 val supportLabel = if (selectedType == FtthNodeType.POTEAU) "Poteau" else if (selectedType == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
@@ -668,7 +669,7 @@ fun AddNodeDialog(
                                         color = if (hasSplitter) Color(0xFF16A34A) else MaterialTheme.colorScheme.outline
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Switch(checked = hasSplitter, onCheckedChange = { hasSplitter = it })
+                                    Switch(checked = hasSplitter, onCheckedChange = { hasSplitter = it }, modifier = Modifier.scale(0.75f))
                                 }
                                 if (hasSplitter) {
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -701,7 +702,7 @@ fun AddNodeDialog(
                             Text(text = "Saturé :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             Text(text = if (isSaturated) "Oui" else "Non", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Switch(checked = isSaturated, onCheckedChange = { isSaturated = it })
+                            Switch(checked = isSaturated, onCheckedChange = { isSaturated = it }, modifier = Modifier.scale(0.75f))
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(text = "Support :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -762,11 +763,11 @@ fun AddNodeDialog(
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "Local technique :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                            Switch(checked = hasLocalTechnique, onCheckedChange = { hasLocalTechnique = it })
+                            Switch(checked = hasLocalTechnique, onCheckedChange = { hasLocalTechnique = it }, modifier = Modifier.scale(0.75f))
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "Gaine montante :", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                            Switch(checked = hasGaineMontante, onCheckedChange = { hasGaineMontante = it })
+                            Switch(checked = hasGaineMontante, onCheckedChange = { hasGaineMontante = it }, modifier = Modifier.scale(0.75f))
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(text = "Mode raccordement :", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)

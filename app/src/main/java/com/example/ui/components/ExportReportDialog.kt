@@ -56,6 +56,11 @@ import com.example.data.local.NodeStatus
 import com.example.data.storage.StoredTrack
 import java.io.File
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.FileUpload
+
 @Composable
 fun ExportReportDialog(
     nodes: List<FtthNodeEntity>,
@@ -69,6 +74,7 @@ fun ExportReportDialog(
     onExportKml: (Context, (File) -> Unit) -> Unit,
     onExportZip: (Context, (File) -> Unit) -> Unit,
     onShareFile: (Context, File, String) -> Unit,
+    onImportFile: (Uri) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -91,6 +97,15 @@ fun ExportReportDialog(
     val totalCableMeters = links.sumOf { it.lengthMeters }.toInt()
     val totalTracksCount = tracks.distinctBy { it.id }.size
     val totalTrackMeters = tracks.distinctBy { it.id }.sumOf { it.totalDistanceMeters }.toInt()
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            onImportFile(uri)
+            onDismiss()
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -122,12 +137,12 @@ fun ExportReportDialog(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Rapport & Exports FTTH",
+                            text = "Rapport, Exports & Imports FTTH",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "SIG, KMZ 8 couches, Trajets & Par type de nœuds",
+                            text = "SIG, KMZ 8 couches, Import KMZ/GeoJSON dynamique",
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -137,6 +152,36 @@ fun ExportReportDialog(
                         Icon(Icons.Default.Close, contentDescription = "Fermer")
                     }
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // ==================== SECTION IMPORT KMZ / GEOJSON ====================
+                Text(
+                    text = "Importation de données géospatiales (KMZ, KML, GeoJSON) :",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = {
+                        try {
+                            importLauncher.launch(arrayOf("*/*"))
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("import_file_button")
+                ) {
+                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Importer un fichier KMZ, KML ou GeoJSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Spacer(modifier = Modifier.height(12.dp))
 

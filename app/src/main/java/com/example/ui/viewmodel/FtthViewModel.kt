@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.export.RealExportService
@@ -1908,6 +1909,26 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.Main) {
                 _bannerMessage.value = "GeoJSON par type générés (${file.length() / 1024} Ko)"
                 RealExportService.shareFile(context, file, "application/zip", "Partager les GeoJSON par type de nœud")
+            }
+        }
+    }
+
+    fun importGeoJsonOrKmz(context: Context, uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _bannerMessage.value = "Importation des données géospatiales en cours..."
+            val result = com.example.data.import.RealImportService.importFromFile(context, uri)
+            if (result.nodes.isNotEmpty()) {
+                val currentNodes = _rawNodes.value.toMutableList()
+                currentNodes.addAll(result.nodes)
+                _rawNodes.value = currentNodes
+                docStorage.saveNodes(currentNodes)
+                withContext(Dispatchers.Main) {
+                    _bannerMessage.value = result.message
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    _bannerMessage.value = if (result.message.isNotEmpty()) result.message else "Aucun nœud valide trouvé dans le fichier."
+                }
             }
         }
     }

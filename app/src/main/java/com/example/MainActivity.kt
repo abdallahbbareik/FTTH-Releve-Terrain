@@ -362,7 +362,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         onExportKmz = { viewModel.exportKmzAndShare(context) },
                         onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) },
                         onStartAutoTrack = { viewModel.startAutoGpsTrack() },
-                        onStartManualTrack = { viewModel.startManualTrack() }
+                        onStartManualTrack = { viewModel.startManualTrack() },
+                        onImportFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) }
                     )
 
                     // Barre d'outils flottante : Mode Déplacement de Nœud
@@ -808,6 +809,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     currentStoragePath = viewModel.getStorageBasePath(),
                     onSetStorageLocation = { viewModel.setStorageLocation(it) },
                     isDarkTheme = isDarkTheme,
+                    onImportFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
                     onDismiss = { viewModel.dismissProjectFolder() }
                 )
             }
@@ -1005,6 +1007,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onExportKml = { ctx, cb -> viewModel.exportKml(ctx, cb) },
                     onExportZip = { ctx, cb -> viewModel.exportCompleteZip(ctx, cb) },
                     onShareFile = { ctx, f, mime -> viewModel.shareExportFile(ctx, f, mime) },
+                    onImportFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
                     onDismiss = { viewModel.dismissExportDialog() }
                 )
             }

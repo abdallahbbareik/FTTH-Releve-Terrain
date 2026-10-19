@@ -7,10 +7,34 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import java.io.File
 
 object PublicStorageHelper {
+
+    fun getPathFromTreeUri(context: Context, uri: Uri): String {
+        try {
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            if (docId != null) {
+                val parts = docId.split(":")
+                val type = parts[0]
+                val relativePath = if (parts.size > 1) parts[1] else ""
+                if ("primary".equals(type, ignoreCase = true)) {
+                    val base = Environment.getExternalStorageDirectory()
+                    return if (relativePath.isNotEmpty()) File(base, relativePath).absolutePath else base.absolutePath
+                } else {
+                    val sdCard = File("/storage/$type")
+                    if (sdCard.exists()) {
+                        return if (relativePath.isNotEmpty()) File(sdCard, relativePath).absolutePath else sdCard.absolutePath
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return uri.path ?: uri.toString()
+    }
 
     private const val FOLDER_DOWNLOADS = "Download/Releve-Terrain"
     private const val FOLDER_DOWNLOADS_LOWER = "Download/releve-terrain"

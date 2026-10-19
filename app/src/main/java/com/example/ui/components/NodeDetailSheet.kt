@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -640,7 +641,8 @@ fun NodeDetailSheet(
                                 }
                                 Switch(
                                     checked = hasBoitierFtth,
-                                    onCheckedChange = { hasBoitierFtth = it }
+                                    onCheckedChange = { hasBoitierFtth = it },
+                                    modifier = Modifier.scale(0.75f)
                                 )
                             }
                             if (hasBoitierFtth) {
@@ -932,7 +934,8 @@ fun NodeDetailSheet(
                                         onCheckedChange = {
                                             hasSplitter = it
                                             triggerAutoSave()
-                                        }
+                                        },
+                                        modifier = Modifier.scale(0.75f)
                                     )
                                 }
                                 if (hasSplitter) {
@@ -991,7 +994,8 @@ fun NodeDetailSheet(
                                     onCheckedChange = {
                                         isSaturated = it
                                         triggerAutoSave()
-                                    }
+                                    },
+                                    modifier = Modifier.scale(0.75f)
                                 )
                             }
                         }
@@ -1106,7 +1110,8 @@ fun NodeDetailSheet(
                                         onCheckedChange = {
                                             hasLocalTechnique = it
                                             triggerAutoSave()
-                                        }
+                                        },
+                                        modifier = Modifier.scale(0.75f)
                                     )
                                 }
                                 HorizontalDivider()
@@ -1119,7 +1124,8 @@ fun NodeDetailSheet(
                                         onCheckedChange = {
                                             hasGaineMontante = it
                                             triggerAutoSave()
-                                        }
+                                        },
+                                        modifier = Modifier.scale(0.75f)
                                     )
                                 }
                             }

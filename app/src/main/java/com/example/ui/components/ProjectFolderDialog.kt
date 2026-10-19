@@ -17,6 +17,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.data.storage.PublicStorageHelper
+import java.io.File
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +38,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
@@ -100,6 +109,7 @@ fun ProjectFolderDialog(
     currentStoragePath: String = "",
     onSetStorageLocation: (String) -> Unit = {},
     isDarkTheme: Boolean = false,
+    onImportFile: (Uri) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val dialogBg = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFFAFAF8)
@@ -107,6 +117,7 @@ fun ProjectFolderDialog(
     val cardBg = if (isDarkTheme) Color(0xFF334155) else Color(0xFFF0F4F9)
     val textColor = if (isDarkTheme) Color(0xFFF8FAFC) else Color(0xFF062A3D)
     val secondaryTextColor = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF5B6B7B)
+    val dividerColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Nœuds, 2: Infra, 3: Câbles
     var searchQuery by remember { mutableStateOf("") }
@@ -124,8 +135,35 @@ fun ProjectFolderDialog(
     var itemToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Dialogue Définir Emplacement de Stockage
+    val context = LocalContext.current
     var showStorageLocationDialog by remember { mutableStateOf(false) }
     var storagePathInput by remember { mutableStateOf(currentStoragePath) }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (_: Exception) {}
+            val chosen = PublicStorageHelper.getPathFromTreeUri(context, uri)
+            if (chosen.isNotBlank()) {
+                onSetStorageLocation(chosen)
+                storagePathInput = chosen
+                showStorageLocationDialog = false
+            }
+        }
+    }
+
+    val projectImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onImportFile(uri)
+            onDismiss()
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -156,13 +194,13 @@ fun ProjectFolderDialog(
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF062A3D)),
+                            .background(if (isDarkTheme) Color(0xFF0284C7).copy(alpha = 0.25f) else Color(0xFF062A3D)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.FolderOpen,
                             contentDescription = null,
-                            tint = Color(0xFF4FC3F7),
+                            tint = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF4FC3F7),
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -174,16 +212,16 @@ fun ProjectFolderDialog(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontSize = 21.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF062A3D)
+                                color = if (isDarkTheme) Color.White else Color(0xFF062A3D)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
-                                color = Color(0xFFE8F5EC)
+                                color = if (isDarkTheme) Color(0xFF14532D) else Color(0xFFE8F5EC)
                             ) {
                                 Text(
                                     text = "Actif",
-                                    color = Color(0xFF2EAD4B),
+                                    color = if (isDarkTheme) Color(0xFF4ADE80) else Color(0xFF2EAD4B),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp)
@@ -194,21 +232,28 @@ fun ProjectFolderDialog(
                             text = "Download/Releve-Terrain/$currentProject",
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = 11.sp,
-                            color = Color(0xFF5B6B7B),
+                            color = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF5B6B7B),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.testTag("close_project_folder_button")
+                    // Bouton X de fermeture à fort contraste (fond circulaire visible)
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Fermer",
-                            tint = Color(0xFF062A3D),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("close_project_folder_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Fermer",
+                                tint = if (isDarkTheme) Color.White else Color(0xFF0F172A),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
@@ -225,7 +270,7 @@ fun ProjectFolderDialog(
                             .weight(1f)
                             .clickable { selectedTab = 1 },
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF0F4F9)
+                        color = cardBg
                     ) {
                         Row(
                             modifier = Modifier.padding(10.dp, 8.dp),
@@ -235,7 +280,7 @@ fun ProjectFolderDialog(
                             Icon(
                                 imageVector = Icons.Default.Place,
                                 contentDescription = null,
-                                tint = Color(0xFF0B7BC1),
+                                tint = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                 modifier = Modifier.size(20.dp)
                             )
                             Column {
@@ -244,12 +289,12 @@ fun ProjectFolderDialog(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Medium,
                                     lineHeight = 16.sp,
-                                    color = Color(0xFF062A3D)
+                                    color = textColor
                                 )
                                 Text(
                                     text = "Nœuds",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF5B6B7B)
+                                    color = secondaryTextColor
                                 )
                             }
                         }
@@ -261,7 +306,7 @@ fun ProjectFolderDialog(
                             .weight(1f)
                             .clickable { selectedTab = 2 },
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF0F4F9)
+                        color = cardBg
                     ) {
                         Row(
                             modifier = Modifier.padding(10.dp, 8.dp),
@@ -271,7 +316,7 @@ fun ProjectFolderDialog(
                             Icon(
                                 imageVector = Icons.Default.Timeline,
                                 contentDescription = null,
-                                tint = Color(0xFF0B7BC1),
+                                tint = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                 modifier = Modifier.size(20.dp)
                             )
                             Column {
@@ -280,12 +325,12 @@ fun ProjectFolderDialog(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Medium,
                                     lineHeight = 16.sp,
-                                    color = Color(0xFF062A3D)
+                                    color = textColor
                                 )
                                 Text(
                                     text = "Infra",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF5B6B7B)
+                                    color = secondaryTextColor
                                 )
                             }
                         }
@@ -297,7 +342,7 @@ fun ProjectFolderDialog(
                             .weight(1f)
                             .clickable { selectedTab = 3 },
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF0F4F9)
+                        color = cardBg
                     ) {
                         Row(
                             modifier = Modifier.padding(10.dp, 8.dp),
@@ -307,7 +352,7 @@ fun ProjectFolderDialog(
                             Icon(
                                 imageVector = Icons.Default.Link,
                                 contentDescription = null,
-                                tint = Color(0xFF0B7BC1),
+                                tint = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                 modifier = Modifier.size(20.dp)
                             )
                             Column {
@@ -316,12 +361,12 @@ fun ProjectFolderDialog(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Medium,
                                     lineHeight = 16.sp,
-                                    color = Color(0xFF062A3D)
+                                    color = textColor
                                 )
                                 Text(
                                     text = "Câbles",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF5B6B7B)
+                                    color = secondaryTextColor
                                 )
                             }
                         }
@@ -334,16 +379,19 @@ fun ProjectFolderDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFFF0F4F9), RoundedCornerShape(30.dp))
+                        .background(cardBg, RoundedCornerShape(30.dp))
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    val activeTabBg = if (isDarkTheme) Color(0xFF0284C7) else Color(0xFF062A3D)
+                    val inactiveTabTextColor = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF5B6B7B)
+
                     // Tab 0: Projets
                     Box(
                         modifier = Modifier
                             .weight(1.2f)
                             .clip(RoundedCornerShape(30.dp))
-                            .background(if (selectedTab == 0) Color(0xFF062A3D) else Color.Transparent)
+                            .background(if (selectedTab == 0) activeTabBg else Color.Transparent)
                             .clickable { selectedTab = 0 }
                             .padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
@@ -352,7 +400,7 @@ fun ProjectFolderDialog(
                             text = "Projets ${allProjects.size}",
                             fontSize = 13.sp,
                             fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selectedTab == 0) Color.White else Color(0xFF5B6B7B)
+                            color = if (selectedTab == 0) Color.White else inactiveTabTextColor
                         )
                     }
                     // Tab 1: Nœuds
@@ -360,7 +408,7 @@ fun ProjectFolderDialog(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(30.dp))
-                            .background(if (selectedTab == 1) Color(0xFF062A3D) else Color.Transparent)
+                            .background(if (selectedTab == 1) activeTabBg else Color.Transparent)
                             .clickable { selectedTab = 1 }
                             .padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
@@ -369,7 +417,7 @@ fun ProjectFolderDialog(
                             text = "Nœuds",
                             fontSize = 13.sp,
                             fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selectedTab == 1) Color.White else Color(0xFF5B6B7B)
+                            color = if (selectedTab == 1) Color.White else inactiveTabTextColor
                         )
                     }
                     // Tab 2: Infra
@@ -377,7 +425,7 @@ fun ProjectFolderDialog(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(30.dp))
-                            .background(if (selectedTab == 2) Color(0xFF062A3D) else Color.Transparent)
+                            .background(if (selectedTab == 2) activeTabBg else Color.Transparent)
                             .clickable { selectedTab = 2 }
                             .padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
@@ -386,7 +434,7 @@ fun ProjectFolderDialog(
                             text = "Infra",
                             fontSize = 13.sp,
                             fontWeight = if (selectedTab == 2) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selectedTab == 2) Color.White else Color(0xFF5B6B7B)
+                            color = if (selectedTab == 2) Color.White else inactiveTabTextColor
                         )
                     }
                     // Tab 3: Câbles
@@ -394,7 +442,7 @@ fun ProjectFolderDialog(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(30.dp))
-                            .background(if (selectedTab == 3) Color(0xFF062A3D) else Color.Transparent)
+                            .background(if (selectedTab == 3) activeTabBg else Color.Transparent)
                             .clickable { selectedTab = 3 }
                             .padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
@@ -403,7 +451,7 @@ fun ProjectFolderDialog(
                             text = "Câbles",
                             fontSize = 13.sp,
                             fontWeight = if (selectedTab == 3) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selectedTab == 3) Color.White else Color(0xFF5B6B7B)
+                            color = if (selectedTab == 3) Color.White else inactiveTabTextColor
                         )
                     }
                 }
@@ -414,7 +462,7 @@ fun ProjectFolderDialog(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    color = Color(0xFFF0F4F9)
+                    color = cardBg
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Row(
@@ -426,22 +474,22 @@ fun ProjectFolderDialog(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFDCEAF7)),
+                                    .background(if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFDCEAF7)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Folder,
                                     contentDescription = null,
-                                    tint = Color(0xFF0B7BC1),
+                                    tint = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                     modifier = Modifier.size(17.dp)
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = "Stockage (Download)", fontSize = 11.sp, color = Color(0xFF5B6B7B))
+                                Text(text = "Stockage (Download)", fontSize = 11.sp, color = secondaryTextColor)
                                 Text(
                                     text = currentStoragePath.ifBlank { "Download/Releve-Terrain/" },
                                     fontSize = 13.sp,
-                                    color = Color(0xFF062A3D),
+                                    color = textColor,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -449,22 +497,69 @@ fun ProjectFolderDialog(
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    storagePathInput = currentStoragePath
-                                    showStorageLocationDialog = true
-                                },
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.White,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC5D0DC))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                            // Bouton Parcourir direct (Explorateur de dossiers Android)
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1.35f)
+                                    .clickable {
+                                        try {
+                                            folderPickerLauncher.launch(null)
+                                        } catch (e: Exception) {
+                                            storagePathInput = currentStoragePath
+                                            showStorageLocationDialog = true
+                                        }
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color(0xFF0284C7)
                             ) {
-                                Text(text = "Changer l'emplacement d'enregistrement", fontSize = 12.sp, color = Color(0xFF0B5A8A), fontWeight = FontWeight.Medium)
+                                Row(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderOpen,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Parcourir dossier",
+                                        fontSize = 12.sp,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+
+                            // Bouton Raccourcis & Détails
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1.05f)
+                                    .clickable {
+                                        storagePathInput = currentStoragePath
+                                        showStorageLocationDialog = true
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isDarkTheme) Color(0xFF1E293B) else Color.White,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDarkTheme) Color(0xFF475569) else Color(0xFFC5D0DC))
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Raccourcis...",
+                                        fontSize = 11.sp,
+                                        color = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B5A8A),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     }
@@ -474,6 +569,24 @@ fun ProjectFolderDialog(
 
                 // Mes projets header & button (visible when tab == 0)
                 if (selectedTab == 0) {
+                    Button(
+                        onClick = {
+                            try {
+                                projectImportLauncher.launch(arrayOf("*/*"))
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("folder_import_file_button")
+                    ) {
+                        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Importer un fichier KMZ ou GeoJSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -483,7 +596,7 @@ fun ProjectFolderDialog(
                             text = "Mes projets",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF062A3D)
+                            color = textColor
                         )
                         Surface(
                             modifier = Modifier.clickable {
@@ -558,7 +671,7 @@ fun ProjectFolderDialog(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                HorizontalDivider(color = dividerColor, thickness = 1.dp)
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Boutons d'export rapide et fermeture (matching HTML)
@@ -574,7 +687,7 @@ fun ProjectFolderDialog(
                             .height(50.dp)
                             .clickable(onClick = onExportZip),
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF062A3D)
+                        color = if (isDarkTheme) Color(0xFF0284C7) else Color(0xFF062A3D)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp),
@@ -605,7 +718,7 @@ fun ProjectFolderDialog(
                             .clickable(onClick = onExportKmz),
                         shape = RoundedCornerShape(16.dp),
                         color = Color.Transparent,
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF0B7BC1))
+                        border = androidx.compose.foundation.BorderStroke(2.dp, if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1))
                     ) {
                         Box(
                             contentAlignment = Alignment.Center,
@@ -614,7 +727,7 @@ fun ProjectFolderDialog(
                             Text(
                                 text = "KMZ",
                                 fontSize = 14.sp,
-                                color = Color(0xFF0B7BC1),
+                                color = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -628,7 +741,7 @@ fun ProjectFolderDialog(
                             .clickable(onClick = onExportGeoJson),
                         shape = RoundedCornerShape(16.dp),
                         color = Color.Transparent,
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF0B7BC1))
+                        border = androidx.compose.foundation.BorderStroke(2.dp, if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1))
                     ) {
                         Box(
                             contentAlignment = Alignment.Center,
@@ -637,7 +750,7 @@ fun ProjectFolderDialog(
                             Text(
                                 text = "GeoJSON",
                                 fontSize = 14.sp,
-                                color = Color(0xFF0B7BC1),
+                                color = if (isDarkTheme) Color(0xFF38BDF8) else Color(0xFF0B7BC1),
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -647,29 +760,105 @@ fun ProjectFolderDialog(
         }
     }
 
-    // Modal Définir Emplacement d'enregistrement
+    // Modal Définir Emplacement d'enregistrement avec navigateur de fichiers
     if (showStorageLocationDialog) {
         AlertDialog(
             onDismissRequest = { showStorageLocationDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Folder, contentDescription = null, tint = TelecomNavy)
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Color(0xFF0284C7))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Définir l'emplacement", fontWeight = FontWeight.Bold)
+                    Text("Emplacement d'enregistrement", fontWeight = FontWeight.Bold)
                 }
             },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Entrez le chemin du dossier cible sur l'appareil pour l'enregistrement des projets :",
+                        text = "Sélectionnez ou parcourez le dossier cible où stocker vos projets FTTH (.noeuds, .infra_lineaire, .cables) :",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Bouton Principal : Parcourir (Explorateur Android SAF)
+                    Button(
+                        onClick = {
+                            try {
+                                folderPickerLauncher.launch(null)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Parcourir les dossiers de l'appareil", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                    Text("Raccourcis d'emplacements rapides :", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+
+                    // Preset 1: Download/Releve-Terrain
+                    Surface(
+                        onClick = {
+                            val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Releve-Terrain")
+                            storagePathInput = downloadDir.absolutePath
+                            onSetStorageLocation(storagePathInput)
+                            showStorageLocationDialog = false
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Dossier Téléchargements (Par défaut)", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text("Download/Releve-Terrain", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Preset 2: Documents/Releve-Terrain
+                    Surface(
+                        onClick = {
+                            val docsDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Releve-Terrain")
+                            storagePathInput = docsDir.absolutePath
+                            onSetStorageLocation(storagePathInput)
+                            showStorageLocationDialog = false
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFF0B7BC1), modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Dossier Documents", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text("Documents/Releve-Terrain", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Champ de saisie ou confirmation du chemin sélectionné
                     OutlinedTextField(
                         value = storagePathInput,
                         onValueChange = { storagePathInput = it },
-                        label = { Text("Chemin du dossier (ex: /storage/emulated/0/Download/Releve-Terrain)") },
+                        label = { Text("Chemin actuellement sélectionné") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -685,12 +874,12 @@ fun ProjectFolderDialog(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy)
                 ) {
-                    Text("Enregistrer", color = Color.White)
+                    Text("Valider cet emplacement", color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showStorageLocationDialog = false }) {
-                    Text("Annuler")
+                    Text("Fermer")
                 }
             }
         )
@@ -962,7 +1151,7 @@ private fun ProjectsListContent(
                             Icon(
                                 imageVector = Icons.Default.DriveFileRenameOutline,
                                 contentDescription = "Renommer",
-                                tint = Color(0xFF062A3D),
+                                tint = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF062A3D),
                                 modifier = Modifier.size(19.dp)
                             )
                         }
@@ -1023,7 +1212,14 @@ private fun NodesListContent(
             onValueChange = onSearchQueryChange,
             placeholder = { Text("Rechercher (nom, ID, adresse)...", fontSize = 12.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "Effacer", modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             shape = RoundedCornerShape(10.dp)
         )

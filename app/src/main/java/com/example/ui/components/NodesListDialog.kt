@@ -137,9 +137,7 @@ fun NodesListDialog(
                             }
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
 
