@@ -695,11 +695,11 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Disparition automatique des messages de notification après exactement 2 secondes (2000 ms)
+        // Disparition automatique des messages de notification après 3.5 secondes
         viewModelScope.launch {
             _bannerMessage.collectLatest { msg ->
                 if (msg != null) {
-                    delay(2000L)
+                    delay(3500L)
                     _bannerMessage.value = null
                 }
             }
@@ -1940,7 +1940,18 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                     _allTracks.value = currentTracks
                     docStorage.saveTracks(currentTracks)
                 }
+
+                val firstFocusLatLon = when {
+                    result.nodes.isNotEmpty() -> Pair(result.nodes.first().latitude, result.nodes.first().longitude)
+                    result.tracks.isNotEmpty() && result.tracks.first().points.isNotEmpty() ->
+                        Pair(result.tracks.first().points.first().latitude, result.tracks.first().points.first().longitude)
+                    else -> null
+                }
+
                 withContext(Dispatchers.Main) {
+                    if (firstFocusLatLon != null) {
+                        _mapFocusTarget.value = firstFocusLatLon
+                    }
                     _bannerMessage.value = result.message
                 }
             } else {

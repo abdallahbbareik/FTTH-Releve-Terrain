@@ -237,22 +237,58 @@ fun ProjectFolderDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    // Bouton X de fermeture à fort contraste (fond circulaire visible)
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
-                        modifier = Modifier.size(36.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.testTag("close_project_folder_button")
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFF7C3AED),
+                            modifier = Modifier.clickable {
+                                try {
+                                    projectImportLauncher.launch(arrayOf("*/*"))
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }.testTag("header_import_button")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Fermer",
-                                tint = if (isDarkTheme) Color.White else Color(0xFF0F172A),
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FileUpload,
+                                    contentDescription = "Importer KMZ ou GeoJSON",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Importer",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // Bouton X de fermeture à fort contraste (fond circulaire visible)
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.testTag("close_project_folder_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fermer",
+                                    tint = if (isDarkTheme) Color.White else Color(0xFF0F172A),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }

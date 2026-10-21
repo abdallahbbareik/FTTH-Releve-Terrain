@@ -37,62 +37,100 @@ object RealImportService {
         existingNodes: List<FtthNodeEntity> = emptyList()
     ): ImportResult {
         val fileName = getFileName(context, uri).lowercase(Locale.ROOT)
-        val inputStream = context.contentResolver.openInputStream(uri)
-            ?: throw IllegalArgumentException("Impossible d'ouvrir le fichier sélectionné.")
+        val bytes = try {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return ImportResult(emptyList(), emptyList(), emptyList(), "Impossible d'ouvrir le fichier sélectionné.")
+        } catch (e: Exception) {
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur de lecture du fichier : ${e.localizedMessage}")
+        }
+
+        if (bytes.isEmpty()) {
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Le fichier sélectionné est vide.")
+        }
 
         return try {
+            // Détection magique des fichiers ZIP (KMZ) : signature 0x50 0x4B (PK..)
+            val isZip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()
+
             when {
-                fileName.endsWith(".kmz") -> importKmz(inputStream, existingNodes)
-                fileName.endsWith(".kml") -> importKml(inputStream, existingNodes)
-                fileName.endsWith(".geojson") || fileName.endsWith(".json") -> importGeoJson(inputStream, existingNodes)
+                isZip || fileName.endsWith(".kmz") -> {
+                    importKmzFromBytes(bytes, existingNodes)
+                }
+                fileName.endsWith(".kml") -> {
+                    val kmlText = String(bytes, StandardCharsets.UTF_8)
+                    parseKmlString(kmlText, existingNodes)
+                }
+                fileName.endsWith(".geojson") || fileName.endsWith(".json") -> {
+                    val jsonText = String(bytes, StandardCharsets.UTF_8)
+                    parseGeoJsonString(jsonText, existingNodes)
+                }
                 else -> {
-                    val content = inputStream.bufferedReader().use { it.readText() }
-                    if (content.trim().startsWith("{")) {
-                        parseGeoJsonString(content, existingNodes)
+                    val text = String(bytes, StandardCharsets.UTF_8).trim()
+                    if (text.startsWith("{") || text.startsWith("[")) {
+                        parseGeoJsonString(text, existingNodes)
+                    } else if (text.contains("<kml", ignoreCase = true) || text.contains("<?xml", ignoreCase = true) || text.contains("<Document", ignoreCase = true)) {
+                        parseKmlString(text, existingNodes)
                     } else {
-                        parseKmlString(content, existingNodes)
+                        // Essai KML puis GeoJSON
+                        val kmlRes = parseKmlString(text, existingNodes)
+                        if (kmlRes.nodes.isNotEmpty() || kmlRes.links.isNotEmpty() || kmlRes.tracks.isNotEmpty()) {
+                            kmlRes
+                        } else {
+                            parseGeoJsonString(text, existingNodes)
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'import : ${e.localizedMessage}")
-        } finally {
-            try { inputStream.close() } catch (_: Exception) {}
+            ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'import : ${e.localizedMessage ?: e.javaClass.simpleName}")
         }
     }
 
     private fun getFileName(context: Context, uri: Uri): String {
-        var result = "import.geojson"
+        var result = "import_file"
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
                 val idx = it.getColumnIndex("_display_name")
                 if (idx != -1) {
-                    result = it.getString(idx) ?: result
+                    val name = it.getString(idx)
+                    if (!name.isNullOrBlank()) {
+                        result = name
+                    }
                 }
             }
         }
         return result
     }
 
-    private fun importKmz(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
-        val zipStream = ZipInputStream(inputStream)
-        var entry = zipStream.nextEntry
+    private fun importKmzFromBytes(bytes: ByteArray, existingNodes: List<FtthNodeEntity>): ImportResult {
         val kmlContents = mutableListOf<String>()
-
-        while (entry != null) {
-            val nameLower = entry.name.lowercase(Locale.ROOT)
-            if (nameLower.endsWith(".kml")) {
-                val content = BufferedReader(InputStreamReader(zipStream, StandardCharsets.UTF_8)).use { it.readText() }
-                if (content.isNotBlank()) {
-                    kmlContents.add(content)
+        try {
+            val zipStream = ZipInputStream(ByteArrayInputStream(bytes))
+            var entry = zipStream.nextEntry
+            while (entry != null) {
+                val nameLower = entry.name.lowercase(Locale.ROOT)
+                if (!entry.isDirectory && nameLower.endsWith(".kml")) {
+                    val out = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var readLen: Int
+                    while (zipStream.read(buffer).also { readLen = it } != -1) {
+                        out.write(buffer, 0, readLen)
+                    }
+                    val kmlText = out.toString(StandardCharsets.UTF_8.name())
+                    if (kmlText.isNotBlank()) {
+                        kmlContents.add(kmlText)
+                    }
                 }
+                zipStream.closeEntry()
+                entry = zipStream.nextEntry
             }
-            zipStream.closeEntry()
-            entry = zipStream.nextEntry
+            zipStream.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'extraction de l'archive KMZ : ${e.localizedMessage}")
         }
-        zipStream.close()
 
         if (kmlContents.isNotEmpty()) {
             val allNodes = mutableListOf<FtthNodeEntity>()
@@ -117,111 +155,110 @@ object RealImportService {
         return parseKmlString(content, existingNodes)
     }
 
+    private fun sanitizeXml(rawXml: String): String {
+        var s = rawXml.removePrefix("\uFEFF").trim()
+        // Remplacer les esperluettes '&' non échappées par '&amp;'
+        s = s.replace(Regex("""&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)"""), "&amp;")
+        return s
+    }
+
     private fun parseKmlString(kml: String, existingNodes: List<FtthNodeEntity>): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
 
         try {
+            val sanitized = sanitizeXml(kml)
             val factory = DocumentBuilderFactory.newInstance()
-            factory.isNamespaceAware = true
+            factory.isNamespaceAware = false
+            factory.isValidating = false
+            try { factory.isCoalescing = true } catch (_: Exception) {}
             val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(ByteArrayInputStream(kml.toByteArray(StandardCharsets.UTF_8)))
+            val doc = builder.parse(ByteArrayInputStream(sanitized.toByteArray(StandardCharsets.UTF_8)))
             doc.documentElement.normalize()
 
-            parseKmlElement(doc.documentElement, "", existingNodes, nodes, links, tracks)
+            // Extraire tous les Placemark une seule fois (évite la duplication via sous-dossiers)
+            val placemarks = doc.getElementsByTagName("Placemark")
+            for (i in 0 until placemarks.length) {
+                val pm = placemarks.item(i) as? Element ?: continue
+                val name = getDirectOrFirstChildValue(pm, "name") ?: "Objet-${i + 1}"
+                val desc = getDirectOrFirstChildValue(pm, "description") ?: ""
+                val styleUrl = getDirectOrFirstChildValue(pm, "styleUrl") ?: ""
+                val folderHierarchy = getParentFolderHierarchy(pm)
+                val folderContext = if (folderHierarchy.isNotEmpty()) "$folderHierarchy / $name" else name
 
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
-        }
-
-        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML")
-        return ImportResult(nodes, links, tracks, msg)
-    }
-
-    private fun parseKmlElement(
-        element: Element,
-        parentFolderName: String,
-        existingNodes: List<FtthNodeEntity>,
-        nodes: MutableList<FtthNodeEntity>,
-        links: MutableList<FtthLinkEntity>,
-        tracks: MutableList<StoredTrack>
-    ) {
-        val placemarks = element.getElementsByTagNameNS("*", "Placemark")
-        for (i in 0 until placemarks.length) {
-            val pm = placemarks.item(i) as? Element ?: continue
-            val name = getChildTagValue(pm, "name") ?: "Objet"
-            val desc = getChildTagValue(pm, "description") ?: ""
-            val styleUrl = getChildTagValue(pm, "styleUrl") ?: ""
-            val folderContext = if (parentFolderName.isNotEmpty()) "$parentFolderName / $name" else name
-
-            // Extraire ExtendedData / Data
-            val properties = mutableMapOf<String, String>()
-            val dataNodes = pm.getElementsByTagNameNS("*", "Data")
-            for (j in 0 until dataNodes.length) {
-                val dataEl = dataNodes.item(j) as? Element ?: continue
-                val key = dataEl.getAttribute("name")
-                val value = getChildTagValue(dataEl, "value") ?: ""
-                if (key.isNotEmpty()) properties[key] = value
-            }
-
-            // Vérifier géométries : LineString, Point, Polygon
-            val lineStringEls = pm.getElementsByTagNameNS("*", "LineString")
-            val pointEls = pm.getElementsByTagNameNS("*", "Point")
-            val polygonEls = pm.getElementsByTagNameNS("*", "Polygon")
-
-            if (lineStringEls.length > 0) {
-                val lineEl = lineStringEls.item(0) as? Element
-                val coordsText = lineEl?.let { getChildTagValue(it, "coordinates") } ?: getChildTagValue(pm, "coordinates")
-                if (coordsText != null) {
-                    val pts = parseKmlCoordinates(coordsText)
-                    if (pts.size >= 2) {
-                        processLineString(
-                            name = name,
-                            description = desc,
-                            styleUrl = styleUrl,
-                            folderContext = folderContext,
-                            properties = properties,
-                            pts = pts,
-                            existingNodes = existingNodes,
-                            nodes = nodes,
-                            links = links,
-                            tracks = tracks,
-                            index = tracks.size + links.size
-                        )
-                    }
+                // Extraire ExtendedData : <Data name="..."> et <SimpleData name="..."> (GIS / QGIS)
+                val properties = mutableMapOf<String, String>()
+                val dataNodes = pm.getElementsByTagName("Data")
+                for (j in 0 until dataNodes.length) {
+                    val dataEl = dataNodes.item(j) as? Element ?: continue
+                    val key = dataEl.getAttribute("name")
+                    val value = getDirectOrFirstChildValue(dataEl, "value") ?: ""
+                    if (key.isNotBlank()) properties[key] = value
                 }
-            } else if (polygonEls.length > 0) {
-                val polyEl = polygonEls.item(0) as? Element
-                val coordsText = polyEl?.let { getChildTagValue(it, "coordinates") } ?: getChildTagValue(pm, "coordinates")
-                if (coordsText != null) {
-                    val pts = parseKmlCoordinates(coordsText)
-                    if (pts.isNotEmpty()) {
-                        val lat = pts.map { it.latitude }.average()
-                        val lon = pts.map { it.longitude }.average()
-                        val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
-                        nodes.add(
-                            createNodeFromAttributes(
-                                id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
-                                type = nodeType,
-                                name = name,
+                val simpleDataNodes = pm.getElementsByTagName("SimpleData")
+                for (j in 0 until simpleDataNodes.length) {
+                    val sEl = simpleDataNodes.item(j) as? Element ?: continue
+                    val key = sEl.getAttribute("name")
+                    val value = sEl.textContent.trim()
+                    if (key.isNotBlank()) properties[key] = value
+                }
+
+                // Vérifier géométries : LineString, Point, Polygon
+                val lineStringEls = pm.getElementsByTagName("LineString")
+                val pointEls = pm.getElementsByTagName("Point")
+                val polygonEls = pm.getElementsByTagName("Polygon")
+
+                if (lineStringEls.length > 0) {
+                    for (l in 0 until lineStringEls.length) {
+                        val lineEl = lineStringEls.item(l) as? Element ?: continue
+                        val coordsText = getDirectOrFirstChildValue(lineEl, "coordinates") ?: continue
+                        val pts = parseKmlCoordinates(coordsText)
+                        if (pts.size >= 2) {
+                            processLineString(
+                                name = if (lineStringEls.length > 1) "$name ($l)" else name,
                                 description = desc,
-                                lat = lat,
-                                lon = lon,
-                                properties = properties
+                                styleUrl = styleUrl,
+                                folderContext = folderContext,
+                                properties = properties,
+                                pts = pts,
+                                existingNodes = existingNodes,
+                                nodes = nodes,
+                                links = links,
+                                tracks = tracks,
+                                index = tracks.size + links.size
                             )
-                        )
+                        }
                     }
-                }
-            } else if (pointEls.length > 0 || getChildTagValue(pm, "coordinates") != null) {
-                val coordsText = getChildTagValue(pm, "coordinates")
-                if (coordsText != null) {
-                    val parts = coordsText.trim().split(Regex("[,\\s]+"))
-                    if (parts.size >= 2) {
-                        val lon = parts[0].toDoubleOrNull() ?: 0.0
-                        val lat = parts[1].toDoubleOrNull() ?: 0.0
-                        if (lat != 0.0 || lon != 0.0) {
+                } else if (pointEls.length > 0) {
+                    for (p in 0 until pointEls.length) {
+                        val ptEl = pointEls.item(p) as? Element ?: continue
+                        val coordsText = getDirectOrFirstChildValue(ptEl, "coordinates") ?: continue
+                        val pts = parseKmlCoordinates(coordsText)
+                        if (pts.isNotEmpty()) {
+                            val pt = pts.first()
+                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                            nodes.add(
+                                createNodeFromAttributes(
+                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                    type = nodeType,
+                                    name = if (pointEls.length > 1) "$name ($p)" else name,
+                                    description = desc,
+                                    lat = pt.latitude,
+                                    lon = pt.longitude,
+                                    properties = properties
+                                )
+                            )
+                        }
+                    }
+                } else if (polygonEls.length > 0) {
+                    val polyEl = polygonEls.item(0) as? Element
+                    val coordsText = polyEl?.let { getDirectOrFirstChildValue(it, "coordinates") }
+                    if (coordsText != null) {
+                        val pts = parseKmlCoordinates(coordsText)
+                        if (pts.isNotEmpty()) {
+                            val lat = pts.map { it.latitude }.average()
+                            val lon = pts.map { it.longitude }.average()
                             val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
                             nodes.add(
                                 createNodeFromAttributes(
@@ -236,22 +273,82 @@ object RealImportService {
                             )
                         }
                     }
+                } else {
+                    // Fallback coordonnées directes sous Placemark
+                    val coordsText = getDirectOrFirstChildValue(pm, "coordinates")
+                    if (coordsText != null) {
+                        val pts = parseKmlCoordinates(coordsText)
+                        if (pts.size >= 2) {
+                            processLineString(
+                                name = name,
+                                description = desc,
+                                styleUrl = styleUrl,
+                                folderContext = folderContext,
+                                properties = properties,
+                                pts = pts,
+                                existingNodes = existingNodes,
+                                nodes = nodes,
+                                links = links,
+                                tracks = tracks,
+                                index = tracks.size + links.size
+                            )
+                        } else if (pts.isNotEmpty()) {
+                            val pt = pts.first()
+                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                            nodes.add(
+                                createNodeFromAttributes(
+                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                    type = nodeType,
+                                    name = name,
+                                    description = desc,
+                                    lat = pt.latitude,
+                                    lon = pt.longitude,
+                                    properties = properties
+                                )
+                            )
+                        }
+                    }
                 }
             }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
         }
 
-        // Parcourir récursivement les sous-dossiers
-        val subFolders = element.getElementsByTagNameNS("*", "Folder")
-        for (k in 0 until subFolders.length) {
-            val subFolder = subFolders.item(k) as? Element ?: continue
-            val folderName = getChildTagValue(subFolder, "name") ?: ""
-            val nextParent = if (parentFolderName.isNotEmpty() && folderName.isNotEmpty()) "$parentFolderName / $folderName" else (folderName.ifEmpty { parentFolderName })
-            parseKmlElement(subFolder, nextParent, existingNodes, nodes, links, tracks)
-        }
+        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML")
+        return ImportResult(nodes, links, tracks, msg)
     }
 
-    private fun getChildTagValue(parent: Element, tagName: String): String? {
-        val list = parent.getElementsByTagNameNS("*", tagName)
+    private fun getParentFolderHierarchy(element: Element): String {
+        val folders = mutableListOf<String>()
+        var parent = element.parentNode
+        while (parent != null) {
+            if (parent is Element) {
+                val tag = parent.tagName
+                if (tag.equals("Folder", ignoreCase = true) || tag.equals("Document", ignoreCase = true)) {
+                    val name = getDirectOrFirstChildValue(parent, "name")
+                    if (!name.isNullOrBlank() && !name.equals("Document", ignoreCase = true)) {
+                        folders.add(0, name)
+                    }
+                }
+            }
+            parent = parent.parentNode
+        }
+        return folders.joinToString(" / ")
+    }
+
+    private fun getDirectOrFirstChildValue(parent: Element, tagName: String): String? {
+        // Chercher en priorité un enfant direct
+        var child = parent.firstChild
+        while (child != null) {
+            if (child is Element && child.tagName.equals(tagName, ignoreCase = true)) {
+                return child.textContent?.trim()
+            }
+            child = child.nextSibling
+        }
+        // Sinon recherche standard
+        val list = parent.getElementsByTagName(tagName)
         if (list.length > 0) {
             val el = list.item(0) as? Element
             return el?.textContent?.trim()
@@ -261,14 +358,17 @@ object RealImportService {
 
     private fun parseKmlCoordinates(coordsText: String): List<TrackPoint> {
         val points = mutableListOf<TrackPoint>()
-        val tokens = coordsText.trim().split(Regex("\\s+"))
+        // Séparer les tuples de coordonnées par les espaces blancs (espaces, retours chariot, tabulations)
+        val tokens = coordsText.trim().split(Regex("""[\s\r\n]+"""))
         for (token in tokens) {
             val parts = token.split(",")
             if (parts.size >= 2) {
-                val lon = parts[0].toDoubleOrNull() ?: continue
-                val lat = parts[1].toDoubleOrNull() ?: continue
-                val alt = if (parts.size >= 3) parts[2].toDoubleOrNull() ?: 0.0 else 0.0
-                points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                val lon = parts[0].trim().toDoubleOrNull() ?: continue
+                val lat = parts[1].trim().toDoubleOrNull() ?: continue
+                val alt = if (parts.size >= 3) parts[2].trim().toDoubleOrNull() ?: 0.0 else 0.0
+                if (lat in -90.0..90.0 && lon in -180.0..180.0 && (lat != 0.0 || lon != 0.0)) {
+                    points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                }
             }
         }
         return points
