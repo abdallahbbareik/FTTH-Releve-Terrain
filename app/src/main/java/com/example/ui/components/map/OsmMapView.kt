@@ -334,10 +334,33 @@ fun OsmMapView(
         val nodesMap = nodes.associateBy { it.id }
 
         // Liaisons Câbles
+        val tracksMap = allTracks.associateBy { it.id }
         for (link in links) {
             val from = nodesMap[link.fromNodeId]
             val to = nodesMap[link.toNodeId]
-            if (from != null && to != null) {
+            val assocTrack = if (link.associatedTrackId.isNotBlank()) tracksMap[link.associatedTrackId] else null
+            val trackPts = assocTrack?.points?.ifEmpty { assocTrack.rawPoints }
+
+            if (trackPts != null && trackPts.size >= 2) {
+                val polyline = Polyline(mapView).apply {
+                    for (pt in trackPts) {
+                        addPoint(GeoPoint(pt.latitude, pt.longitude))
+                    }
+                    outlinePaint.strokeWidth = 7f
+                    outlinePaint.isAntiAlias = true
+                    outlinePaint.color = when (link.installationType.lowercase(Locale.ROOT)) {
+                        "aérien" -> android.graphics.Color.parseColor("#EA580C")
+                        "façade" -> android.graphics.Color.parseColor("#0284C7")
+                        else -> android.graphics.Color.parseColor("#16A34A")
+                    }
+                    title = "Câble ${link.capacityFO} FO (${link.cableType} - ${link.installationType})"
+                    setOnClickListener { _, _, _ ->
+                        onLinkClick?.invoke(link)
+                        true
+                    }
+                }
+                mapView.overlays.add(polyline)
+            } else if (from != null && to != null) {
                 val polyline = Polyline(mapView).apply {
                     addPoint(GeoPoint(from.latitude, from.longitude))
                     addPoint(GeoPoint(to.latitude, to.longitude))
@@ -358,7 +381,7 @@ fun OsmMapView(
             }
         }
 
-        // Tracés GPS enregistrés
+        // Tracés GPS / Infras linéaires
         for (track in allTracks) {
             val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
             if (pts.size >= 2) {
@@ -368,15 +391,18 @@ fun OsmMapView(
                     }
                     outlinePaint.strokeWidth = 8f
                     outlinePaint.isAntiAlias = true
+                    val isCableTrack = track.name.contains("FO", ignoreCase = true) || track.notes.contains("FO", ignoreCase = true)
                     outlinePaint.color = when {
                         track.etat == "Non conforme" -> android.graphics.Color.parseColor("#DC2626")
-                        track.type == "GC" -> android.graphics.Color.parseColor("#EA580C")
-                        track.type == "Aérien" -> android.graphics.Color.parseColor("#0284C7")
+                        isCableTrack -> android.graphics.Color.parseColor("#9333EA") // Violet pour Câble FO
+                        track.type == "GC" -> android.graphics.Color.parseColor("#EA580C") // Orange pour GC
+                        track.type == "Aérien" -> android.graphics.Color.parseColor("#0284C7") // Bleu pour Aérien
                         track.type == "Façade" -> android.graphics.Color.parseColor("#8B5CF6")
                         track.isSimplified -> android.graphics.Color.parseColor("#059669")
                         else -> android.graphics.Color.parseColor("#7C3AED")
                     }
-                    title = "${track.name} [${track.type}] (${String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)})"
+                    val lengthLabel = if (track.totalDistanceMeters < 1000.0) "${track.totalDistanceMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)
+                    title = "${track.name} [${track.type}] ($lengthLabel)"
                     val isCurrentAdjusted = isAdjustTrackMode && selectedAdjustTrack?.id == track.id
                     if (isCurrentAdjusted) {
                         outlinePaint.strokeWidth = 10f

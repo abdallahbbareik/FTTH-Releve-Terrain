@@ -1916,16 +1916,23 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun importGeoJsonOrKmz(context: Context, uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             _bannerMessage.value = "Importation des données géospatiales en cours..."
-            val result = com.example.data.import.RealImportService.importFromFile(context, uri)
+            val result = com.example.data.import.RealImportService.importFromFile(context, uri, existingNodes = _rawNodes.value)
             val hasNodes = result.nodes.isNotEmpty()
+            val hasLinks = result.links.isNotEmpty()
             val hasTracks = result.tracks.isNotEmpty()
 
-            if (hasNodes || hasTracks) {
+            if (hasNodes || hasLinks || hasTracks) {
                 if (hasNodes) {
                     val currentNodes = _rawNodes.value.toMutableList()
                     currentNodes.addAll(result.nodes)
                     _rawNodes.value = currentNodes
                     docStorage.saveNodes(currentNodes)
+                }
+                if (hasLinks) {
+                    val currentLinks = _rawLinks.value.toMutableList()
+                    currentLinks.addAll(result.links)
+                    _rawLinks.value = currentLinks
+                    docStorage.saveLinks(currentLinks)
                 }
                 if (hasTracks) {
                     val currentTracks = _allTracks.value.toMutableList()

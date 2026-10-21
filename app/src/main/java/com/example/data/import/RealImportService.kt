@@ -14,8 +14,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.w3c.dom.Element
 import java.io.BufferedReader
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
+import java.util.Locale
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -28,24 +31,27 @@ object RealImportService {
         val message: String
     )
 
-    fun importFromFile(context: Context, uri: Uri): ImportResult {
-        val fileName = getFileName(context, uri).lowercase()
+    fun importFromFile(
+        context: Context,
+        uri: Uri,
+        existingNodes: List<FtthNodeEntity> = emptyList()
+    ): ImportResult {
+        val fileName = getFileName(context, uri).lowercase(Locale.ROOT)
         val inputStream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Impossible d'ouvrir le fichier sélectionné.")
 
         return try {
-            if (fileName.endsWith(".kmz")) {
-                importKmz(inputStream)
-            } else if (fileName.endsWith(".kml")) {
-                importKml(inputStream)
-            } else if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) {
-                importGeoJson(inputStream)
-            } else {
-                val content = inputStream.bufferedReader().use { it.readText() }
-                if (content.trim().startsWith("{")) {
-                    parseGeoJsonString(content)
-                } else {
-                    parseKmlString(content)
+            when {
+                fileName.endsWith(".kmz") -> importKmz(inputStream, existingNodes)
+                fileName.endsWith(".kml") -> importKml(inputStream, existingNodes)
+                fileName.endsWith(".geojson") || fileName.endsWith(".json") -> importGeoJson(inputStream, existingNodes)
+                else -> {
+                    val content = inputStream.bufferedReader().use { it.readText() }
+                    if (content.trim().startsWith("{")) {
+                        parseGeoJsonString(content, existingNodes)
+                    } else {
+                        parseKmlString(content, existingNodes)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -70,122 +76,187 @@ object RealImportService {
         return result
     }
 
-    private fun importKmz(inputStream: InputStream): ImportResult {
+    private fun importKmz(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
         val zipStream = ZipInputStream(inputStream)
         var entry = zipStream.nextEntry
-        var kmlContent: String? = null
+        val kmlContents = mutableListOf<String>()
+
         while (entry != null) {
-            if (entry.name.lowercase().endsWith(".kml")) {
-                kmlContent = BufferedReader(InputStreamReader(zipStream)).use { it.readText() }
-                break
+            val nameLower = entry.name.lowercase(Locale.ROOT)
+            if (nameLower.endsWith(".kml")) {
+                val content = BufferedReader(InputStreamReader(zipStream, StandardCharsets.UTF_8)).use { it.readText() }
+                if (content.isNotBlank()) {
+                    kmlContents.add(content)
+                }
             }
             zipStream.closeEntry()
             entry = zipStream.nextEntry
         }
         zipStream.close()
 
-        if (kmlContent != null) {
-            return parseKmlString(kmlContent)
+        if (kmlContents.isNotEmpty()) {
+            val allNodes = mutableListOf<FtthNodeEntity>()
+            val allLinks = mutableListOf<FtthLinkEntity>()
+            val allTracks = mutableListOf<StoredTrack>()
+
+            for (kml in kmlContents) {
+                val combinedExisting = existingNodes + allNodes
+                val res = parseKmlString(kml, combinedExisting)
+                allNodes.addAll(res.nodes)
+                allLinks.addAll(res.links)
+                allTracks.addAll(res.tracks)
+            }
+            val msg = buildSummaryMessage(allNodes.size, allLinks.size, allTracks.size, "KMZ")
+            return ImportResult(allNodes, allLinks, allTracks, msg)
         }
-        return ImportResult(emptyList(), emptyList(), emptyList(), "Aucun fichier KML trouvé dans l'archive KMZ.")
+        return ImportResult(emptyList(), emptyList(), emptyList(), "Aucun fichier KML valide trouvé dans l'archive KMZ.")
     }
 
-    private fun importKml(inputStream: InputStream): ImportResult {
+    private fun importKml(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
         val content = inputStream.bufferedReader().use { it.readText() }
-        return parseKmlString(content)
+        return parseKmlString(content, existingNodes)
     }
 
-    private fun parseKmlString(kml: String): ImportResult {
+    private fun parseKmlString(kml: String, existingNodes: List<FtthNodeEntity>): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
+        val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
+
         try {
             val factory = DocumentBuilderFactory.newInstance()
+            factory.isNamespaceAware = true
             val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(java.io.ByteArrayInputStream(kml.toByteArray(Charsets.UTF_8)))
+            val doc = builder.parse(ByteArrayInputStream(kml.toByteArray(StandardCharsets.UTF_8)))
             doc.documentElement.normalize()
 
-            val placemarks = doc.getElementsByTagName("Placemark")
-            for (i in 0 until placemarks.length) {
-                val placemark = placemarks.item(i) as? Element ?: continue
-                val name = getElementValue(placemark, "name") ?: "Objet-${i + 1}"
-                val description = getElementValue(placemark, "description") ?: ""
-                
-                // Propriétés ExtendedData
-                val properties = mutableMapOf<String, String>()
-                val dataElements = placemark.getElementsByTagName("Data")
-                for (j in 0 until dataElements.length) {
-                    val dataEl = dataElements.item(j) as? Element ?: continue
-                    val key = dataEl.getAttribute("name")
-                    val value = getElementValue(dataEl, "value") ?: ""
-                    if (key.isNotEmpty()) {
-                        properties[key] = value
-                    }
-                }
+            parseKmlElement(doc.documentElement, "", existingNodes, nodes, links, tracks)
 
-                val lineStringEl = placemark.getElementsByTagName("LineString")
-                val pointEl = placemark.getElementsByTagName("Point")
-
-                if (lineStringEl.length > 0) {
-                    val lineEl = lineStringEl.item(0) as? Element
-                    val coordsText = lineEl?.let { getElementValue(it, "coordinates") } ?: getElementValue(placemark, "coordinates")
-                    if (coordsText != null) {
-                        val points = parseKmlCoordinates(coordsText)
-                        if (points.size >= 2) {
-                            val trackType = determineTrackType(name, description, properties)
-                            val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
-                            tracks.add(
-                                StoredTrack(
-                                    id = "IMP-KML-TRK-${System.currentTimeMillis()}-$i",
-                                    name = name,
-                                    type = trackType,
-                                    etat = "Conforme",
-                                    notes = description,
-                                    startTime = System.currentTimeMillis(),
-                                    endTime = System.currentTimeMillis(),
-                                    totalDistanceMeters = totalDist,
-                                    rawPoints = points,
-                                    points = points
-                                )
-                            )
-                        }
-                    }
-                } else if (pointEl.length > 0 || getElementValue(placemark, "coordinates") != null) {
-                    val coordsText = getElementValue(placemark, "coordinates")
-                    if (coordsText != null) {
-                        val parts = coordsText.trim().split(Regex("[,\\s]+"))
-                        if (parts.size >= 2) {
-                            val lon = parts[0].toDoubleOrNull() ?: 0.0
-                            val lat = parts[1].toDoubleOrNull() ?: 0.0
-                            if (lat != 0.0 || lon != 0.0) {
-                                val nodeType = determineNodeType(name, description, properties)
-                                nodes.add(createNodeFromAttributes(
-                                    id = "IMP-KML-NOD-${System.currentTimeMillis()}-$i",
-                                    type = nodeType,
-                                    name = name,
-                                    description = description,
-                                    lat = lat,
-                                    lon = lon,
-                                    properties = properties
-                                ))
-                            }
-                        }
-                    }
-                }
-            }
         } catch (e: Exception) {
             e.printStackTrace()
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
         }
-        val msg = buildString {
-            if (nodes.isNotEmpty()) append("${nodes.size} nœuds ")
-            if (tracks.isNotEmpty()) {
-                if (isNotEmpty()) append("et ")
-                append("${tracks.size} linéaires/trajets ")
+
+        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML")
+        return ImportResult(nodes, links, tracks, msg)
+    }
+
+    private fun parseKmlElement(
+        element: Element,
+        parentFolderName: String,
+        existingNodes: List<FtthNodeEntity>,
+        nodes: MutableList<FtthNodeEntity>,
+        links: MutableList<FtthLinkEntity>,
+        tracks: MutableList<StoredTrack>
+    ) {
+        val placemarks = element.getElementsByTagNameNS("*", "Placemark")
+        for (i in 0 until placemarks.length) {
+            val pm = placemarks.item(i) as? Element ?: continue
+            val name = getChildTagValue(pm, "name") ?: "Objet"
+            val desc = getChildTagValue(pm, "description") ?: ""
+            val styleUrl = getChildTagValue(pm, "styleUrl") ?: ""
+            val folderContext = if (parentFolderName.isNotEmpty()) "$parentFolderName / $name" else name
+
+            // Extraire ExtendedData / Data
+            val properties = mutableMapOf<String, String>()
+            val dataNodes = pm.getElementsByTagNameNS("*", "Data")
+            for (j in 0 until dataNodes.length) {
+                val dataEl = dataNodes.item(j) as? Element ?: continue
+                val key = dataEl.getAttribute("name")
+                val value = getChildTagValue(dataEl, "value") ?: ""
+                if (key.isNotEmpty()) properties[key] = value
             }
-            append("importés avec succès (KML).")
-            if (isEmpty()) append("Aucun objet valide trouvé.")
+
+            // Vérifier géométries : LineString, Point, Polygon
+            val lineStringEls = pm.getElementsByTagNameNS("*", "LineString")
+            val pointEls = pm.getElementsByTagNameNS("*", "Point")
+            val polygonEls = pm.getElementsByTagNameNS("*", "Polygon")
+
+            if (lineStringEls.length > 0) {
+                val lineEl = lineStringEls.item(0) as? Element
+                val coordsText = lineEl?.let { getChildTagValue(it, "coordinates") } ?: getChildTagValue(pm, "coordinates")
+                if (coordsText != null) {
+                    val pts = parseKmlCoordinates(coordsText)
+                    if (pts.size >= 2) {
+                        processLineString(
+                            name = name,
+                            description = desc,
+                            styleUrl = styleUrl,
+                            folderContext = folderContext,
+                            properties = properties,
+                            pts = pts,
+                            existingNodes = existingNodes,
+                            nodes = nodes,
+                            links = links,
+                            tracks = tracks,
+                            index = tracks.size + links.size
+                        )
+                    }
+                }
+            } else if (polygonEls.length > 0) {
+                val polyEl = polygonEls.item(0) as? Element
+                val coordsText = polyEl?.let { getChildTagValue(it, "coordinates") } ?: getChildTagValue(pm, "coordinates")
+                if (coordsText != null) {
+                    val pts = parseKmlCoordinates(coordsText)
+                    if (pts.isNotEmpty()) {
+                        val lat = pts.map { it.latitude }.average()
+                        val lon = pts.map { it.longitude }.average()
+                        val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                        nodes.add(
+                            createNodeFromAttributes(
+                                id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                type = nodeType,
+                                name = name,
+                                description = desc,
+                                lat = lat,
+                                lon = lon,
+                                properties = properties
+                            )
+                        )
+                    }
+                }
+            } else if (pointEls.length > 0 || getChildTagValue(pm, "coordinates") != null) {
+                val coordsText = getChildTagValue(pm, "coordinates")
+                if (coordsText != null) {
+                    val parts = coordsText.trim().split(Regex("[,\\s]+"))
+                    if (parts.size >= 2) {
+                        val lon = parts[0].toDoubleOrNull() ?: 0.0
+                        val lat = parts[1].toDoubleOrNull() ?: 0.0
+                        if (lat != 0.0 || lon != 0.0) {
+                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                            nodes.add(
+                                createNodeFromAttributes(
+                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                    type = nodeType,
+                                    name = name,
+                                    description = desc,
+                                    lat = lat,
+                                    lon = lon,
+                                    properties = properties
+                                )
+                            )
+                        }
+                    }
+                }
+            }
         }
-        return ImportResult(nodes, emptyList(), tracks, msg)
+
+        // Parcourir récursivement les sous-dossiers
+        val subFolders = element.getElementsByTagNameNS("*", "Folder")
+        for (k in 0 until subFolders.length) {
+            val subFolder = subFolders.item(k) as? Element ?: continue
+            val folderName = getChildTagValue(subFolder, "name") ?: ""
+            val nextParent = if (parentFolderName.isNotEmpty() && folderName.isNotEmpty()) "$parentFolderName / $folderName" else (folderName.ifEmpty { parentFolderName })
+            parseKmlElement(subFolder, nextParent, existingNodes, nodes, links, tracks)
+        }
+    }
+
+    private fun getChildTagValue(parent: Element, tagName: String): String? {
+        val list = parent.getElementsByTagNameNS("*", tagName)
+        if (list.length > 0) {
+            val el = list.item(0) as? Element
+            return el?.textContent?.trim()
+        }
+        return null
     }
 
     private fun parseKmlCoordinates(coordsText: String): List<TrackPoint> {
@@ -203,23 +274,16 @@ object RealImportService {
         return points
     }
 
-    private fun getElementValue(parent: Element, tagName: String): String? {
-        val list = parent.getElementsByTagName(tagName)
-        if (list.length > 0) {
-            val el = list.item(0) as? Element
-            return el?.textContent?.trim()
-        }
-        return null
-    }
-
-    private fun importGeoJson(inputStream: InputStream): ImportResult {
+    private fun importGeoJson(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
         val jsonStr = inputStream.bufferedReader().use { it.readText() }
-        return parseGeoJsonString(jsonStr)
+        return parseGeoJsonString(jsonStr, existingNodes)
     }
 
-    private fun parseGeoJsonString(jsonStr: String): ImportResult {
+    private fun parseGeoJsonString(jsonStr: String, existingNodes: List<FtthNodeEntity>): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
+        val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
+
         try {
             val root = JSONObject(jsonStr)
             val features = if (root.has("features")) {
@@ -247,56 +311,29 @@ object RealImportService {
                 val name = propMap["name"] ?: propMap["nom"] ?: propMap["ID"] ?: "Objet-${i + 1}"
                 val description = propMap["description"] ?: propMap["desc"] ?: ""
 
-                if (geomType.equals("Point", ignoreCase = true) && coords.length() >= 2) {
-                    val lon = coords.getDouble(0)
-                    val lat = coords.getDouble(1)
-                    if (lat != 0.0 || lon != 0.0) {
-                        val nodeType = determineNodeType(name, description, propMap)
-                        nodes.add(createNodeFromAttributes(
-                            id = "IMP-GEO-NOD-${System.currentTimeMillis()}-$i",
-                            type = nodeType,
-                            name = name,
-                            description = description,
-                            lat = lat,
-                            lon = lon,
-                            properties = propMap
-                        ))
-                    }
-                } else if (geomType.equals("LineString", ignoreCase = true) && coords.length() > 0) {
-                    val points = mutableListOf<TrackPoint>()
-                    for (j in 0 until coords.length()) {
-                        val ptArr = coords.getJSONArray(j)
-                        if (ptArr.length() >= 2) {
-                            val lon = ptArr.getDouble(0)
-                            val lat = ptArr.getDouble(1)
-                            val alt = if (ptArr.length() >= 3) ptArr.getDouble(2) else 0.0
-                            points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                when {
+                    geomType.equals("Point", ignoreCase = true) && coords.length() >= 2 -> {
+                        val lon = coords.getDouble(0)
+                        val lat = coords.getDouble(1)
+                        if (lat != 0.0 || lon != 0.0) {
+                            val nodeType = determineNodeType(name, description, "", propMap)
+                            nodes.add(
+                                createNodeFromAttributes(
+                                    id = "GEO-NOD-${System.currentTimeMillis()}-$i",
+                                    type = nodeType,
+                                    name = name,
+                                    description = description,
+                                    lat = lat,
+                                    lon = lon,
+                                    properties = propMap
+                                )
+                            )
                         }
                     }
-                    if (points.size >= 2) {
-                        val trackType = determineTrackType(name, description, propMap)
-                        val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
-                        tracks.add(
-                            StoredTrack(
-                                id = "IMP-GEO-TRK-${System.currentTimeMillis()}-$i",
-                                name = name,
-                                type = trackType,
-                                etat = "Conforme",
-                                notes = description,
-                                startTime = System.currentTimeMillis(),
-                                endTime = System.currentTimeMillis(),
-                                totalDistanceMeters = totalDist,
-                                rawPoints = points,
-                                points = points
-                            )
-                        )
-                    }
-                } else if (geomType.equals("MultiLineString", ignoreCase = true) && coords.length() > 0) {
-                    for (m in 0 until coords.length()) {
-                        val lineArr = coords.getJSONArray(m)
+                    geomType.equals("LineString", ignoreCase = true) && coords.length() > 0 -> {
                         val points = mutableListOf<TrackPoint>()
-                        for (j in 0 until lineArr.length()) {
-                            val ptArr = lineArr.getJSONArray(j)
+                        for (j in 0 until coords.length()) {
+                            val ptArr = coords.getJSONArray(j)
                             if (ptArr.length() >= 2) {
                                 val lon = ptArr.getDouble(0)
                                 val lat = ptArr.getDouble(1)
@@ -305,20 +342,73 @@ object RealImportService {
                             }
                         }
                         if (points.size >= 2) {
-                            val trackType = determineTrackType(name, description, propMap)
-                            val totalDist = TrackGeometryHelper.computeTotalDistanceMeters(points)
-                            tracks.add(
-                                StoredTrack(
-                                    id = "IMP-GEO-TRK-${System.currentTimeMillis()}-$i-$m",
+                            processLineString(
+                                name = name,
+                                description = description,
+                                styleUrl = "",
+                                folderContext = name,
+                                properties = propMap,
+                                pts = points,
+                                existingNodes = existingNodes,
+                                nodes = nodes,
+                                links = links,
+                                tracks = tracks,
+                                index = i
+                            )
+                        }
+                    }
+                    geomType.equals("MultiLineString", ignoreCase = true) && coords.length() > 0 -> {
+                        for (m in 0 until coords.length()) {
+                            val lineArr = coords.getJSONArray(m)
+                            val points = mutableListOf<TrackPoint>()
+                            for (j in 0 until lineArr.length()) {
+                                val ptArr = lineArr.getJSONArray(j)
+                                if (ptArr.length() >= 2) {
+                                    val lon = ptArr.getDouble(0)
+                                    val lat = ptArr.getDouble(1)
+                                    val alt = if (ptArr.length() >= 3) ptArr.getDouble(2) else 0.0
+                                    points.add(TrackPoint(latitude = lat, longitude = lon, altitude = alt))
+                                }
+                            }
+                            if (points.size >= 2) {
+                                processLineString(
                                     name = "$name (${m + 1})",
-                                    type = trackType,
-                                    etat = "Conforme",
-                                    notes = description,
-                                    startTime = System.currentTimeMillis(),
-                                    endTime = System.currentTimeMillis(),
-                                    totalDistanceMeters = totalDist,
-                                    rawPoints = points,
-                                    points = points
+                                    description = description,
+                                    styleUrl = "",
+                                    folderContext = name,
+                                    properties = propMap,
+                                    pts = points,
+                                    existingNodes = existingNodes,
+                                    nodes = nodes,
+                                    links = links,
+                                    tracks = tracks,
+                                    index = i * 100 + m
+                                )
+                            }
+                        }
+                    }
+                    geomType.equals("Polygon", ignoreCase = true) && coords.length() > 0 -> {
+                        val ring = coords.getJSONArray(0)
+                        val points = mutableListOf<TrackPoint>()
+                        for (j in 0 until ring.length()) {
+                            val ptArr = ring.getJSONArray(j)
+                            if (ptArr.length() >= 2) {
+                                points.add(TrackPoint(latitude = ptArr.getDouble(1), longitude = ptArr.getDouble(0)))
+                            }
+                        }
+                        if (points.isNotEmpty()) {
+                            val lat = points.map { it.latitude }.average()
+                            val lon = points.map { it.longitude }.average()
+                            val nodeType = determineNodeType(name, description, "", propMap)
+                            nodes.add(
+                                createNodeFromAttributes(
+                                    id = "GEO-NOD-${System.currentTimeMillis()}-$i",
+                                    type = nodeType,
+                                    name = name,
+                                    description = description,
+                                    lat = lat,
+                                    lon = lon,
+                                    properties = propMap
                                 )
                             )
                         }
@@ -329,62 +419,331 @@ object RealImportService {
             e.printStackTrace()
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse GeoJSON : ${e.localizedMessage}")
         }
-        val msg = buildString {
-            if (nodes.isNotEmpty()) append("${nodes.size} nœuds ")
-            if (tracks.isNotEmpty()) {
-                if (isNotEmpty()) append("et ")
-                append("${tracks.size} linéaires/trajets ")
-            }
-            append("importés avec succès (GeoJSON).")
-            if (isEmpty()) append("Aucun objet valide trouvé.")
-        }
-        return ImportResult(nodes, emptyList(), tracks, msg)
+
+        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "GeoJSON")
+        return ImportResult(nodes, links, tracks, msg)
     }
 
-    private fun determineTrackType(name: String, description: String, properties: Map<String, String>): String {
-        val tKeys = listOf("track_type", "type", "category", "nature", "installation", "mode")
-        for (k in tKeys) {
-            val v = properties[k]?.lowercase() ?: continue
-            if (v.contains("aerien") || v.contains("aérien") || v.contains("aerial")) return "Aérien"
-            if (v.contains("facade") || v.contains("façade")) return "Façade"
-            if (v.contains("gc") || v.contains("souterrain") || v.contains("underground")) return "GC"
+    /**
+     * Traitement intelligent des polylignes / LineString :
+     * Détermine s'il s'agit d'un CÂBLE OPTIQUE avec sa capacité en FO ou d'une INFRASTRUCTURE GC.
+     */
+    private fun processLineString(
+        name: String,
+        description: String,
+        styleUrl: String,
+        folderContext: String,
+        properties: Map<String, String>,
+        pts: List<TrackPoint>,
+        existingNodes: List<FtthNodeEntity>,
+        nodes: MutableList<FtthNodeEntity>,
+        links: MutableList<FtthLinkEntity>,
+        tracks: MutableList<StoredTrack>,
+        index: Int
+    ) {
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+        val lineInfo = classifyLineString(name, description, styleUrl, folderContext, properties)
+
+        if (lineInfo.isCable) {
+            // C'est un CÂBLE OPTIQUE avec capacité en FO
+            val trackId = "TRK-CBL-${System.currentTimeMillis()}-$index"
+            val cableId = "CBL-${System.currentTimeMillis() % 100000}-$index"
+
+            // Trouver ou générer les extrémités (fromNodeId et toNodeId)
+            val allNodesPool = existingNodes + nodes
+            val startPt = pts.first()
+            val endPt = pts.last()
+
+            var fromNode = findClosestNode(startPt.latitude, startPt.longitude, allNodesPool, maxDistanceMeters = 75.0)
+            var toNode = findClosestNode(endPt.latitude, endPt.longitude, allNodesPool, maxDistanceMeters = 75.0)
+
+            // Si aucune extrémité trouvée, générer des nœuds de raccordement automatiques
+            if (fromNode == null) {
+                val startNodeType = when (lineInfo.installationType.lowercase(Locale.ROOT)) {
+                    "aérien" -> FtthNodeType.POTEAU
+                    "façade" -> FtthNodeType.BOITIER
+                    else -> FtthNodeType.CHAMBRE
+                }
+                fromNode = FtthNodeEntity(
+                    id = "EXT-A-${System.currentTimeMillis() % 10000}-$index",
+                    type = startNodeType,
+                    name = "Extrémité $name",
+                    latitude = startPt.latitude,
+                    longitude = startPt.longitude,
+                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO"
+                )
+                nodes.add(fromNode)
+            }
+
+            if (toNode == null || toNode.id == fromNode.id) {
+                val endNodeType = when (lineInfo.installationType.lowercase(Locale.ROOT)) {
+                    "aérien" -> FtthNodeType.POTEAU
+                    "façade" -> FtthNodeType.BOITIER
+                    else -> FtthNodeType.CHAMBRE
+                }
+                toNode = FtthNodeEntity(
+                    id = "EXT-B-${System.currentTimeMillis() % 10000}-$index",
+                    type = endNodeType,
+                    name = "Extrémité $name (B)",
+                    latitude = endPt.latitude,
+                    longitude = endPt.longitude,
+                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO"
+                )
+                nodes.add(toNode)
+            }
+
+            // Créer la liaison Câble (FtthLinkEntity)
+            val link = FtthLinkEntity(
+                id = cableId,
+                fromNodeId = fromNode.id,
+                toNodeId = toNode.id,
+                cableType = lineInfo.cableType,
+                installationType = lineInfo.installationType,
+                capacityFO = lineInfo.capacityFO,
+                lengthMeters = dist,
+                associatedTrackId = trackId
+            )
+            links.add(link)
+
+            // Créer également le tracé physique (StoredTrack) pour que la ligne exacte s'affiche sur la carte
+            val cableTrackName = if (name.contains("FO", ignoreCase = true)) name else "$name (${lineInfo.capacityFO} FO)"
+            tracks.add(
+                StoredTrack(
+                    id = trackId,
+                    name = cableTrackName,
+                    type = if (lineInfo.installationType == "Souterrain") "GC" else lineInfo.installationType,
+                    etat = "Conforme",
+                    notes = "Câble ${lineInfo.capacityFO} FO [${lineInfo.cableType} - ${lineInfo.installationType}]",
+                    totalDistanceMeters = dist,
+                    rawPoints = pts,
+                    points = pts
+                )
+            )
+
+        } else {
+            // C'est une INFRASTRUCTURE GÉNIE CIVIL (GC / Conduite / Tranchée)
+            val trackId = "TRK-GC-${System.currentTimeMillis()}-$index"
+            tracks.add(
+                StoredTrack(
+                    id = trackId,
+                    name = name,
+                    type = lineInfo.infrastructureType,
+                    etat = "Conforme",
+                    conduitType = lineInfo.conduitType,
+                    conduitCount = lineInfo.conduitCount,
+                    conduitDiameters = listOf("Ø 40"),
+                    conduitAudit = "Libres",
+                    notes = description.ifBlank { "Infrastructure ${lineInfo.infrastructureType}" },
+                    totalDistanceMeters = dist,
+                    rawPoints = pts,
+                    points = pts
+                )
+            )
         }
-        val combined = "$name $description".lowercase()
-        return when {
+    }
+
+    private fun findClosestNode(
+        lat: Double,
+        lon: Double,
+        candidates: List<FtthNodeEntity>,
+        maxDistanceMeters: Double
+    ): FtthNodeEntity? {
+        var closest: FtthNodeEntity? = null
+        var minDistance = maxDistanceMeters
+
+        for (node in candidates) {
+            val d = TrackGeometryHelper.calculateDistanceMeters(lat, lon, node.latitude, node.longitude)
+            if (d < minDistance) {
+                minDistance = d
+                closest = node
+            }
+        }
+        return closest
+    }
+
+    private data class LineClassification(
+        val isCable: Boolean,
+        val capacityFO: Int,
+        val cableType: String,
+        val installationType: String,
+        val infrastructureType: String,
+        val conduitType: String = "PEHD",
+        val conduitCount: Int = 1
+    )
+
+    /**
+     * Analyse intelligente pour classifier un LineString : Câble (avec capacité FO) ou Génie Civil (GC).
+     */
+    private fun classifyLineString(
+        name: String,
+        description: String,
+        styleUrl: String,
+        folderContext: String,
+        properties: Map<String, String>
+    ): LineClassification {
+        val combined = "$name $description $styleUrl $folderContext ${properties.values.joinToString(" ")}".lowercase(Locale.ROOT)
+
+        // 1. Extraire la capacité en FO
+        val detectedFO = extractCapacityFO(combined, properties)
+
+        // 2. Détecter si c'est explicitement un câble ou une infra
+        val isCableKeyword = combined.contains("cable") || combined.contains("câble") ||
+                combined.contains("cbl") || combined.contains("fibre") || combined.contains("fiber") ||
+                combined.contains("optique") || combined.contains("transport") ||
+                combined.contains("distrib") || combined.contains("distribution") ||
+                combined.contains("raccord") || combined.contains("branchement") ||
+                combined.contains("tirage") || detectedFO != null
+
+        val isGcKeyword = combined.contains("gc") || combined.contains("tranchee") ||
+                combined.contains("tranchée") || combined.contains("fourreau") ||
+                combined.contains("conduite") || combined.contains("pehd") ||
+                combined.contains("pvc") || combined.contains("alveole") ||
+                combined.contains("alvéole") || combined.contains("masque") ||
+                combined.contains("infrastructure") || combined.contains("genie civil") ||
+                combined.contains("génie civil")
+
+        // Priorité : si une capacité en FO est détectée ou mot-clé câble prédominant
+        val isCable = (detectedFO != null || isCableKeyword) && !(isGcKeyword && detectedFO == null && !isCableKeyword)
+
+        val capacityFO = detectedFO ?: if (isCable) {
+            when {
+                combined.contains("transport") -> 144
+                combined.contains("raccord") -> 4
+                combined.contains("72") -> 72
+                combined.contains("48") -> 48
+                combined.contains("24") -> 24
+                combined.contains("12") -> 12
+                else -> 24
+            }
+        } else 0
+
+        // Type de câble : Transport, Distribution, Raccordement
+        val cableType = when {
+            combined.contains("transport") || combined.contains("trsp") || combined.contains("nro") || capacityFO >= 144 -> "Transport"
+            combined.contains("raccord") || combined.contains("branchement") || combined.contains("client") || combined.contains("drop") || capacityFO <= 12 -> "Raccordement"
+            else -> "Distribution"
+        }
+
+        // Type de pose / installation : Souterrain, Aérien, Façade
+        val installationType = when {
+            combined.contains("aerien") || combined.contains("aérien") || combined.contains("pole") || combined.contains("poteau") || combined.contains("appui") -> "Aérien"
+            combined.contains("facade") || combined.contains("façade") || combined.contains("mural") -> "Façade"
+            else -> "Souterrain"
+        }
+
+        val infraType = when {
             combined.contains("aerien") || combined.contains("aérien") -> "Aérien"
             combined.contains("facade") || combined.contains("façade") -> "Façade"
             else -> "GC"
         }
+
+        val conduitType = if (combined.contains("pvc")) "PVC" else "PEHD"
+        val conduitCount = if (combined.contains("bi-tub") || combined.contains("2x") || combined.contains("2 tub")) 2 else 1
+
+        return LineClassification(
+            isCable = isCable,
+            capacityFO = capacityFO,
+            cableType = cableType,
+            installationType = installationType,
+            infrastructureType = infraType,
+            conduitType = conduitType,
+            conduitCount = conduitCount
+        )
     }
 
-    private fun determineNodeType(name: String, description: String, properties: Map<String, String>): FtthNodeType {
-        val typeKeys = listOf("type", "node_type", "type_noeud", "category", "nature", "kind", "layer", "class", "sym", "equipment", "equipement")
-        for (key in typeKeys) {
-            for ((k, v) in properties) {
-                if (k.equals(key, ignoreCase = true)) {
-                    val evaluated = mapKeywordToNodeType(v)
-                    if (evaluated != null) return evaluated
-                }
+    /**
+     * Extraction avancée de la capacité en FO (xx FO, xx fibres, attributs SIG...)
+     */
+    private fun extractCapacityFO(combined: String, properties: Map<String, String>): Int? {
+        // 1. Chercher dans les attributs de propriétés (capacité, capa_fo, nb_fo, fo, etc.)
+        val propKeys = listOf("capacity", "capacite", "capacite_fo", "capa_fo", "capa", "nb_fo", "nbr_fo", "fo", "f_o", "fibres", "fiber", "fibers", "brins", "taille_fo")
+        for ((k, v) in properties) {
+            val kLower = k.lowercase(Locale.ROOT)
+            if (propKeys.any { kLower.contains(it) }) {
+                val num = Regex("""\d+""").find(v)?.value?.toIntOrNull()
+                if (num != null && isValidFoCapacity(num)) return num
             }
         }
 
-        val combined = "$name $description".lowercase()
-        val keywordMatch = mapKeywordToNodeType(combined)
-        if (keywordMatch != null) return keywordMatch
+        // 2. Chercher avec Regex : ex: 144FO, 144 FO, 72 f.o, 48 fibres, 24fo, 12 fo
+        val matchFo = Regex("""(\d+)\s*(?:fo|f\.o|fibres?|fibers?|brins?)\b""", RegexOption.IGNORE_CASE).find(combined)
+        if (matchFo != null) {
+            val num = matchFo.groupValues[1].toIntOrNull()
+            if (num != null && num > 0) return num
+        }
 
-        return FtthNodeType.BOITIER
+        // 3. Chercher préfixe cable/cbl/fo suivi de nombre : CABLE_144, CBL-72, FO_48
+        val matchPrefix = Regex("""(?:cable|câble|cbl|fo)[_\-\s]+(\d+)\b""", RegexOption.IGNORE_CASE).find(combined)
+        if (matchPrefix != null) {
+            val num = matchPrefix.groupValues[1].toIntOrNull()
+            if (num != null && isValidFoCapacity(num)) return num
+        }
+
+        // 4. Détecter un nombre standard de capacité FO (720, 432, 288, 144, 96, 72, 48, 36, 24, 16, 12, 8, 6, 4, 2)
+        // seulement si le contexte mentionne un câble ou fibre
+        if (combined.contains("cable") || combined.contains("câble") || combined.contains("fibre") || combined.contains("optique")) {
+            val matchStandard = Regex("""\b(864|720|576|432|288|144|96|72|48|36|24|16|12|8|6|4|2)\b""").find(combined)
+            if (matchStandard != null) {
+                val num = matchStandard.groupValues[1].toIntOrNull()
+                if (num != null) return num
+            }
+        }
+
+        return null
     }
 
-    private fun mapKeywordToNodeType(text: String): FtthNodeType? {
-        val t = text.lowercase()
+    private fun isValidFoCapacity(num: Int): Boolean {
+        return num in 1..1500
+    }
+
+    /**
+     * Détermination intelligente du type de nœud FTTH (Poteau, Chambre, Boîtier, SRO, Immeuble, Villa).
+     */
+    private fun determineNodeType(
+        name: String,
+        description: String,
+        styleUrl: String,
+        properties: Map<String, String>
+    ): FtthNodeType {
+        val combined = "$name $description $styleUrl ${properties.values.joinToString(" ")}".lowercase(Locale.ROOT)
+
         return when {
-            t.contains("poteau") || t.contains("pole") || t.contains("appui") || t.contains("support") || t.contains("bois") || t.contains("beton") || t.contains("facade") -> FtthNodeType.POTEAU
-            t.contains("chambre") || t.contains("manhole") || t.contains("ch") || t.contains("regard") -> FtthNodeType.CHAMBRE
-            t.contains("boitier") || t.contains("pbo") || t.contains("bpe") || t.contains("pb") || t.contains("box") || t.contains("splitter") -> FtthNodeType.BOITIER
-            t.contains("sro") || t.contains("nro") || t.contains("armoire") || t.contains("cabinet") -> FtthNodeType.SRO
-            t.contains("immeuble") || t.contains("batiment") || t.contains("building") || t.contains("collectif") || t.contains("residence") -> FtthNodeType.IMMEUBLE
-            t.contains("villa") || t.contains("pavillon") || t.contains("maison") || t.contains("house") -> FtthNodeType.VILLA
-            else -> null
+            // Poteau / Appui aérien
+            combined.contains("poteau") || combined.contains("pole") || combined.contains("appui") ||
+                    combined.contains("support") || combined.contains("bois") || combined.contains("beton") ||
+                    combined.contains("béton") || combined.contains("pt_") || combined.contains("pot_") ||
+                    combined.contains("pt-") || combined.contains("pot-") || Regex("""\b(pt|pot|p)\d+\b""").containsMatchIn(combined) -> FtthNodeType.POTEAU
+
+            // SRO / NRO (Armoire de rue / PM)
+            combined.contains("sro") || combined.contains("nro") || combined.contains("armoire") ||
+                    combined.contains("cabinet") || combined.contains("pm360") || combined.contains("pm144") ||
+                    combined.contains("sous-repartiteur") || combined.contains("sous_repartiteur") ||
+                    Regex("""\bpm\d*\b""").containsMatchIn(combined) -> FtthNodeType.SRO
+
+            // Immeuble / Bâtiment collectif
+            combined.contains("immeuble") || combined.contains("batiment") || combined.contains("bâtiment") ||
+                    combined.contains("building") || combined.contains("collectif") || combined.contains("residence") ||
+                    combined.contains("résidence") || combined.contains("imm_") || combined.contains("imm-") ||
+                    combined.contains("bat_") || combined.contains("bat-") || combined.contains("bloc") -> FtthNodeType.IMMEUBLE
+
+            // Villa / Pavillon
+            combined.contains("villa") || combined.contains("pavillon") || combined.contains("maison") ||
+                    combined.contains("individuel") || combined.contains("hab_") -> FtthNodeType.VILLA
+
+            // Chambre souterraine / Regard
+            combined.contains("chambre") || combined.contains("manhole") || combined.contains("regard") ||
+                    combined.contains("l0t") || combined.contains("l1t") || combined.contains("l2t") ||
+                    combined.contains("l3t") || combined.contains("l4t") || combined.contains("k1c") ||
+                    combined.contains("k2c") || combined.contains("ch_") || combined.contains("ch-") ||
+                    Regex("""\bch\d+\b""").containsMatchIn(combined) -> FtthNodeType.CHAMBRE
+
+            // Boîtier / PBO / BPE
+            combined.contains("boitier") || combined.contains("boîtier") || combined.contains("pbo") ||
+                    combined.contains("bpe") || combined.contains("pb_") || combined.contains("pb-") ||
+                    combined.contains("pri") || combined.contains("splitter") || combined.contains("coupleur") ||
+                    combined.contains("bpo") || combined.contains("bpi") || combined.contains("box") -> FtthNodeType.BOITIER
+
+            else -> FtthNodeType.BOITIER
         }
     }
 
@@ -397,28 +756,20 @@ object RealImportService {
         lon: Double,
         properties: Map<String, String>
     ): FtthNodeEntity {
-        var address = properties["address"] ?: properties["adresse"] ?: description
-        var operator = properties["operator"] ?: properties["operateur"] ?: properties["owner"] ?: "Tunisie Telecom"
-        var notes = properties["notes"] ?: properties["commentaire"] ?: properties["comment"] ?: description
+        val address = properties["address"] ?: properties["adresse"] ?: description
+        val operator = properties["operator"] ?: properties["operateur"] ?: properties["owner"] ?: "Tunisie Telecom"
+        val notes = properties["notes"] ?: properties["commentaire"] ?: description
 
-        val statusStr = (properties["status"] ?: properties["etat_deploiement"] ?: "").lowercase()
+        val statusStr = (properties["status"] ?: properties["etat"] ?: "").lowercase(Locale.ROOT)
         val status = when {
             statusStr.contains("exist") -> NodeStatus.EXISTANT
             statusStr.contains("const") -> NodeStatus.EN_CONSTRUCTION
-            statusStr.contains("poser") || statusStr.contains("new") -> NodeStatus.A_POSER
+            statusStr.contains("poser") -> NodeStatus.A_POSER
             statusStr.contains("remplac") -> NodeStatus.A_REMPLACER
             statusStr.contains("depos") -> NodeStatus.A_DEPOSER
             statusStr.contains("raccord") -> NodeStatus.RACCORDEE
             else -> NodeStatus.EXISTANT
         }
-
-        val poleNature = properties["pole_nature"] ?: properties["nature"] ?: "bois"
-        val poleHeight = properties["pole_height"]?.toIntOrNull() ?: 8
-        val chamberType = properties["chamber_type"] ?: properties["type_chambre"] ?: "L2T"
-        val boitierType = properties["boitier_type"] ?: properties["type_boitier"] ?: "PBO"
-        val sroCapacity = properties["sro_capacity"] ?: properties["capacite"] ?: "360 FO"
-        val buildingFloors = properties["floors"]?.toIntOrNull() ?: properties["etages"]?.toIntOrNull() ?: 4
-        val buildingDwellings = properties["dwellings"]?.toIntOrNull() ?: properties["logements"]?.toIntOrNull() ?: 16
 
         return FtthNodeEntity(
             id = id,
@@ -431,14 +782,23 @@ object RealImportService {
             etat = NodeConformity.CONFORME,
             address = address,
             operator = operator,
-            notes = notes,
-            poleNature = poleNature,
-            poleHeight = poleHeight,
-            chamberType = chamberType,
-            boitierType = boitierType,
-            sroCapacity = sroCapacity,
-            buildingFloors = buildingFloors,
-            buildingDwellings = buildingDwellings
+            notes = notes
         )
+    }
+
+    private fun buildSummaryMessage(nodesCount: Int, linksCount: Int, tracksCount: Int, format: String): String {
+        return buildString {
+            val parts = mutableListOf<String>()
+            if (nodesCount > 0) parts.add("$nodesCount nœuds")
+            if (linksCount > 0) parts.add("$linksCount câbles optiques (avec capacité FO)")
+            if (tracksCount > 0) parts.add("$tracksCount tracés/infrastructures")
+
+            if (parts.isNotEmpty()) {
+                append(parts.joinToString(", "))
+                append(" importés avec succès ($format).")
+            } else {
+                append("Aucun objet géospatial valide trouvé.")
+            }
+        }
     }
 }
