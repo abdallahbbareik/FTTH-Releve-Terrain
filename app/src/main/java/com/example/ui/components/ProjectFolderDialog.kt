@@ -605,21 +605,69 @@ fun ProjectFolderDialog(
 
                 // Mes projets header & button (visible when tab == 0)
                 if (selectedTab == 0) {
-                    Button(
-                        onClick = {
-                            try {
-                                projectImportLauncher.launch(arrayOf("*/*"))
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("folder_import_file_button")
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isDarkTheme) Color(0xFF1E1B4B) else Color(0xFFF5F3FF),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Importer un fichier KMZ ou GeoJSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.FileUpload,
+                                        contentDescription = null,
+                                        tint = Color(0xFF7C3AED),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Import KMZ / KML / GeoJSON",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = if (isDarkTheme) Color.White else Color(0xFF1E1B4B)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF7C3AED).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "Mode Natif",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF7C3AED),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Affichage fidèle des données brutes (tracés, points, polygones) sans classification automatique.",
+                                fontSize = 11.sp,
+                                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    try {
+                                        projectImportLauncher.launch(arrayOf("*/*"))
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("folder_import_file_button")
+                            ) {
+                                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Importer un fichier KMZ ou GeoJSON (Mode Natif)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
 

@@ -389,20 +389,23 @@ fun OsmMapView(
                     for (pt in pts) {
                         addPoint(GeoPoint(pt.latitude, pt.longitude))
                     }
-                    outlinePaint.strokeWidth = 8f
+                    val isNativeTrack = track.type == "Tracé" || track.type == "Natif" || track.type == "Polygone"
+                    val isCableTrack = !isNativeTrack && (track.name.contains("FO", ignoreCase = true) || track.notes.contains("FO", ignoreCase = true))
+                    outlinePaint.strokeWidth = if (isNativeTrack) 7f else 8f
                     outlinePaint.isAntiAlias = true
-                    val isCableTrack = track.name.contains("FO", ignoreCase = true) || track.notes.contains("FO", ignoreCase = true)
                     outlinePaint.color = when {
                         track.etat == "Non conforme" -> android.graphics.Color.parseColor("#DC2626")
+                        track.type == "Polygone" -> android.graphics.Color.parseColor("#D97706") // Ambre pour polygones fermés
+                        isNativeTrack -> android.graphics.Color.parseColor("#2563EB") // Bleu Royal SIG éclatant pour tracés natifs
                         isCableTrack -> android.graphics.Color.parseColor("#9333EA") // Violet pour Câble FO
                         track.type == "GC" -> android.graphics.Color.parseColor("#EA580C") // Orange pour GC
                         track.type == "Aérien" -> android.graphics.Color.parseColor("#0284C7") // Bleu pour Aérien
                         track.type == "Façade" -> android.graphics.Color.parseColor("#8B5CF6")
                         track.isSimplified -> android.graphics.Color.parseColor("#059669")
-                        else -> android.graphics.Color.parseColor("#7C3AED")
+                        else -> android.graphics.Color.parseColor("#2563EB")
                     }
                     val lengthLabel = if (track.totalDistanceMeters < 1000.0) "${track.totalDistanceMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)
-                    title = "${track.name} [${track.type}] ($lengthLabel)"
+                    title = if (isNativeTrack) "${track.name} ($lengthLabel)" else "${track.name} [${track.type}] ($lengthLabel)"
                     val isCurrentAdjusted = isAdjustTrackMode && selectedAdjustTrack?.id == track.id
                     if (isCurrentAdjusted) {
                         outlinePaint.strokeWidth = 10f

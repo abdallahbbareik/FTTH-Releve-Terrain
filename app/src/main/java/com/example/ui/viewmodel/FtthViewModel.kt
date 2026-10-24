@@ -614,6 +614,24 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _mapFocusTarget = MutableStateFlow<Pair<Double, Double>?>(null)
     val mapFocusTarget: StateFlow<Pair<Double, Double>?> = _mapFocusTarget.asStateFlow()
 
+    // Mode d'importation : NATIVE (par défaut, données brutes non classées) ou INTELLIGENT_CLASSIFICATION (enregistré)
+    private val _importMode = MutableStateFlow(com.example.data.import.RealImportService.ImportMode.NATIVE)
+    val importMode: StateFlow<com.example.data.import.RealImportService.ImportMode> = _importMode.asStateFlow()
+
+    fun setImportMode(mode: com.example.data.import.RealImportService.ImportMode) {
+        _importMode.value = mode
+    }
+
+    fun toggleImportMode() {
+        val newMode = if (_importMode.value == com.example.data.import.RealImportService.ImportMode.NATIVE) {
+            com.example.data.import.RealImportService.ImportMode.INTELLIGENT_CLASSIFICATION
+        } else {
+            com.example.data.import.RealImportService.ImportMode.NATIVE
+        }
+        _importMode.value = newMode
+        _bannerMessage.value = "Mode d'import configuré : ${newMode.label}"
+    }
+
     private val _activeMapLayer = MutableStateFlow(MapLayerType.CADASTRE)
     val activeMapLayer: StateFlow<MapLayerType> = _activeMapLayer.asStateFlow()
 
@@ -1913,10 +1931,21 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importGeoJsonOrKmz(context: Context, uri: Uri) {
+    fun importGeoJsonOrKmz(
+        context: Context,
+        uri: Uri,
+        forcedMode: com.example.data.import.RealImportService.ImportMode? = null
+    ) {
+        val modeToUse = forcedMode ?: _importMode.value
         viewModelScope.launch(Dispatchers.IO) {
-            _bannerMessage.value = "Importation des données géospatiales en cours..."
-            val result = com.example.data.import.RealImportService.importFromFile(context, uri, existingNodes = _rawNodes.value)
+            val modeLabel = if (modeToUse == com.example.data.import.RealImportService.ImportMode.NATIVE) "mode natif (non classé)" else "classification FTTH"
+            _bannerMessage.value = "Importation des données en cours ($modeLabel)..."
+            val result = com.example.data.import.RealImportService.importFromFile(
+                context = context,
+                uri = uri,
+                existingNodes = _rawNodes.value,
+                mode = modeToUse
+            )
             val hasNodes = result.nodes.isNotEmpty()
             val hasLinks = result.links.isNotEmpty()
             val hasTracks = result.tracks.isNotEmpty()

@@ -227,9 +227,14 @@ fun CompactPiquetageTopBar(
 
                         HorizontalDivider()
 
-                        // Importation KMZ / GeoJSON
+                        // Importation KMZ / GeoJSON (Mode Natif)
                         DropdownMenuItem(
-                            text = { Text("Importer KMZ ou GeoJSON", fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED)) },
+                            text = {
+                                Column {
+                                    Text("Importer KMZ ou GeoJSON", fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
+                                    Text("Mode Natif (données brutes non classées)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
                             leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null, tint = Color(0xFF7C3AED)) },
                             onClick = {
                                 menuExpanded = false

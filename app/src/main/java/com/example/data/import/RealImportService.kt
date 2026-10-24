@@ -13,16 +13,35 @@ import com.example.data.util.TrackGeometryHelper
 import org.json.JSONArray
 import org.json.JSONObject
 import org.w3c.dom.Element
-import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
+/**
+ * Service d'importation de données géospatiales (KMZ, KML, GeoJSON).
+ *
+ * Prend en charge deux modes :
+ * 1. NATIVE (Par défaut actuel) : Importation et affichage brut des données sans classification automatique.
+ *    Les polylignes restent des tracés natifs fidèles à l'original (Google Earth / SIG), les points restent des
+ *    points natifs préservant tous les attributs, sans créer de faux câbles ni forcer de types FTTH.
+ * 2. INTELLIGENT_CLASSIFICATION (Méthode enregistrée et conservée) : Analyse heuristique déterminant automatiquement
+ *    la distinction entre Génie Civil (GC) et Câbles optiques avec capacité en FO (xx FO).
+ */
 object RealImportService {
+
+    enum class ImportMode(val label: String, val shortDescription: String) {
+        NATIVE(
+            label = "Mode Natif (Données brutes sans classification)",
+            shortDescription = "Affiche fidèlement les tracés et points tels quels sans conversion automatique."
+        ),
+        INTELLIGENT_CLASSIFICATION(
+            label = "Classification FTTH intelligente",
+            shortDescription = "Détecte automatiquement les câbles optiques (capacité FO) et le Génie Civil (GC)."
+        )
+    }
 
     data class ImportResult(
         val nodes: List<FtthNodeEntity>,
@@ -31,10 +50,15 @@ object RealImportService {
         val message: String
     )
 
+    /**
+     * Méthode principale d'importation.
+     * Par défaut, utilise le mode NATIVE (sans classification automatique) comme demandé.
+     */
     fun importFromFile(
         context: Context,
         uri: Uri,
-        existingNodes: List<FtthNodeEntity> = emptyList()
+        existingNodes: List<FtthNodeEntity> = emptyList(),
+        mode: ImportMode = ImportMode.NATIVE
     ): ImportResult {
         val fileName = getFileName(context, uri).lowercase(Locale.ROOT)
         val bytes = try {
@@ -54,29 +78,29 @@ object RealImportService {
 
             when {
                 isZip || fileName.endsWith(".kmz") -> {
-                    importKmzFromBytes(bytes, existingNodes)
+                    importKmzFromBytes(bytes, existingNodes, mode)
                 }
                 fileName.endsWith(".kml") -> {
                     val kmlText = String(bytes, StandardCharsets.UTF_8)
-                    parseKmlString(kmlText, existingNodes)
+                    parseKmlString(kmlText, existingNodes, mode)
                 }
                 fileName.endsWith(".geojson") || fileName.endsWith(".json") -> {
                     val jsonText = String(bytes, StandardCharsets.UTF_8)
-                    parseGeoJsonString(jsonText, existingNodes)
+                    parseGeoJsonString(jsonText, existingNodes, mode)
                 }
                 else -> {
                     val text = String(bytes, StandardCharsets.UTF_8).trim()
                     if (text.startsWith("{") || text.startsWith("[")) {
-                        parseGeoJsonString(text, existingNodes)
+                        parseGeoJsonString(text, existingNodes, mode)
                     } else if (text.contains("<kml", ignoreCase = true) || text.contains("<?xml", ignoreCase = true) || text.contains("<Document", ignoreCase = true)) {
-                        parseKmlString(text, existingNodes)
+                        parseKmlString(text, existingNodes, mode)
                     } else {
                         // Essai KML puis GeoJSON
-                        val kmlRes = parseKmlString(text, existingNodes)
+                        val kmlRes = parseKmlString(text, existingNodes, mode)
                         if (kmlRes.nodes.isNotEmpty() || kmlRes.links.isNotEmpty() || kmlRes.tracks.isNotEmpty()) {
                             kmlRes
                         } else {
-                            parseGeoJsonString(text, existingNodes)
+                            parseGeoJsonString(text, existingNodes, mode)
                         }
                     }
                 }
@@ -86,6 +110,24 @@ object RealImportService {
             ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'import : ${e.localizedMessage ?: e.javaClass.simpleName}")
         }
     }
+
+    /**
+     * Méthode explicite pour l'import avec classification automatique intelligente (conservée et enregistrée).
+     */
+    fun importFromFileWithClassification(
+        context: Context,
+        uri: Uri,
+        existingNodes: List<FtthNodeEntity> = emptyList()
+    ): ImportResult = importFromFile(context, uri, existingNodes, ImportMode.INTELLIGENT_CLASSIFICATION)
+
+    /**
+     * Méthode explicite pour l'import natif sans classification.
+     */
+    fun importFromFileNative(
+        context: Context,
+        uri: Uri,
+        existingNodes: List<FtthNodeEntity> = emptyList()
+    ): ImportResult = importFromFile(context, uri, existingNodes, ImportMode.NATIVE)
 
     private fun getFileName(context: Context, uri: Uri): String {
         var result = "import_file"
@@ -104,7 +146,11 @@ object RealImportService {
         return result
     }
 
-    private fun importKmzFromBytes(bytes: ByteArray, existingNodes: List<FtthNodeEntity>): ImportResult {
+    private fun importKmzFromBytes(
+        bytes: ByteArray,
+        existingNodes: List<FtthNodeEntity>,
+        mode: ImportMode
+    ): ImportResult {
         val kmlContents = mutableListOf<String>()
         try {
             val zipStream = ZipInputStream(ByteArrayInputStream(bytes))
@@ -139,20 +185,20 @@ object RealImportService {
 
             for (kml in kmlContents) {
                 val combinedExisting = existingNodes + allNodes
-                val res = parseKmlString(kml, combinedExisting)
+                val res = parseKmlString(kml, combinedExisting, mode)
                 allNodes.addAll(res.nodes)
                 allLinks.addAll(res.links)
                 allTracks.addAll(res.tracks)
             }
-            val msg = buildSummaryMessage(allNodes.size, allLinks.size, allTracks.size, "KMZ")
+            val msg = buildSummaryMessage(allNodes.size, allLinks.size, allTracks.size, "KMZ", mode)
             return ImportResult(allNodes, allLinks, allTracks, msg)
         }
         return ImportResult(emptyList(), emptyList(), emptyList(), "Aucun fichier KML valide trouvé dans l'archive KMZ.")
     }
 
-    private fun importKml(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
+    fun importKml(inputStream: InputStream, existingNodes: List<FtthNodeEntity>, mode: ImportMode = ImportMode.NATIVE): ImportResult {
         val content = inputStream.bufferedReader().use { it.readText() }
-        return parseKmlString(content, existingNodes)
+        return parseKmlString(content, existingNodes, mode)
     }
 
     private fun sanitizeXml(rawXml: String): String {
@@ -162,7 +208,11 @@ object RealImportService {
         return s
     }
 
-    private fun parseKmlString(kml: String, existingNodes: List<FtthNodeEntity>): ImportResult {
+    fun parseKmlString(
+        kml: String,
+        existingNodes: List<FtthNodeEntity>,
+        mode: ImportMode = ImportMode.NATIVE
+    ): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
@@ -177,7 +227,7 @@ object RealImportService {
             val doc = builder.parse(ByteArrayInputStream(sanitized.toByteArray(StandardCharsets.UTF_8)))
             doc.documentElement.normalize()
 
-            // Extraire tous les Placemark une seule fois (évite la duplication via sous-dossiers)
+            // Extraire tous les Placemark une seule fois
             val placemarks = doc.getElementsByTagName("Placemark")
             for (i in 0 until placemarks.length) {
                 val pm = placemarks.item(i) as? Element ?: continue
@@ -215,19 +265,35 @@ object RealImportService {
                         val coordsText = getDirectOrFirstChildValue(lineEl, "coordinates") ?: continue
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.size >= 2) {
-                            processLineString(
-                                name = if (lineStringEls.length > 1) "$name ($l)" else name,
-                                description = desc,
-                                styleUrl = styleUrl,
-                                folderContext = folderContext,
-                                properties = properties,
-                                pts = pts,
-                                existingNodes = existingNodes,
-                                nodes = nodes,
-                                links = links,
-                                tracks = tracks,
-                                index = tracks.size + links.size
-                            )
+                            val lineName = if (lineStringEls.length > 1) "$name ($l)" else name
+                            if (mode == ImportMode.NATIVE) {
+                                // MODE NATIF : Tracé brut sans classification
+                                processLineStringNative(
+                                    name = lineName,
+                                    description = desc,
+                                    styleUrl = styleUrl,
+                                    folderContext = folderContext,
+                                    properties = properties,
+                                    pts = pts,
+                                    tracks = tracks,
+                                    index = tracks.size
+                                )
+                            } else {
+                                // MODE CLASSIFICATION INTELLIGENTE FTTH (enregistré)
+                                processLineStringClassification(
+                                    name = lineName,
+                                    description = desc,
+                                    styleUrl = styleUrl,
+                                    folderContext = folderContext,
+                                    properties = properties,
+                                    pts = pts,
+                                    existingNodes = existingNodes,
+                                    nodes = nodes,
+                                    links = links,
+                                    tracks = tracks,
+                                    index = tracks.size + links.size
+                                )
+                            }
                         }
                     }
                 } else if (pointEls.length > 0) {
@@ -237,18 +303,35 @@ object RealImportService {
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.isNotEmpty()) {
                             val pt = pts.first()
-                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
-                            nodes.add(
-                                createNodeFromAttributes(
-                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
-                                    type = nodeType,
-                                    name = if (pointEls.length > 1) "$name ($p)" else name,
-                                    description = desc,
-                                    lat = pt.latitude,
-                                    lon = pt.longitude,
-                                    properties = properties
+                            val ptName = if (pointEls.length > 1) "$name ($p)" else name
+                            if (mode == ImportMode.NATIVE) {
+                                // MODE NATIF : Point brut non classifié
+                                nodes.add(
+                                    createNativeNode(
+                                        id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                        name = ptName,
+                                        description = desc,
+                                        folderContext = folderContext,
+                                        lat = pt.latitude,
+                                        lon = pt.longitude,
+                                        properties = properties
+                                    )
                                 )
-                            )
+                            } else {
+                                // MODE CLASSIFICATION FTTH
+                                val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                                nodes.add(
+                                    createNodeFromAttributesWithClassification(
+                                        id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                        type = nodeType,
+                                        name = ptName,
+                                        description = desc,
+                                        lat = pt.latitude,
+                                        lon = pt.longitude,
+                                        properties = properties
+                                    )
+                                )
+                            }
                         }
                     }
                 } else if (polygonEls.length > 0) {
@@ -257,20 +340,33 @@ object RealImportService {
                     if (coordsText != null) {
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.isNotEmpty()) {
-                            val lat = pts.map { it.latitude }.average()
-                            val lon = pts.map { it.longitude }.average()
-                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
-                            nodes.add(
-                                createNodeFromAttributes(
-                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
-                                    type = nodeType,
+                            if (mode == ImportMode.NATIVE) {
+                                processPolygonNative(
                                     name = name,
                                     description = desc,
-                                    lat = lat,
-                                    lon = lon,
-                                    properties = properties
+                                    folderContext = folderContext,
+                                    properties = properties,
+                                    pts = pts,
+                                    tracks = tracks,
+                                    nodes = nodes,
+                                    index = tracks.size
                                 )
-                            )
+                            } else {
+                                val lat = pts.map { it.latitude }.average()
+                                val lon = pts.map { it.longitude }.average()
+                                val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                                nodes.add(
+                                    createNodeFromAttributesWithClassification(
+                                        id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                        type = nodeType,
+                                        name = name,
+                                        description = desc,
+                                        lat = lat,
+                                        lon = lon,
+                                        properties = properties
+                                    )
+                                )
+                            }
                         }
                     }
                 } else {
@@ -279,33 +375,60 @@ object RealImportService {
                     if (coordsText != null) {
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.size >= 2) {
-                            processLineString(
-                                name = name,
-                                description = desc,
-                                styleUrl = styleUrl,
-                                folderContext = folderContext,
-                                properties = properties,
-                                pts = pts,
-                                existingNodes = existingNodes,
-                                nodes = nodes,
-                                links = links,
-                                tracks = tracks,
-                                index = tracks.size + links.size
-                            )
-                        } else if (pts.isNotEmpty()) {
-                            val pt = pts.first()
-                            val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
-                            nodes.add(
-                                createNodeFromAttributes(
-                                    id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
-                                    type = nodeType,
+                            if (mode == ImportMode.NATIVE) {
+                                processLineStringNative(
                                     name = name,
                                     description = desc,
-                                    lat = pt.latitude,
-                                    lon = pt.longitude,
-                                    properties = properties
+                                    styleUrl = styleUrl,
+                                    folderContext = folderContext,
+                                    properties = properties,
+                                    pts = pts,
+                                    tracks = tracks,
+                                    index = tracks.size
                                 )
-                            )
+                            } else {
+                                processLineStringClassification(
+                                    name = name,
+                                    description = desc,
+                                    styleUrl = styleUrl,
+                                    folderContext = folderContext,
+                                    properties = properties,
+                                    pts = pts,
+                                    existingNodes = existingNodes,
+                                    nodes = nodes,
+                                    links = links,
+                                    tracks = tracks,
+                                    index = tracks.size + links.size
+                                )
+                            }
+                        } else if (pts.isNotEmpty()) {
+                            val pt = pts.first()
+                            if (mode == ImportMode.NATIVE) {
+                                nodes.add(
+                                    createNativeNode(
+                                        id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                        name = name,
+                                        description = desc,
+                                        folderContext = folderContext,
+                                        lat = pt.latitude,
+                                        lon = pt.longitude,
+                                        properties = properties
+                                    )
+                                )
+                            } else {
+                                val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
+                                nodes.add(
+                                    createNodeFromAttributesWithClassification(
+                                        id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
+                                        type = nodeType,
+                                        name = name,
+                                        description = desc,
+                                        lat = pt.latitude,
+                                        lon = pt.longitude,
+                                        properties = properties
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -316,7 +439,7 @@ object RealImportService {
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
         }
 
-        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML")
+        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML", mode)
         return ImportResult(nodes, links, tracks, msg)
     }
 
@@ -339,7 +462,6 @@ object RealImportService {
     }
 
     private fun getDirectOrFirstChildValue(parent: Element, tagName: String): String? {
-        // Chercher en priorité un enfant direct
         var child = parent.firstChild
         while (child != null) {
             if (child is Element && child.tagName.equals(tagName, ignoreCase = true)) {
@@ -347,7 +469,6 @@ object RealImportService {
             }
             child = child.nextSibling
         }
-        // Sinon recherche standard
         val list = parent.getElementsByTagName(tagName)
         if (list.length > 0) {
             val el = list.item(0) as? Element
@@ -358,7 +479,6 @@ object RealImportService {
 
     private fun parseKmlCoordinates(coordsText: String): List<TrackPoint> {
         val points = mutableListOf<TrackPoint>()
-        // Séparer les tuples de coordonnées par les espaces blancs (espaces, retours chariot, tabulations)
         val tokens = coordsText.trim().split(Regex("""[\s\r\n]+"""))
         for (token in tokens) {
             val parts = token.split(",")
@@ -374,12 +494,16 @@ object RealImportService {
         return points
     }
 
-    private fun importGeoJson(inputStream: InputStream, existingNodes: List<FtthNodeEntity>): ImportResult {
+    fun importGeoJson(inputStream: InputStream, existingNodes: List<FtthNodeEntity>, mode: ImportMode = ImportMode.NATIVE): ImportResult {
         val jsonStr = inputStream.bufferedReader().use { it.readText() }
-        return parseGeoJsonString(jsonStr, existingNodes)
+        return parseGeoJsonString(jsonStr, existingNodes, mode)
     }
 
-    private fun parseGeoJsonString(jsonStr: String, existingNodes: List<FtthNodeEntity>): ImportResult {
+    fun parseGeoJsonString(
+        jsonStr: String,
+        existingNodes: List<FtthNodeEntity>,
+        mode: ImportMode = ImportMode.NATIVE
+    ): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
@@ -416,18 +540,32 @@ object RealImportService {
                         val lon = coords.getDouble(0)
                         val lat = coords.getDouble(1)
                         if (lat != 0.0 || lon != 0.0) {
-                            val nodeType = determineNodeType(name, description, "", propMap)
-                            nodes.add(
-                                createNodeFromAttributes(
-                                    id = "GEO-NOD-${System.currentTimeMillis()}-$i",
-                                    type = nodeType,
-                                    name = name,
-                                    description = description,
-                                    lat = lat,
-                                    lon = lon,
-                                    properties = propMap
+                            if (mode == ImportMode.NATIVE) {
+                                nodes.add(
+                                    createNativeNode(
+                                        id = "GEO-NOD-${System.currentTimeMillis()}-$i",
+                                        name = name,
+                                        description = description,
+                                        folderContext = name,
+                                        lat = lat,
+                                        lon = lon,
+                                        properties = propMap
+                                    )
                                 )
-                            )
+                            } else {
+                                val nodeType = determineNodeType(name, description, "", propMap)
+                                nodes.add(
+                                    createNodeFromAttributesWithClassification(
+                                        id = "GEO-NOD-${System.currentTimeMillis()}-$i",
+                                        type = nodeType,
+                                        name = name,
+                                        description = description,
+                                        lat = lat,
+                                        lon = lon,
+                                        properties = propMap
+                                    )
+                                )
+                            }
                         }
                     }
                     geomType.equals("LineString", ignoreCase = true) && coords.length() > 0 -> {
@@ -442,19 +580,32 @@ object RealImportService {
                             }
                         }
                         if (points.size >= 2) {
-                            processLineString(
-                                name = name,
-                                description = description,
-                                styleUrl = "",
-                                folderContext = name,
-                                properties = propMap,
-                                pts = points,
-                                existingNodes = existingNodes,
-                                nodes = nodes,
-                                links = links,
-                                tracks = tracks,
-                                index = i
-                            )
+                            if (mode == ImportMode.NATIVE) {
+                                processLineStringNative(
+                                    name = name,
+                                    description = description,
+                                    styleUrl = "",
+                                    folderContext = name,
+                                    properties = propMap,
+                                    pts = points,
+                                    tracks = tracks,
+                                    index = i
+                                )
+                            } else {
+                                processLineStringClassification(
+                                    name = name,
+                                    description = description,
+                                    styleUrl = "",
+                                    folderContext = name,
+                                    properties = propMap,
+                                    pts = points,
+                                    existingNodes = existingNodes,
+                                    nodes = nodes,
+                                    links = links,
+                                    tracks = tracks,
+                                    index = i
+                                )
+                            }
                         }
                     }
                     geomType.equals("MultiLineString", ignoreCase = true) && coords.length() > 0 -> {
@@ -471,19 +622,33 @@ object RealImportService {
                                 }
                             }
                             if (points.size >= 2) {
-                                processLineString(
-                                    name = "$name (${m + 1})",
-                                    description = description,
-                                    styleUrl = "",
-                                    folderContext = name,
-                                    properties = propMap,
-                                    pts = points,
-                                    existingNodes = existingNodes,
-                                    nodes = nodes,
-                                    links = links,
-                                    tracks = tracks,
-                                    index = i * 100 + m
-                                )
+                                val lineName = "$name (${m + 1})"
+                                if (mode == ImportMode.NATIVE) {
+                                    processLineStringNative(
+                                        name = lineName,
+                                        description = description,
+                                        styleUrl = "",
+                                        folderContext = name,
+                                        properties = propMap,
+                                        pts = points,
+                                        tracks = tracks,
+                                        index = i * 100 + m
+                                    )
+                                } else {
+                                    processLineStringClassification(
+                                        name = lineName,
+                                        description = description,
+                                        styleUrl = "",
+                                        folderContext = name,
+                                        properties = propMap,
+                                        pts = points,
+                                        existingNodes = existingNodes,
+                                        nodes = nodes,
+                                        links = links,
+                                        tracks = tracks,
+                                        index = i * 100 + m
+                                    )
+                                }
                             }
                         }
                     }
@@ -497,20 +662,33 @@ object RealImportService {
                             }
                         }
                         if (points.isNotEmpty()) {
-                            val lat = points.map { it.latitude }.average()
-                            val lon = points.map { it.longitude }.average()
-                            val nodeType = determineNodeType(name, description, "", propMap)
-                            nodes.add(
-                                createNodeFromAttributes(
-                                    id = "GEO-NOD-${System.currentTimeMillis()}-$i",
-                                    type = nodeType,
+                            if (mode == ImportMode.NATIVE) {
+                                processPolygonNative(
                                     name = name,
                                     description = description,
-                                    lat = lat,
-                                    lon = lon,
-                                    properties = propMap
+                                    folderContext = name,
+                                    properties = propMap,
+                                    pts = points,
+                                    tracks = tracks,
+                                    nodes = nodes,
+                                    index = i
                                 )
-                            )
+                            } else {
+                                val lat = points.map { it.latitude }.average()
+                                val lon = points.map { it.longitude }.average()
+                                val nodeType = determineNodeType(name, description, "", propMap)
+                                nodes.add(
+                                    createNodeFromAttributesWithClassification(
+                                        id = "GEO-NOD-${System.currentTimeMillis()}-$i",
+                                        type = nodeType,
+                                        name = name,
+                                        description = description,
+                                        lat = lat,
+                                        lon = lon,
+                                        properties = propMap
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -520,15 +698,154 @@ object RealImportService {
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse GeoJSON : ${e.localizedMessage}")
         }
 
-        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "GeoJSON")
+        val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "GeoJSON", mode)
         return ImportResult(nodes, links, tracks, msg)
     }
 
+    // =========================================================================================
+    //  TRAITEMENT NATIF DES DONNÉES (Affichage direct sans classification automatique)
+    // =========================================================================================
+
+    private fun processLineStringNative(
+        name: String,
+        description: String,
+        styleUrl: String,
+        folderContext: String,
+        properties: Map<String, String>,
+        pts: List<TrackPoint>,
+        tracks: MutableList<StoredTrack>,
+        index: Int
+    ) {
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+        val trackId = "TRK-NAT-${System.currentTimeMillis() % 100000}-$index"
+        val notes = buildNativeNotes(description, folderContext, properties)
+
+        tracks.add(
+            StoredTrack(
+                id = trackId,
+                name = name.ifBlank { "Tracé #${index + 1}" },
+                type = "Tracé", // Type natif
+                etat = "Conforme",
+                conduitAudit = "Natif",
+                conduitType = "Natif",
+                notes = notes,
+                totalDistanceMeters = dist,
+                rawPoints = pts,
+                points = pts
+            )
+        )
+    }
+
+    private fun createNativeNode(
+        id: String,
+        name: String,
+        description: String,
+        folderContext: String,
+        lat: Double,
+        lon: Double,
+        properties: Map<String, String>
+    ): FtthNodeEntity {
+        val notes = buildNativeNotes(description, folderContext, properties)
+        val address = properties["address"] ?: properties["adresse"] ?: ""
+        val operator = properties["operator"] ?: properties["operateur"] ?: properties["layer"] ?: ""
+
+        return FtthNodeEntity(
+            id = id,
+            type = FtthNodeType.BOITIER, // Marker neutre pour affichage natif
+            name = name.ifBlank { "Point" },
+            buildingName = name,
+            latitude = lat,
+            longitude = lon,
+            status = NodeStatus.EXISTANT,
+            etat = NodeConformity.CONFORME,
+            address = address,
+            operator = operator,
+            notes = notes
+        )
+    }
+
+    private fun processPolygonNative(
+        name: String,
+        description: String,
+        folderContext: String,
+        properties: Map<String, String>,
+        pts: List<TrackPoint>,
+        tracks: MutableList<StoredTrack>,
+        nodes: MutableList<FtthNodeEntity>,
+        index: Int
+    ) {
+        if (pts.isEmpty()) return
+        val closedPts = if (pts.first().latitude != pts.last().latitude || pts.first().longitude != pts.last().longitude) {
+            pts + pts.first()
+        } else {
+            pts
+        }
+        val dist = TrackGeometryHelper.computeTotalDistanceMeters(closedPts)
+        val notes = buildNativeNotes(description, folderContext, properties)
+
+        tracks.add(
+            StoredTrack(
+                id = "POLY-NAT-${System.currentTimeMillis() % 100000}-$index",
+                name = name.ifBlank { "Polygone #${index + 1}" },
+                type = "Polygone",
+                etat = "Conforme",
+                conduitAudit = "Natif",
+                conduitType = "Natif",
+                notes = notes,
+                totalDistanceMeters = dist,
+                rawPoints = closedPts,
+                points = closedPts
+            )
+        )
+
+        // Centroïde du polygone
+        val avgLat = pts.map { it.latitude }.average()
+        val avgLon = pts.map { it.longitude }.average()
+        nodes.add(
+            createNativeNode(
+                id = "NOD-POLY-${System.currentTimeMillis() % 100000}-$index",
+                name = name.ifBlank { "Polygone #${index + 1}" },
+                description = description,
+                folderContext = folderContext,
+                lat = avgLat,
+                lon = avgLon,
+                properties = properties
+            )
+        )
+    }
+
+    private fun buildNativeNotes(description: String, folderContext: String, properties: Map<String, String>): String {
+        val sb = StringBuilder()
+        if (description.isNotBlank()) {
+            sb.append(description.trim())
+        }
+        if (folderContext.isNotBlank() && !folderContext.equals(description, ignoreCase = true)) {
+            if (sb.isNotEmpty()) sb.append("\n")
+            sb.append("Dossier KML : ").append(folderContext)
+        }
+        val filtered = properties.filter { (k, v) ->
+            !k.equals("name", ignoreCase = true) &&
+            !k.equals("description", ignoreCase = true) &&
+            v.isNotBlank()
+        }
+        if (filtered.isNotEmpty()) {
+            if (sb.isNotEmpty()) sb.append("\n\nAttributs SIG :\n") else sb.append("Attributs SIG :\n")
+            for ((k, v) in filtered) {
+                sb.append("• ").append(k).append(" : ").append(v).append("\n")
+            }
+        }
+        return sb.toString().trim()
+    }
+
+    // =========================================================================================
+    //  MÉTHODE DE CLASSIFICATION INTELLIGENTE (ENREGISTRÉE ET CONSERVÉE)
+    // =========================================================================================
+
     /**
-     * Traitement intelligent des polylignes / LineString :
+     * Traitement avec classification intelligente des polylignes / LineString :
      * Détermine s'il s'agit d'un CÂBLE OPTIQUE avec sa capacité en FO ou d'une INFRASTRUCTURE GC.
      */
-    private fun processLineString(
+    private fun processLineStringClassification(
         name: String,
         description: String,
         styleUrl: String,
@@ -549,7 +866,6 @@ object RealImportService {
             val trackId = "TRK-CBL-${System.currentTimeMillis()}-$index"
             val cableId = "CBL-${System.currentTimeMillis() % 100000}-$index"
 
-            // Trouver ou générer les extrémités (fromNodeId et toNodeId)
             val allNodesPool = existingNodes + nodes
             val startPt = pts.first()
             val endPt = pts.last()
@@ -557,7 +873,6 @@ object RealImportService {
             var fromNode = findClosestNode(startPt.latitude, startPt.longitude, allNodesPool, maxDistanceMeters = 75.0)
             var toNode = findClosestNode(endPt.latitude, endPt.longitude, allNodesPool, maxDistanceMeters = 75.0)
 
-            // Si aucune extrémité trouvée, générer des nœuds de raccordement automatiques
             if (fromNode == null) {
                 val startNodeType = when (lineInfo.installationType.lowercase(Locale.ROOT)) {
                     "aérien" -> FtthNodeType.POTEAU
@@ -592,7 +907,6 @@ object RealImportService {
                 nodes.add(toNode)
             }
 
-            // Créer la liaison Câble (FtthLinkEntity)
             val link = FtthLinkEntity(
                 id = cableId,
                 fromNodeId = fromNode.id,
@@ -605,7 +919,6 @@ object RealImportService {
             )
             links.add(link)
 
-            // Créer également le tracé physique (StoredTrack) pour que la ligne exacte s'affiche sur la carte
             val cableTrackName = if (name.contains("FO", ignoreCase = true)) name else "$name (${lineInfo.capacityFO} FO)"
             tracks.add(
                 StoredTrack(
@@ -661,7 +974,7 @@ object RealImportService {
         return closest
     }
 
-    private data class LineClassification(
+    data class LineClassification(
         val isCable: Boolean,
         val capacityFO: Int,
         val cableType: String,
@@ -671,10 +984,7 @@ object RealImportService {
         val conduitCount: Int = 1
     )
 
-    /**
-     * Analyse intelligente pour classifier un LineString : Câble (avec capacité FO) ou Génie Civil (GC).
-     */
-    private fun classifyLineString(
+    fun classifyLineString(
         name: String,
         description: String,
         styleUrl: String,
@@ -683,10 +993,8 @@ object RealImportService {
     ): LineClassification {
         val combined = "$name $description $styleUrl $folderContext ${properties.values.joinToString(" ")}".lowercase(Locale.ROOT)
 
-        // 1. Extraire la capacité en FO
         val detectedFO = extractCapacityFO(combined, properties)
 
-        // 2. Détecter si c'est explicitement un câble ou une infra
         val isCableKeyword = combined.contains("cable") || combined.contains("câble") ||
                 combined.contains("cbl") || combined.contains("fibre") || combined.contains("fiber") ||
                 combined.contains("optique") || combined.contains("transport") ||
@@ -702,7 +1010,6 @@ object RealImportService {
                 combined.contains("infrastructure") || combined.contains("genie civil") ||
                 combined.contains("génie civil")
 
-        // Priorité : si une capacité en FO est détectée ou mot-clé câble prédominant
         val isCable = (detectedFO != null || isCableKeyword) && !(isGcKeyword && detectedFO == null && !isCableKeyword)
 
         val capacityFO = detectedFO ?: if (isCable) {
@@ -717,14 +1024,12 @@ object RealImportService {
             }
         } else 0
 
-        // Type de câble : Transport, Distribution, Raccordement
         val cableType = when {
             combined.contains("transport") || combined.contains("trsp") || combined.contains("nro") || capacityFO >= 144 -> "Transport"
             combined.contains("raccord") || combined.contains("branchement") || combined.contains("client") || combined.contains("drop") || capacityFO <= 12 -> "Raccordement"
             else -> "Distribution"
         }
 
-        // Type de pose / installation : Souterrain, Aérien, Façade
         val installationType = when {
             combined.contains("aerien") || combined.contains("aérien") || combined.contains("pole") || combined.contains("poteau") || combined.contains("appui") -> "Aérien"
             combined.contains("facade") || combined.contains("façade") || combined.contains("mural") -> "Façade"
@@ -751,11 +1056,7 @@ object RealImportService {
         )
     }
 
-    /**
-     * Extraction avancée de la capacité en FO (xx FO, xx fibres, attributs SIG...)
-     */
-    private fun extractCapacityFO(combined: String, properties: Map<String, String>): Int? {
-        // 1. Chercher dans les attributs de propriétés (capacité, capa_fo, nb_fo, fo, etc.)
+    fun extractCapacityFO(combined: String, properties: Map<String, String>): Int? {
         val propKeys = listOf("capacity", "capacite", "capacite_fo", "capa_fo", "capa", "nb_fo", "nbr_fo", "fo", "f_o", "fibres", "fiber", "fibers", "brins", "taille_fo")
         for ((k, v) in properties) {
             val kLower = k.lowercase(Locale.ROOT)
@@ -765,22 +1066,18 @@ object RealImportService {
             }
         }
 
-        // 2. Chercher avec Regex : ex: 144FO, 144 FO, 72 f.o, 48 fibres, 24fo, 12 fo
         val matchFo = Regex("""(\d+)\s*(?:fo|f\.o|fibres?|fibers?|brins?)\b""", RegexOption.IGNORE_CASE).find(combined)
         if (matchFo != null) {
             val num = matchFo.groupValues[1].toIntOrNull()
             if (num != null && num > 0) return num
         }
 
-        // 3. Chercher préfixe cable/cbl/fo suivi de nombre : CABLE_144, CBL-72, FO_48
         val matchPrefix = Regex("""(?:cable|câble|cbl|fo)[_\-\s]+(\d+)\b""", RegexOption.IGNORE_CASE).find(combined)
         if (matchPrefix != null) {
             val num = matchPrefix.groupValues[1].toIntOrNull()
             if (num != null && isValidFoCapacity(num)) return num
         }
 
-        // 4. Détecter un nombre standard de capacité FO (720, 432, 288, 144, 96, 72, 48, 36, 24, 16, 12, 8, 6, 4, 2)
-        // seulement si le contexte mentionne un câble ou fibre
         if (combined.contains("cable") || combined.contains("câble") || combined.contains("fibre") || combined.contains("optique")) {
             val matchStandard = Regex("""\b(864|720|576|432|288|144|96|72|48|36|24|16|12|8|6|4|2)\b""").find(combined)
             if (matchStandard != null) {
@@ -796,10 +1093,7 @@ object RealImportService {
         return num in 1..1500
     }
 
-    /**
-     * Détermination intelligente du type de nœud FTTH (Poteau, Chambre, Boîtier, SRO, Immeuble, Villa).
-     */
-    private fun determineNodeType(
+    fun determineNodeType(
         name: String,
         description: String,
         styleUrl: String,
@@ -808,36 +1102,30 @@ object RealImportService {
         val combined = "$name $description $styleUrl ${properties.values.joinToString(" ")}".lowercase(Locale.ROOT)
 
         return when {
-            // Poteau / Appui aérien
             combined.contains("poteau") || combined.contains("pole") || combined.contains("appui") ||
                     combined.contains("support") || combined.contains("bois") || combined.contains("beton") ||
                     combined.contains("béton") || combined.contains("pt_") || combined.contains("pot_") ||
                     combined.contains("pt-") || combined.contains("pot-") || Regex("""\b(pt|pot|p)\d+\b""").containsMatchIn(combined) -> FtthNodeType.POTEAU
 
-            // SRO / NRO (Armoire de rue / PM)
             combined.contains("sro") || combined.contains("nro") || combined.contains("armoire") ||
                     combined.contains("cabinet") || combined.contains("pm360") || combined.contains("pm144") ||
                     combined.contains("sous-repartiteur") || combined.contains("sous_repartiteur") ||
                     Regex("""\bpm\d*\b""").containsMatchIn(combined) -> FtthNodeType.SRO
 
-            // Immeuble / Bâtiment collectif
             combined.contains("immeuble") || combined.contains("batiment") || combined.contains("bâtiment") ||
                     combined.contains("building") || combined.contains("collectif") || combined.contains("residence") ||
                     combined.contains("résidence") || combined.contains("imm_") || combined.contains("imm-") ||
                     combined.contains("bat_") || combined.contains("bat-") || combined.contains("bloc") -> FtthNodeType.IMMEUBLE
 
-            // Villa / Pavillon
             combined.contains("villa") || combined.contains("pavillon") || combined.contains("maison") ||
                     combined.contains("individuel") || combined.contains("hab_") -> FtthNodeType.VILLA
 
-            // Chambre souterraine / Regard
             combined.contains("chambre") || combined.contains("manhole") || combined.contains("regard") ||
                     combined.contains("l0t") || combined.contains("l1t") || combined.contains("l2t") ||
                     combined.contains("l3t") || combined.contains("l4t") || combined.contains("k1c") ||
                     combined.contains("k2c") || combined.contains("ch_") || combined.contains("ch-") ||
                     Regex("""\bch\d+\b""").containsMatchIn(combined) -> FtthNodeType.CHAMBRE
 
-            // Boîtier / PBO / BPE
             combined.contains("boitier") || combined.contains("boîtier") || combined.contains("pbo") ||
                     combined.contains("bpe") || combined.contains("pb_") || combined.contains("pb-") ||
                     combined.contains("pri") || combined.contains("splitter") || combined.contains("coupleur") ||
@@ -847,7 +1135,7 @@ object RealImportService {
         }
     }
 
-    private fun createNodeFromAttributes(
+    private fun createNodeFromAttributesWithClassification(
         id: String,
         type: FtthNodeType,
         name: String,
@@ -886,16 +1174,26 @@ object RealImportService {
         )
     }
 
-    private fun buildSummaryMessage(nodesCount: Int, linksCount: Int, tracksCount: Int, format: String): String {
+    private fun buildSummaryMessage(
+        nodesCount: Int,
+        linksCount: Int,
+        tracksCount: Int,
+        format: String,
+        mode: ImportMode
+    ): String {
         return buildString {
             val parts = mutableListOf<String>()
-            if (nodesCount > 0) parts.add("$nodesCount nœuds")
-            if (linksCount > 0) parts.add("$linksCount câbles optiques (avec capacité FO)")
-            if (tracksCount > 0) parts.add("$tracksCount tracés/infrastructures")
+            if (nodesCount > 0) parts.add("$nodesCount point${if (nodesCount > 1) "s" else ""}")
+            if (linksCount > 0) parts.add("$linksCount câble${if (linksCount > 1) "s" else ""} optique${if (linksCount > 1) "s" else ""}")
+            if (tracksCount > 0) parts.add("$tracksCount tracé${if (tracksCount > 1) "s" else ""}/ligne${if (tracksCount > 1) "s" else ""}")
 
             if (parts.isNotEmpty()) {
                 append(parts.joinToString(", "))
-                append(" importés avec succès ($format).")
+                if (mode == ImportMode.NATIVE) {
+                    append(" affichés avec succès en mode natif ($format, non classés).")
+                } else {
+                    append(" importés et classifiés avec succès ($format).")
+                }
             } else {
                 append("Aucun objet géospatial valide trouvé.")
             }
