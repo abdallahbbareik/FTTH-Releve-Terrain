@@ -255,6 +255,21 @@ class DocumentStorageManager(private val context: Context) {
         prefs.edit().putBoolean("app_theme_dark", isDark).apply()
     }
 
+    fun saveKmlDocumentTitle(title: String, projectName: String = currentProject) {
+        val sanitized = sanitizeProjectName(projectName)
+        prefs.edit().putString("kml_doc_title_$sanitized", title.trim()).apply()
+    }
+
+    fun getKmlDocumentTitle(projectName: String = currentProject): String {
+        val sanitized = sanitizeProjectName(projectName)
+        return prefs.getString("kml_doc_title_$sanitized", "") ?: ""
+    }
+
+    fun clearKmlDocumentTitle(projectName: String = currentProject) {
+        val sanitized = sanitizeProjectName(projectName)
+        prefs.edit().remove("kml_doc_title_$sanitized").apply()
+    }
+
     // Répertoire principal préféré pour Releve-Terrain
     val baseDir: File
         get() {

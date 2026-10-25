@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -81,11 +84,15 @@ fun KmlGoogleEarthSheet(
     onZoomToFolder: (String) -> Unit,
     onZoomToTrack: (StoredTrack) -> Unit,
     onZoomToNode: (FtthNodeEntity) -> Unit,
+    onDeleteFile: () -> Unit = {},
+    onDeleteFolder: ((String) -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val expandedFolders = remember { mutableStateMapOf<String, Boolean>() }
+    var showDeleteFileDialog by remember { mutableStateOf(false) }
+    var folderToDelete by remember { mutableStateOf<String?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -160,6 +167,27 @@ fun KmlGoogleEarthSheet(
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Bouton de suppression du fichier et de tous ses dossiers
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    IconButton(
+                        onClick = { showDeleteFileDialog = true },
+                        modifier = Modifier.testTag("kml_sheet_delete_file")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Supprimer le fichier et tous ses dossiers",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
@@ -372,6 +400,21 @@ fun KmlGoogleEarthSheet(
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
+
+                                    // Bouton suppression dossier
+                                    if (onDeleteFolder != null) {
+                                        IconButton(
+                                            onClick = { folderToDelete = folder.name },
+                                            modifier = Modifier.size(38.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Supprimer le dossier",
+                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
                                 }
 
                                 // Contenu déplié du dossier (liste des tracés et points)
@@ -499,5 +542,83 @@ fun KmlGoogleEarthSheet(
                 }
             }
         }
+    }
+
+    // Dialogue de confirmation de suppression du fichier et de tous ses dossiers
+    if (showDeleteFileDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteFileDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DeleteForever,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Supprimer le fichier ?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Voulez-vous supprimer le fichier « ${documentTitle.ifBlank { "Projet KML" }} » ?\n\nTous les dossiers associés (${folders.size} dossier${if (folders.size > 1) "s" else ""}) ainsi que tous leurs tracés et points seront définitivement supprimés.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteFileDialog = false
+                        onDeleteFile()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Supprimer tout", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteFileDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // Dialogue de confirmation de suppression d'un dossier spécifique
+    if (folderToDelete != null) {
+        val fName = folderToDelete ?: ""
+        AlertDialog(
+            onDismissRequest = { folderToDelete = null },
+            icon = {
+                Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+            },
+            title = {
+                Text("Supprimer le dossier ?", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("Voulez-vous supprimer le dossier « $fName » et tous les tracés et points qu'il contient ?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toDel = fName
+                        folderToDelete = null
+                        onDeleteFolder?.invoke(toDel)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Supprimer le dossier", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { folderToDelete = null }) {
+                    Text("Annuler")
+                }
+            }
+        )
     }
 }

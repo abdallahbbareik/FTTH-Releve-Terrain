@@ -734,7 +734,82 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                     isVisible = !hidden.contains(fName)
                 )
             }
+        } else {
+            _kmlFolders.value = emptyList()
         }
+    }
+
+    /**
+     * Supprime le fichier KML/KMZ et TOUS les dossiers et tracés/nœuds associés
+     */
+    fun deleteKmlFileAndFolders() {
+        val fileName = _kmlDocumentTitle.value.ifBlank { "Fichier importé" }
+        val folderNames = _kmlFolders.value.map { it.name.trim().lowercase(Locale.ROOT) }.toSet()
+
+        val initialTracksCount = _allTracks.value.size
+        val initialNodesCount = _rawNodes.value.size
+
+        // Supprimer tous les tracés appartenant aux dossiers de ce fichier
+        val remainingTracks = _allTracks.value.filterNot { trk ->
+            val f = trk.folderName.trim().lowercase(Locale.ROOT)
+            if (folderNames.isNotEmpty()) {
+                f.isNotBlank() && folderNames.contains(f)
+            } else {
+                // S'il n'y avait aucun sous-dossier, le fichier représente l'ensemble des tracés importés
+                true
+            }
+        }
+
+        // Supprimer tous les nœuds appartenant aux dossiers de ce fichier
+        val remainingNodes = _rawNodes.value.filterNot { node ->
+            val f = node.folderName.trim().lowercase(Locale.ROOT)
+            if (folderNames.isNotEmpty()) {
+                f.isNotBlank() && folderNames.contains(f)
+            } else {
+                true
+            }
+        }
+
+        _allTracks.value = remainingTracks
+        _rawNodes.value = remainingNodes
+        _kmlFolders.value = emptyList()
+        _kmlDocumentTitle.value = ""
+        _hiddenKmlFolders.value = emptySet()
+        _showKmlGoogleEarthSheet.value = false
+
+        docStorage.clearKmlDocumentTitle()
+        docStorage.saveTracks(remainingTracks)
+        docStorage.saveNodes(remainingNodes)
+
+        val deletedTracks = initialTracksCount - remainingTracks.size
+        val deletedNodes = initialNodesCount - remainingNodes.size
+        _bannerMessage.value = "Fichier « $fileName » et tous ses dossiers supprimés ($deletedTracks tracés, $deletedNodes nœuds)"
+    }
+
+    /**
+     * Supprime un dossier spécifique et l'ensemble de ses tracés et nœuds
+     */
+    fun deleteKmlFolder(folderName: String) {
+        val remainingTracks = _allTracks.value.filterNot {
+            it.folderName.equals(folderName, ignoreCase = true)
+        }
+        val remainingNodes = _rawNodes.value.filterNot {
+            it.folderName.equals(folderName, ignoreCase = true)
+        }
+        _allTracks.value = remainingTracks
+        _rawNodes.value = remainingNodes
+        docStorage.saveTracks(remainingTracks)
+        docStorage.saveNodes(remainingNodes)
+
+        val updatedFolders = _kmlFolders.value.filterNot {
+            it.name.equals(folderName, ignoreCase = true)
+        }
+        _kmlFolders.value = updatedFolders
+        if (updatedFolders.isEmpty()) {
+            _kmlDocumentTitle.value = ""
+            docStorage.clearKmlDocumentTitle()
+        }
+        _bannerMessage.value = "Dossier « $folderName » et son contenu supprimés"
     }
 
     fun setImportMode(mode: com.example.data.import.RealImportService.ImportMode) {
@@ -883,6 +958,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 _rawLinks.value = links
                 _allTracks.value = tracks.distinctBy { it.id }
                 _isLoading.value = false
+                _kmlDocumentTitle.value = docStorage.getKmlDocumentTitle(curProj)
                 refreshKmlFolders()
             }
             if (nodes.isNotEmpty() || tracks.isNotEmpty() || links.isNotEmpty()) {
@@ -1719,6 +1795,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 _rawLinks.value = loadedLinks
                 _allTracks.value = loadedTracks.distinctBy { it.id }
                 _isLoading.value = false
+                _kmlDocumentTitle.value = docStorage.getKmlDocumentTitle()
+                refreshKmlFolders()
             }
         }
     }
@@ -1836,6 +1914,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             _rawLinks.value = links
             _allTracks.value = tracks
             _allProjects.value = docStorage.listAllProjects()
+            _kmlDocumentTitle.value = docStorage.getKmlDocumentTitle(projectName)
+            refreshKmlFolders()
 
             _selectedNode.value = null
             _selectedTrackForDetail.value = null
@@ -1890,10 +1970,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 val links = docStorage.loadLinks(nextProject)
                 val tracks = docStorage.loadTracks(nextProject)
 
+                docStorage.clearKmlDocumentTitle(projectName)
                 _rawNodes.value = nodes
                 _rawLinks.value = links
                 _allTracks.value = tracks
                 _allProjects.value = docStorage.listAllProjects()
+                _kmlDocumentTitle.value = docStorage.getKmlDocumentTitle(nextProject)
+                refreshKmlFolders()
 
                 _blockingTaskState.value = BlockingTaskState(
                     isRunning = true,
@@ -2089,6 +2172,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (hasNodes || hasLinks || hasTracks) {
                 if (result.documentTitle.isNotBlank()) {
                     _kmlDocumentTitle.value = result.documentTitle
+                    docStorage.saveKmlDocumentTitle(result.documentTitle)
                 }
                 if (result.folders.isNotEmpty()) {
                     _kmlFolders.value = result.folders

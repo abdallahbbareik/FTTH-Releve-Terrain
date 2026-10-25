@@ -822,6 +822,10 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onSetStorageLocation = { viewModel.setStorageLocation(it) },
                     isDarkTheme = isDarkTheme,
                     onImportFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
+                    kmlDocumentTitle = kmlDocumentTitle,
+                    kmlFolders = kmlFolders,
+                    onDeleteKmlFile = { viewModel.deleteKmlFileAndFolders() },
+                    onOpenKmlGoogleEarth = { viewModel.openKmlGoogleEarthSheet() },
                     onDismiss = { viewModel.dismissProjectFolder() }
                 )
             }
@@ -1004,6 +1008,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onZoomToNode = { node ->
                         viewModel.focusOnCoordinates(node.latitude, node.longitude)
                     },
+                    onDeleteFile = { viewModel.deleteKmlFileAndFolders() },
+                    onDeleteFolder = { viewModel.deleteKmlFolder(it) },
                     onDismiss = { viewModel.dismissKmlGoogleEarthSheet() }
                 )
             }

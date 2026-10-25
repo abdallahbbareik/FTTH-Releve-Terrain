@@ -34,11 +34,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
@@ -110,6 +112,10 @@ fun ProjectFolderDialog(
     onSetStorageLocation: (String) -> Unit = {},
     isDarkTheme: Boolean = false,
     onImportFile: (Uri) -> Unit = {},
+    kmlDocumentTitle: String = "",
+    kmlFolders: List<com.example.data.import.RealImportService.KmlFolderInfo> = emptyList(),
+    onDeleteKmlFile: () -> Unit = {},
+    onOpenKmlGoogleEarth: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val dialogBg = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFFAFAF8)
@@ -127,6 +133,7 @@ fun ProjectFolderDialog(
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     var newProjectNameInput by remember { mutableStateOf("") }
     var copyCurrentDataCheck by remember { mutableStateOf(false) }
+    var showDeleteKmlFileDialog by remember { mutableStateOf(false) }
 
     var projectToRename by remember { mutableStateOf<String?>(null) }
     var renameInput by remember { mutableStateOf("") }
@@ -237,58 +244,22 @@ fun ProjectFolderDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Bouton X de fermeture à fort contraste (fond circulaire visible)
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color(0xFF7C3AED),
-                            modifier = Modifier.clickable {
-                                try {
-                                    projectImportLauncher.launch(arrayOf("*/*"))
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            }.testTag("header_import_button")
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("close_project_folder_button")
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FileUpload,
-                                    contentDescription = "Importer KMZ ou GeoJSON",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Importer",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        // Bouton X de fermeture à fort contraste (fond circulaire visible)
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            IconButton(
-                                onClick = onDismiss,
-                                modifier = Modifier.testTag("close_project_folder_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Fermer",
-                                    tint = if (isDarkTheme) Color.White else Color(0xFF0F172A),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Fermer",
+                                tint = if (isDarkTheme) Color.White else Color(0xFF0F172A),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -605,67 +576,192 @@ fun ProjectFolderDialog(
 
                 // Mes projets header & button (visible when tab == 0)
                 if (selectedTab == 0) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isDarkTheme) Color(0xFF1E1B4B) else Color(0xFFF5F3FF),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Icon(
-                                        imageVector = Icons.Default.FileUpload,
-                                        contentDescription = null,
-                                        tint = Color(0xFF7C3AED),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Import KMZ / KML / GeoJSON",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (isDarkTheme) Color.White else Color(0xFF1E1B4B)
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xFF7C3AED).copy(alpha = 0.15f)
+                    if (kmlDocumentTitle.isNotBlank() || kmlFolders.isNotEmpty()) {
+                        // Carte Fichier KML/KMZ Importé et ses Dossiers Associés
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth().testTag("imported_file_card")
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "Mode Natif",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF7C3AED),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Layers,
+                                            contentDescription = null,
+                                            tint = Color(0xFF0284C7),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = kmlDocumentTitle.ifBlank { "Fichier importé" },
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = textColor,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            val nonBlankTracksCount = tracks.count { it.folderName.isNotBlank() }
+                                            val nonBlankNodesCount = nodes.count { it.folderName.isNotBlank() }
+                                            Text(
+                                                text = "${kmlFolders.size} dossier${if (kmlFolders.size > 1) "s associés" else " associé"} • $nonBlankTracksCount tracés • $nonBlankNodesCount points",
+                                                fontSize = 11.sp,
+                                                color = secondaryTextColor
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Color(0xFF0284C7).copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "KMZ / KML",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF0284C7),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                if (kmlFolders.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        kmlFolders.take(3).forEach { f ->
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+                                            ) {
+                                                Text(
+                                                    text = "${f.name} (${f.tracksCount + f.nodesCount})",
+                                                    fontSize = 10.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = textColor,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        if (kmlFolders.size > 3) {
+                                            Text(
+                                                text = "+${kmlFolders.size - 3} autres",
+                                                fontSize = 10.sp,
+                                                color = secondaryTextColor,
+                                                modifier = Modifier.align(Alignment.CenterVertically)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenKmlGoogleEarth()
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f).testTag("open_kml_layers_button")
+                                    ) {
+                                        Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Voir calques", fontSize = 12.sp)
+                                    }
+
+                                    Button(
+                                        onClick = { showDeleteKmlFileDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f).testTag("delete_imported_file_button")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Supprimer fichier", fontSize = 12.sp, color = Color.White)
+                                    }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Affichage fidèle des données brutes (tracés, points, polygones) sans classification automatique.",
-                                fontSize = 11.sp,
-                                color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    try {
-                                        projectImportLauncher.launch(arrayOf("*/*"))
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
+                        }
+                    } else {
+                        // Carte d'importation quand aucun fichier n'est chargé
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isDarkTheme) Color(0xFF1E1B4B) else Color(0xFFF5F3FF),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(
+                                            imageVector = Icons.Default.FileUpload,
+                                            contentDescription = null,
+                                            tint = Color(0xFF7C3AED),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Import KMZ / KML / GeoJSON",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = if (isDarkTheme) Color.White else Color(0xFF1E1B4B)
+                                        )
                                     }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("folder_import_file_button")
-                            ) {
-                                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Importer un fichier KMZ ou GeoJSON (Mode Natif)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFF7C3AED).copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "Mode Natif",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF7C3AED),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Affichage fidèle des données brutes (tracés, points, polygones) avec arborescence complète des dossiers.",
+                                    fontSize = 11.sp,
+                                    color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        try {
+                                            projectImportLauncher.launch(arrayOf("*/*"))
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("folder_import_file_button")
+                                ) {
+                                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Importer un fichier KMZ ou GeoJSON (Mode Natif)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
                             }
                         }
                     }
@@ -1027,6 +1123,48 @@ fun ProjectFolderDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showCreateProjectDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
+    // Modal Confirmation Suppression du Fichier KML et de tous ses dossiers
+    if (showDeleteKmlFileDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteKmlFileDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DeleteForever,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Supprimer le fichier importé ?",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Voulez-vous supprimer le fichier « ${kmlDocumentTitle.ifBlank { "Fichier importé" }} » ?\n\nTous les dossiers associés (${kmlFolders.size} dossiers) ainsi que tous leurs tracés et points seront définitivement supprimés du projet."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteKmlFileDialog = false
+                        onDeleteKmlFile()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Supprimer tout", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteKmlFileDialog = false }) {
                     Text("Annuler")
                 }
             }
