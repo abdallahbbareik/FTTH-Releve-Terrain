@@ -678,22 +678,22 @@ fun ProjectFolderDialog(
                                             onOpenKmlGoogleEarth()
                                         },
                                         shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f).testTag("open_kml_layers_button")
+                                        modifier = Modifier.weight(1.1f).testTag("open_kml_layers_button")
                                     ) {
                                         Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Voir calques", fontSize = 12.sp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Calques", fontSize = 11.sp, maxLines = 1)
                                     }
 
                                     Button(
                                         onClick = { showDeleteKmlFileDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                                         shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f).testTag("delete_imported_file_button")
+                                        modifier = Modifier.weight(0.9f).testTag("delete_imported_file_button")
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Supprimer fichier", fontSize = 12.sp, color = Color.White)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Supprimer", fontSize = 11.sp, color = Color.White, maxLines = 1)
                                     }
                                 }
                             }

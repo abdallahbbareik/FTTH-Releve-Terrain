@@ -2170,6 +2170,18 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val hasTracks = result.tracks.isNotEmpty()
 
             if (hasNodes || hasLinks || hasTracks) {
+                // Remplacer les anciennes données KML importées pour que le nouveau fichier remplace le précédent
+                val oldFolderNames = _kmlFolders.value.map { it.name.trim().lowercase(Locale.ROOT) }.toSet()
+                val cleanedTracks = _allTracks.value.filterNot { trk ->
+                    val f = trk.folderName.trim().lowercase(Locale.ROOT)
+                    if (oldFolderNames.isNotEmpty()) f.isNotBlank() && oldFolderNames.contains(f) else true
+                }
+                val cleanedNodes = _rawNodes.value.filterNot { node ->
+                    val f = node.folderName.trim().lowercase(Locale.ROOT)
+                    if (oldFolderNames.isNotEmpty()) f.isNotBlank() && oldFolderNames.contains(f) else true
+                }
+                val cleanedLinks = _rawLinks.value
+
                 if (result.documentTitle.isNotBlank()) {
                     _kmlDocumentTitle.value = result.documentTitle
                     docStorage.saveKmlDocumentTitle(result.documentTitle)
@@ -2178,24 +2190,18 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                     _kmlFolders.value = result.folders
                 }
 
-                if (hasNodes) {
-                    val currentNodes = _rawNodes.value.toMutableList()
-                    currentNodes.addAll(result.nodes)
-                    _rawNodes.value = currentNodes
-                    docStorage.saveNodes(currentNodes)
-                }
-                if (hasLinks) {
-                    val currentLinks = _rawLinks.value.toMutableList()
-                    currentLinks.addAll(result.links)
-                    _rawLinks.value = currentLinks
-                    docStorage.saveLinks(currentLinks)
-                }
-                if (hasTracks) {
-                    val currentTracks = _allTracks.value.toMutableList()
-                    currentTracks.addAll(result.tracks)
-                    _allTracks.value = currentTracks
-                    docStorage.saveTracks(currentTracks)
-                }
+                val finalNodes = (cleanedNodes + result.nodes).distinctBy { it.id }
+                val finalLinks = (cleanedLinks + result.links).distinctBy { it.id }
+                val finalTracks = (cleanedTracks + result.tracks).distinctBy { it.id }
+
+                _rawNodes.value = finalNodes
+                docStorage.saveNodes(finalNodes)
+
+                _rawLinks.value = cleanedLinks
+                docStorage.saveLinks(cleanedLinks)
+
+                _allTracks.value = finalTracks
+                docStorage.saveTracks(finalTracks)
 
                 val firstFocusLatLon = when {
                     result.nodes.isNotEmpty() -> Pair(result.nodes.first().latitude, result.nodes.first().longitude)
