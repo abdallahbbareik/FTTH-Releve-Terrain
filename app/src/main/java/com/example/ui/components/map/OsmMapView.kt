@@ -383,6 +383,7 @@ fun OsmMapView(
 
         // Tracés GPS / Infras linéaires
         for (track in allTracks) {
+            if (!track.isVisible) continue
             val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
             if (pts.size >= 2) {
                 val polyline = Polyline(mapView).apply {
@@ -391,9 +392,14 @@ fun OsmMapView(
                     }
                     val isNativeTrack = track.type == "Tracé" || track.type == "Natif" || track.type == "Polygone"
                     val isCableTrack = !isNativeTrack && (track.name.contains("FO", ignoreCase = true) || track.notes.contains("FO", ignoreCase = true))
-                    outlinePaint.strokeWidth = if (isNativeTrack) 7f else 8f
+                    outlinePaint.strokeWidth = track.strokeWidth ?: (if (isNativeTrack) 7f else 8f)
                     outlinePaint.isAntiAlias = true
                     outlinePaint.color = when {
+                        !track.colorHex.isNullOrBlank() -> try {
+                            android.graphics.Color.parseColor(track.colorHex)
+                        } catch (_: Exception) {
+                            android.graphics.Color.parseColor("#2563EB")
+                        }
                         track.etat == "Non conforme" -> android.graphics.Color.parseColor("#DC2626")
                         track.type == "Polygone" -> android.graphics.Color.parseColor("#D97706") // Ambre pour polygones fermés
                         isNativeTrack -> android.graphics.Color.parseColor("#2563EB") // Bleu Royal SIG éclatant pour tracés natifs
@@ -673,6 +679,7 @@ fun OsmMapView(
 
         // Marqueurs Nœuds FTTH
         for (node in nodes) {
+            if (!node.isVisible) continue
             val marker = Marker(mapView).apply {
                 position = GeoPoint(node.latitude, node.longitude)
                 title = when {

@@ -78,6 +78,7 @@ import com.example.ui.components.AddNodeDialog
 import com.example.ui.components.BlockingTaskDialog
 import com.example.ui.components.ExportReportDialog
 import com.example.ui.components.FilterLayerSheet
+import com.example.ui.components.KmlGoogleEarthSheet
 import com.example.ui.components.GpsTrackControlBar
 import com.example.ui.components.ManualTrackEditorBar
 import com.example.ui.components.MoveNodeEditorBar
@@ -251,6 +252,10 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val showConnectCableDialog by viewModel.showConnectCableDialog.collectAsStateWithLifecycle()
     val pendingLinkNodes by viewModel.pendingLinkNodes.collectAsStateWithLifecycle()
 
+    val kmlDocumentTitle by viewModel.kmlDocumentTitle.collectAsStateWithLifecycle()
+    val kmlFolders by viewModel.kmlFolders.collectAsStateWithLifecycle()
+    val showKmlGoogleEarthSheet by viewModel.showKmlGoogleEarthSheet.collectAsStateWithLifecycle()
+
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
@@ -284,10 +289,13 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 showExportDialog || showWorkflowGuide || showTracksListDialog || showNodesListDialog ||
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
                 pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog ||
-                showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet || showFullTrackDetail
+                showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet || showFullTrackDetail ||
+                showKmlGoogleEarthSheet
     ) {
         if (showGpsDetailsDialog) {
             showGpsDetailsDialog = false
+        } else if (showKmlGoogleEarthSheet) {
+            viewModel.dismissKmlGoogleEarthSheet()
         } else if (showLinksListDialog) {
             showLinksListDialog = false
         } else if (showFullNodeDetailSheet) {
@@ -599,6 +607,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     isManualTrackActive = isManualTrackMode,
                     isAutoTrackActive = activeTrack != null,
                     isFilterActive = !filterState.showPoteaux || !filterState.showBoitiers || !filterState.showChambres || searchQuery.isNotBlank(),
+                    hasKmlFolders = kmlFolders.isNotEmpty(),
                     onAddNodeClick = {
                         if (isPickOnMapMode || pendingStakePosition != null) {
                             viewModel.cancelPickOnMapMode()
@@ -619,6 +628,9 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         } else {
                             viewModel.startAutoGpsTrack()
                         }
+                    },
+                    onKmlLayersClick = {
+                        viewModel.openKmlGoogleEarthSheet()
                     },
                     onFilterClick = {
                         viewModel.openFilterSheet()
@@ -971,6 +983,29 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         }
                     }
                 }
+            }
+
+            // Calques KML / Google Earth
+            if (showKmlGoogleEarthSheet) {
+                KmlGoogleEarthSheet(
+                    documentTitle = kmlDocumentTitle.ifBlank { currentProject },
+                    folders = kmlFolders,
+                    allTracks = allTracks,
+                    allNodes = rawNodes,
+                    onToggleFolderVisibility = { viewModel.toggleFolderVisibility(it) },
+                    onSetAllVisibility = { viewModel.setAllKmlFoldersVisibility(it) },
+                    onZoomToFolder = { viewModel.zoomToKmlFolder(it) },
+                    onZoomToTrack = { trk ->
+                        val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
+                        if (pts.isNotEmpty()) {
+                            viewModel.focusOnCoordinates(pts.first().latitude, pts.first().longitude)
+                        }
+                    },
+                    onZoomToNode = { node ->
+                        viewModel.focusOnCoordinates(node.latitude, node.longitude)
+                    },
+                    onDismiss = { viewModel.dismissKmlGoogleEarthSheet() }
+                )
             }
 
             // Filtres

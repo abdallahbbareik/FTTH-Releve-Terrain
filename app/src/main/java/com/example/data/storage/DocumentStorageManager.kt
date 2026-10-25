@@ -93,7 +93,11 @@ data class StoredTrack(
     val photos: List<TrackPhoto> = emptyList(),
     val isSimplified: Boolean = false,
     val toleranceMeters: Double? = null,
-    val isActive: Boolean = false
+    val isActive: Boolean = false,
+    val folderName: String = "", // Dossier KML / Calque d'origine (ex: POCHE 1 [144FO])
+    val colorHex: String? = null, // Couleur KML (#AARRGGBB) pour affichage Google Earth
+    val strokeWidth: Float? = null, // Épaisseur de ligne KML
+    val isVisible: Boolean = true // Visibilité sur la carte
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -113,6 +117,10 @@ data class StoredTrack(
         put("isSimplified", isSimplified)
         put("toleranceMeters", toleranceMeters ?: JSONObject.NULL)
         put("isActive", isActive)
+        put("folderName", folderName)
+        put("colorHex", colorHex ?: JSONObject.NULL)
+        put("strokeWidth", strokeWidth ?: JSONObject.NULL)
+        put("isVisible", isVisible)
 
         val rawArr = JSONArray()
         rawPoints.forEach { rawArr.put(it.toJson()) }
@@ -185,7 +193,11 @@ data class StoredTrack(
                 photos = phoList,
                 isSimplified = json.optBoolean("isSimplified", false),
                 toleranceMeters = if (json.has("toleranceMeters") && !json.isNull("toleranceMeters")) json.optDouble("toleranceMeters") else null,
-                isActive = json.optBoolean("isActive", false)
+                isActive = json.optBoolean("isActive", false),
+                folderName = json.optString("folderName", ""),
+                colorHex = if (json.has("colorHex") && !json.isNull("colorHex")) json.optString("colorHex") else null,
+                strokeWidth = if (json.has("strokeWidth") && !json.isNull("strokeWidth")) json.optDouble("strokeWidth").toFloat() else null,
+                isVisible = json.optBoolean("isVisible", true)
             )
         }
     }

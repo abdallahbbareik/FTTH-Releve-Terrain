@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,10 +43,12 @@ fun MapTopActionsBar(
     isManualTrackActive: Boolean = false,
     isAutoTrackActive: Boolean = false,
     isFilterActive: Boolean = false,
+    hasKmlFolders: Boolean = false,
     onAddNodeClick: () -> Unit,
     onCreerGcClick: () -> Unit,
     onGcAutoClick: () -> Unit,
     onFilterClick: () -> Unit,
+    onKmlLayersClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Arrière-plan transparent
@@ -98,7 +101,19 @@ fun MapTopActionsBar(
                 modifier = Modifier.weight(0.95f)
             )
 
-            // 4. Filtre (sans mot filtre : icône seule)
+            // 4. Calques KML / Google Earth (si dossiers KML disponibles)
+            if (onKmlLayersClick != null && hasKmlFolders) {
+                TopIconOnlyButton(
+                    icon = Icons.Default.Layers,
+                    isActive = true,
+                    activeColor = Color(0xFF2563EB),
+                    activeIconColor = Color.White,
+                    onClick = onKmlLayersClick,
+                    testTag = "map_action_kml_layers"
+                )
+            }
+
+            // 5. Filtre (sans mot filtre : icône seule)
             TopIconOnlyButton(
                 icon = Icons.Default.FilterList,
                 isActive = isFilterActive,

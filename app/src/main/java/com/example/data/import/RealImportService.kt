@@ -43,11 +43,27 @@ object RealImportService {
         )
     }
 
+    data class KmlFolderInfo(
+        val name: String,
+        val tracksCount: Int = 0,
+        val nodesCount: Int = 0,
+        val totalDistanceMeters: Double = 0.0,
+        val colorHex: String? = null,
+        val isVisible: Boolean = true
+    )
+
+    private data class KmlParsedStyle(
+        val colorHex: String? = null,
+        val width: Float? = null
+    )
+
     data class ImportResult(
         val nodes: List<FtthNodeEntity>,
         val links: List<FtthLinkEntity>,
         val tracks: List<StoredTrack>,
-        val message: String
+        val message: String,
+        val documentTitle: String = "",
+        val folders: List<KmlFolderInfo> = emptyList()
     )
 
     /**
@@ -60,7 +76,8 @@ object RealImportService {
         existingNodes: List<FtthNodeEntity> = emptyList(),
         mode: ImportMode = ImportMode.NATIVE
     ): ImportResult {
-        val fileName = getFileName(context, uri).lowercase(Locale.ROOT)
+        val originalFileName = getFileName(context, uri)
+        val fileNameLower = originalFileName.lowercase(Locale.ROOT)
         val bytes = try {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: return ImportResult(emptyList(), emptyList(), emptyList(), "Impossible d'ouvrir le fichier sélectionné.")
@@ -77,14 +94,14 @@ object RealImportService {
             val isZip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()
 
             when {
-                isZip || fileName.endsWith(".kmz") -> {
-                    importKmzFromBytes(bytes, existingNodes, mode)
+                isZip || fileNameLower.endsWith(".kmz") -> {
+                    importKmzFromBytes(bytes, existingNodes, mode, originalFileName)
                 }
-                fileName.endsWith(".kml") -> {
+                fileNameLower.endsWith(".kml") -> {
                     val kmlText = String(bytes, StandardCharsets.UTF_8)
-                    parseKmlString(kmlText, existingNodes, mode)
+                    parseKmlString(kmlText, existingNodes, mode, originalFileName)
                 }
-                fileName.endsWith(".geojson") || fileName.endsWith(".json") -> {
+                fileNameLower.endsWith(".geojson") || fileNameLower.endsWith(".json") -> {
                     val jsonText = String(bytes, StandardCharsets.UTF_8)
                     parseGeoJsonString(jsonText, existingNodes, mode)
                 }
@@ -93,10 +110,10 @@ object RealImportService {
                     if (text.startsWith("{") || text.startsWith("[")) {
                         parseGeoJsonString(text, existingNodes, mode)
                     } else if (text.contains("<kml", ignoreCase = true) || text.contains("<?xml", ignoreCase = true) || text.contains("<Document", ignoreCase = true)) {
-                        parseKmlString(text, existingNodes, mode)
+                        parseKmlString(text, existingNodes, mode, originalFileName)
                     } else {
                         // Essai KML puis GeoJSON
-                        val kmlRes = parseKmlString(text, existingNodes, mode)
+                        val kmlRes = parseKmlString(text, existingNodes, mode, originalFileName)
                         if (kmlRes.nodes.isNotEmpty() || kmlRes.links.isNotEmpty() || kmlRes.tracks.isNotEmpty()) {
                             kmlRes
                         } else {
@@ -149,7 +166,8 @@ object RealImportService {
     private fun importKmzFromBytes(
         bytes: ByteArray,
         existingNodes: List<FtthNodeEntity>,
-        mode: ImportMode
+        mode: ImportMode,
+        fallbackDocTitle: String = ""
     ): ImportResult {
         val kmlContents = mutableListOf<String>()
         try {
@@ -182,16 +200,44 @@ object RealImportService {
             val allNodes = mutableListOf<FtthNodeEntity>()
             val allLinks = mutableListOf<FtthLinkEntity>()
             val allTracks = mutableListOf<StoredTrack>()
+            val allFolders = mutableListOf<KmlFolderInfo>()
+            var docTitle = fallbackDocTitle
 
             for (kml in kmlContents) {
                 val combinedExisting = existingNodes + allNodes
-                val res = parseKmlString(kml, combinedExisting, mode)
+                val res = parseKmlString(kml, combinedExisting, mode, fallbackDocTitle)
                 allNodes.addAll(res.nodes)
                 allLinks.addAll(res.links)
                 allTracks.addAll(res.tracks)
+                allFolders.addAll(res.folders)
+                if (res.documentTitle.isNotBlank() && (docTitle.isBlank() || docTitle == fallbackDocTitle)) {
+                    docTitle = res.documentTitle
+                }
             }
+
+            // Dédupliquer les dossiers KML par nom
+            val mergedFolders = allFolders
+                .groupBy { it.name }
+                .map { (name, list) ->
+                    KmlFolderInfo(
+                        name = name,
+                        tracksCount = list.sumOf { it.tracksCount },
+                        nodesCount = list.sumOf { it.nodesCount },
+                        totalDistanceMeters = list.sumOf { it.totalDistanceMeters },
+                        colorHex = list.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex ?: getFolderDefaultColor(name),
+                        isVisible = true
+                    )
+                }
+
             val msg = buildSummaryMessage(allNodes.size, allLinks.size, allTracks.size, "KMZ", mode)
-            return ImportResult(allNodes, allLinks, allTracks, msg)
+            return ImportResult(
+                nodes = allNodes,
+                links = allLinks,
+                tracks = allTracks,
+                message = msg,
+                documentTitle = docTitle.ifBlank { fallbackDocTitle },
+                folders = mergedFolders
+            )
         }
         return ImportResult(emptyList(), emptyList(), emptyList(), "Aucun fichier KML valide trouvé dans l'archive KMZ.")
     }
@@ -208,14 +254,127 @@ object RealImportService {
         return s
     }
 
+    private val FOLDER_PALETTE = listOf(
+        "#2563EB", // Bleu Royal
+        "#9333EA", // Violet
+        "#059669", // Émeraude
+        "#EA580C", // Orange
+        "#0284C7", // Cyan / Ciel
+        "#D97706", // Ambre
+        "#DC2626", // Rouge
+        "#0D9488", // Sarcelle
+        "#7C3AED", // Mauve
+        "#4F46E5"  // Indigo
+    )
+
+    private fun getFolderDefaultColor(folderName: String): String {
+        if (folderName.isBlank() || folderName == "Sans dossier") return "#2563EB"
+        val hash = Math.abs(folderName.hashCode())
+        return FOLDER_PALETTE[hash % FOLDER_PALETTE.size]
+    }
+
+    private fun kmlColorToAndroidHex(kmlColor: String?): String? {
+        if (kmlColor.isNullOrBlank()) return null
+        val clean = kmlColor.trim().removePrefix("#")
+        return when (clean.length) {
+            8 -> {
+                // Format KML : AABBGGRR -> Convertir en Android #AARRGGBB
+                val a = clean.substring(0, 2)
+                val b = clean.substring(2, 4)
+                val g = clean.substring(4, 6)
+                val r = clean.substring(6, 8)
+                "#$a$r$g$b"
+            }
+            6 -> {
+                // BBGGRR -> #ffRRGGBB
+                val b = clean.substring(0, 2)
+                val g = clean.substring(2, 4)
+                val r = clean.substring(4, 6)
+                "#ff$r$g$b"
+            }
+            else -> null
+        }
+    }
+
+    private fun getImmediateFolderName(element: Element): String {
+        var parent = element.parentNode
+        while (parent != null) {
+            if (parent is Element) {
+                if (parent.tagName.equals("Folder", ignoreCase = true)) {
+                    val name = getDirectChildValue(parent, "name")
+                    if (!name.isNullOrBlank()) {
+                        return name
+                    }
+                }
+            }
+            parent = parent.parentNode
+        }
+        return ""
+    }
+
+    private fun getDirectChildValue(parent: Element, tagName: String): String? {
+        var child = parent.firstChild
+        while (child != null) {
+            if (child is Element && child.tagName.equals(tagName, ignoreCase = true)) {
+                return child.textContent?.trim()
+            }
+            child = child.nextSibling
+        }
+        return null
+    }
+
+    private fun resolvePlacemarkStyle(
+        pm: Element,
+        styleUrl: String,
+        stylesMap: Map<String, KmlParsedStyle>,
+        styleMaps: Map<String, String>
+    ): KmlParsedStyle? {
+        // 1. Style inline sous Placemark (<Style><LineStyle>...)
+        val inlineStyles = pm.getElementsByTagName("Style")
+        if (inlineStyles.length > 0) {
+            val sEl = inlineStyles.item(0) as? Element
+            if (sEl != null) {
+                val ls = sEl.getElementsByTagName("LineStyle")
+                var c: String? = null
+                var w: Float? = null
+                if (ls.length > 0) {
+                    val lsEl = ls.item(0) as? Element
+                    if (lsEl != null) {
+                        c = kmlColorToAndroidHex(getDirectOrFirstChildValue(lsEl, "color"))
+                        w = getDirectOrFirstChildValue(lsEl, "width")?.toFloatOrNull()
+                    }
+                }
+                val ps = sEl.getElementsByTagName("PolyStyle")
+                if (c == null && ps.length > 0) {
+                    val psEl = ps.item(0) as? Element
+                    if (psEl != null) {
+                        c = kmlColorToAndroidHex(getDirectOrFirstChildValue(psEl, "color"))
+                    }
+                }
+                if (c != null || w != null) {
+                    return KmlParsedStyle(c, w)
+                }
+            }
+        }
+        // 2. Référence styleUrl (#style_id)
+        if (styleUrl.isNotBlank()) {
+            val cleanUrl = styleUrl.removePrefix("#")
+            val targetId = styleMaps[cleanUrl] ?: cleanUrl
+            return stylesMap[targetId]
+        }
+        return null
+    }
+
     fun parseKmlString(
         kml: String,
         existingNodes: List<FtthNodeEntity>,
-        mode: ImportMode = ImportMode.NATIVE
+        mode: ImportMode = ImportMode.NATIVE,
+        fallbackDocTitle: String = ""
     ): ImportResult {
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
+        var extractedDocTitle = fallbackDocTitle
 
         try {
             val sanitized = sanitizeXml(kml)
@@ -227,13 +386,84 @@ object RealImportService {
             val doc = builder.parse(ByteArrayInputStream(sanitized.toByteArray(StandardCharsets.UTF_8)))
             doc.documentElement.normalize()
 
-            // Extraire tous les Placemark une seule fois
+            // 1. Extraire le titre du Document KML
+            val docEls = doc.getElementsByTagName("Document")
+            if (docEls.length > 0) {
+                val docEl = docEls.item(0) as? Element
+                val docName = docEl?.let { getDirectChildValue(it, "name") }
+                if (!docName.isNullOrBlank()) {
+                    extractedDocTitle = docName
+                }
+            }
+            if (extractedDocTitle.isBlank()) {
+                val kmlName = getDirectChildValue(doc.documentElement, "name")
+                if (!kmlName.isNullOrBlank()) {
+                    extractedDocTitle = kmlName
+                }
+            }
+
+            // 2. Extraire la table des Styles KML (<Style id="...">)
+            val stylesMap = mutableMapOf<String, KmlParsedStyle>()
+            val styleNodes = doc.getElementsByTagName("Style")
+            for (s in 0 until styleNodes.length) {
+                val styleEl = styleNodes.item(s) as? Element ?: continue
+                val id = styleEl.getAttribute("id")
+                if (id.isNotBlank()) {
+                    var color: String? = null
+                    var width: Float? = null
+                    val lineStyles = styleEl.getElementsByTagName("LineStyle")
+                    if (lineStyles.length > 0) {
+                        val lsEl = lineStyles.item(0) as? Element
+                        if (lsEl != null) {
+                            color = kmlColorToAndroidHex(getDirectOrFirstChildValue(lsEl, "color"))
+                            width = getDirectOrFirstChildValue(lsEl, "width")?.toFloatOrNull()
+                        }
+                    }
+                    val polyStyles = styleEl.getElementsByTagName("PolyStyle")
+                    if (color == null && polyStyles.length > 0) {
+                        val psEl = polyStyles.item(0) as? Element
+                        if (psEl != null) {
+                            color = kmlColorToAndroidHex(getDirectOrFirstChildValue(psEl, "color"))
+                        }
+                    }
+                    stylesMap[id] = KmlParsedStyle(colorHex = color, width = width)
+                }
+            }
+
+            // 3. Extraire les StyleMap (<StyleMap id="...">)
+            val styleMaps = mutableMapOf<String, String>()
+            val styleMapNodes = doc.getElementsByTagName("StyleMap")
+            for (sm in 0 until styleMapNodes.length) {
+                val smEl = styleMapNodes.item(sm) as? Element ?: continue
+                val id = smEl.getAttribute("id")
+                if (id.isNotBlank()) {
+                    val pairs = smEl.getElementsByTagName("Pair")
+                    var targetStyleUrl: String? = null
+                    for (p in 0 until pairs.length) {
+                        val pairEl = pairs.item(p) as? Element ?: continue
+                        val key = getDirectOrFirstChildValue(pairEl, "key")
+                        val sUrl = getDirectOrFirstChildValue(pairEl, "styleUrl")
+                        if (key == "normal" && !sUrl.isNullOrBlank()) {
+                            targetStyleUrl = sUrl.removePrefix("#")
+                            break
+                        } else if (targetStyleUrl == null && !sUrl.isNullOrBlank()) {
+                            targetStyleUrl = sUrl.removePrefix("#")
+                        }
+                    }
+                    if (targetStyleUrl != null) {
+                        styleMaps[id] = targetStyleUrl
+                    }
+                }
+            }
+
+            // 4. Parcourir tous les Placemarks
             val placemarks = doc.getElementsByTagName("Placemark")
             for (i in 0 until placemarks.length) {
                 val pm = placemarks.item(i) as? Element ?: continue
                 val name = getDirectOrFirstChildValue(pm, "name") ?: "Objet-${i + 1}"
                 val desc = getDirectOrFirstChildValue(pm, "description") ?: ""
                 val styleUrl = getDirectOrFirstChildValue(pm, "styleUrl") ?: ""
+                val immediateFolder = getImmediateFolderName(pm)
                 val folderHierarchy = getParentFolderHierarchy(pm)
                 val folderContext = if (folderHierarchy.isNotEmpty()) "$folderHierarchy / $name" else name
 
@@ -254,32 +484,41 @@ object RealImportService {
                     if (key.isNotBlank()) properties[key] = value
                 }
 
-                // Vérifier géométries : LineString, Point, Polygon
+                // Résolution de couleur et style
+                val parsedStyle = resolvePlacemarkStyle(pm, styleUrl, stylesMap, styleMaps)
+                val itemColor = parsedStyle?.colorHex ?: getFolderDefaultColor(immediateFolder)
+                val itemWidth = parsedStyle?.width ?: 7f
+
+                // Extraire géométries
                 val lineStringEls = pm.getElementsByTagName("LineString")
                 val pointEls = pm.getElementsByTagName("Point")
                 val polygonEls = pm.getElementsByTagName("Polygon")
+                var parsedAnyGeometry = false
 
+                // A. Traiter tous les LineStrings sans exclusion
                 if (lineStringEls.length > 0) {
                     for (l in 0 until lineStringEls.length) {
                         val lineEl = lineStringEls.item(l) as? Element ?: continue
                         val coordsText = getDirectOrFirstChildValue(lineEl, "coordinates") ?: continue
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.size >= 2) {
+                            parsedAnyGeometry = true
                             val lineName = if (lineStringEls.length > 1) "$name ($l)" else name
                             if (mode == ImportMode.NATIVE) {
-                                // MODE NATIF : Tracé brut sans classification
                                 processLineStringNative(
                                     name = lineName,
                                     description = desc,
                                     styleUrl = styleUrl,
+                                    folderName = immediateFolder,
                                     folderContext = folderContext,
+                                    colorHex = itemColor,
+                                    strokeWidth = itemWidth,
                                     properties = properties,
                                     pts = pts,
                                     tracks = tracks,
                                     index = tracks.size
                                 )
                             } else {
-                                // MODE CLASSIFICATION INTELLIGENTE FTTH (enregistré)
                                 processLineStringClassification(
                                     name = lineName,
                                     description = desc,
@@ -296,29 +535,33 @@ object RealImportService {
                             }
                         }
                     }
-                } else if (pointEls.length > 0) {
+                }
+
+                // B. Traiter tous les Points (indépendamment des LineStrings)
+                if (pointEls.length > 0) {
                     for (p in 0 until pointEls.length) {
                         val ptEl = pointEls.item(p) as? Element ?: continue
                         val coordsText = getDirectOrFirstChildValue(ptEl, "coordinates") ?: continue
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.isNotEmpty()) {
+                            parsedAnyGeometry = true
                             val pt = pts.first()
                             val ptName = if (pointEls.length > 1) "$name ($p)" else name
                             if (mode == ImportMode.NATIVE) {
-                                // MODE NATIF : Point brut non classifié
                                 nodes.add(
                                     createNativeNode(
                                         id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
                                         name = ptName,
                                         description = desc,
+                                        folderName = immediateFolder,
                                         folderContext = folderContext,
+                                        colorHex = itemColor,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
                                         properties = properties
                                     )
                                 )
                             } else {
-                                // MODE CLASSIFICATION FTTH
                                 val nodeType = determineNodeType(folderContext, desc, styleUrl, properties)
                                 nodes.add(
                                     createNodeFromAttributesWithClassification(
@@ -334,17 +577,25 @@ object RealImportService {
                             }
                         }
                     }
-                } else if (polygonEls.length > 0) {
-                    val polyEl = polygonEls.item(0) as? Element
-                    val coordsText = polyEl?.let { getDirectOrFirstChildValue(it, "coordinates") }
-                    if (coordsText != null) {
+                }
+
+                // C. Traiter tous les Polygons
+                if (polygonEls.length > 0) {
+                    for (pg in 0 until polygonEls.length) {
+                        val polyEl = polygonEls.item(pg) as? Element ?: continue
+                        val coordsText = getDirectOrFirstChildValue(polyEl, "coordinates") ?: continue
                         val pts = parseKmlCoordinates(coordsText)
                         if (pts.isNotEmpty()) {
+                            parsedAnyGeometry = true
+                            val polyName = if (polygonEls.length > 1) "$name ($pg)" else name
                             if (mode == ImportMode.NATIVE) {
                                 processPolygonNative(
-                                    name = name,
+                                    name = polyName,
                                     description = desc,
+                                    folderName = immediateFolder,
                                     folderContext = folderContext,
+                                    colorHex = itemColor,
+                                    strokeWidth = itemWidth,
                                     properties = properties,
                                     pts = pts,
                                     tracks = tracks,
@@ -359,7 +610,7 @@ object RealImportService {
                                     createNodeFromAttributesWithClassification(
                                         id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
                                         type = nodeType,
-                                        name = name,
+                                        name = polyName,
                                         description = desc,
                                         lat = lat,
                                         lon = lon,
@@ -369,8 +620,10 @@ object RealImportService {
                             }
                         }
                     }
-                } else {
-                    // Fallback coordonnées directes sous Placemark
+                }
+
+                // D. Coordonnées directes sous Placemark si aucune géométrie enfant trouvée
+                if (!parsedAnyGeometry) {
                     val coordsText = getDirectOrFirstChildValue(pm, "coordinates")
                     if (coordsText != null) {
                         val pts = parseKmlCoordinates(coordsText)
@@ -380,7 +633,10 @@ object RealImportService {
                                     name = name,
                                     description = desc,
                                     styleUrl = styleUrl,
+                                    folderName = immediateFolder,
                                     folderContext = folderContext,
+                                    colorHex = itemColor,
+                                    strokeWidth = itemWidth,
                                     properties = properties,
                                     pts = pts,
                                     tracks = tracks,
@@ -409,7 +665,9 @@ object RealImportService {
                                         id = "KML-NOD-${System.currentTimeMillis()}-${nodes.size}",
                                         name = name,
                                         description = desc,
+                                        folderName = immediateFolder,
                                         folderContext = folderContext,
+                                        colorHex = itemColor,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
                                         properties = properties
@@ -439,8 +697,38 @@ object RealImportService {
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse KML : ${e.localizedMessage}")
         }
 
+        // Construire la liste des dossiers KML (reproduisant l'arborescence Google Earth)
+        val folderTracksMap = tracks.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val folderNodesMap = nodes.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val allFolderNames = (folderTracksMap.keys + folderNodesMap.keys).distinct()
+
+        val kmlFolders = allFolderNames.map { fName ->
+            val fTracks = folderTracksMap[fName] ?: emptyList()
+            val fNodes = folderNodesMap[fName] ?: emptyList()
+            val totalDist = fTracks.sumOf { it.totalDistanceMeters }
+            val color = fTracks.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+                ?: fNodes.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+                ?: getFolderDefaultColor(fName)
+
+            KmlFolderInfo(
+                name = fName,
+                tracksCount = fTracks.size,
+                nodesCount = fNodes.size,
+                totalDistanceMeters = totalDist,
+                colorHex = color,
+                isVisible = true
+            )
+        }
+
         val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "KML", mode)
-        return ImportResult(nodes, links, tracks, msg)
+        return ImportResult(
+            nodes = nodes,
+            links = links,
+            tracks = tracks,
+            message = msg,
+            documentTitle = extractedDocTitle.ifBlank { fallbackDocTitle },
+            folders = kmlFolders
+        )
     }
 
     private fun getParentFolderHierarchy(element: Element): String {
@@ -479,8 +767,12 @@ object RealImportService {
 
     private fun parseKmlCoordinates(coordsText: String): List<TrackPoint> {
         val points = mutableListOf<TrackPoint>()
-        val tokens = coordsText.trim().split(Regex("""[\s\r\n]+"""))
+        if (coordsText.isBlank()) return points
+        // Normaliser les espaces autour des virgules pour que "lon, lat, alt" devienne "lon,lat,alt"
+        val normalized = coordsText.replace(Regex("""\s*,\s*"""), ",")
+        val tokens = normalized.trim().split(Regex("""[\s\r\n]+"""))
         for (token in tokens) {
+            if (token.isBlank()) continue
             val parts = token.split(",")
             if (parts.size >= 2) {
                 val lon = parts[0].trim().toDoubleOrNull() ?: continue
@@ -710,7 +1002,10 @@ object RealImportService {
         name: String,
         description: String,
         styleUrl: String,
+        folderName: String = "",
         folderContext: String,
+        colorHex: String? = null,
+        strokeWidth: Float? = null,
         properties: Map<String, String>,
         pts: List<TrackPoint>,
         tracks: MutableList<StoredTrack>,
@@ -731,7 +1026,11 @@ object RealImportService {
                 notes = notes,
                 totalDistanceMeters = dist,
                 rawPoints = pts,
-                points = pts
+                points = pts,
+                folderName = folderName,
+                colorHex = colorHex,
+                strokeWidth = strokeWidth,
+                isVisible = true
             )
         )
     }
@@ -740,7 +1039,9 @@ object RealImportService {
         id: String,
         name: String,
         description: String,
+        folderName: String = "",
         folderContext: String,
+        colorHex: String? = null,
         lat: Double,
         lon: Double,
         properties: Map<String, String>
@@ -760,14 +1061,20 @@ object RealImportService {
             etat = NodeConformity.CONFORME,
             address = address,
             operator = operator,
-            notes = notes
+            notes = notes,
+            folderName = folderName,
+            colorHex = colorHex,
+            isVisible = true
         )
     }
 
     private fun processPolygonNative(
         name: String,
         description: String,
+        folderName: String = "",
         folderContext: String,
+        colorHex: String? = null,
+        strokeWidth: Float? = null,
         properties: Map<String, String>,
         pts: List<TrackPoint>,
         tracks: MutableList<StoredTrack>,
@@ -794,7 +1101,11 @@ object RealImportService {
                 notes = notes,
                 totalDistanceMeters = dist,
                 rawPoints = closedPts,
-                points = closedPts
+                points = closedPts,
+                folderName = folderName,
+                colorHex = colorHex,
+                strokeWidth = strokeWidth,
+                isVisible = true
             )
         )
 
@@ -806,7 +1117,9 @@ object RealImportService {
                 id = "NOD-POLY-${System.currentTimeMillis() % 100000}-$index",
                 name = name.ifBlank { "Polygone #${index + 1}" },
                 description = description,
+                folderName = folderName,
                 folderContext = folderContext,
+                colorHex = colorHex,
                 lat = avgLat,
                 lon = avgLon,
                 properties = properties

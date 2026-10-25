@@ -618,6 +618,125 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _importMode = MutableStateFlow(com.example.data.import.RealImportService.ImportMode.NATIVE)
     val importMode: StateFlow<com.example.data.import.RealImportService.ImportMode> = _importMode.asStateFlow()
 
+    // Google Earth / Calques KML
+    private val _kmlDocumentTitle = MutableStateFlow<String>("")
+    val kmlDocumentTitle: StateFlow<String> = _kmlDocumentTitle.asStateFlow()
+
+    private val _kmlFolders = MutableStateFlow<List<com.example.data.import.RealImportService.KmlFolderInfo>>(emptyList())
+    val kmlFolders: StateFlow<List<com.example.data.import.RealImportService.KmlFolderInfo>> = _kmlFolders.asStateFlow()
+
+    private val _showKmlGoogleEarthSheet = MutableStateFlow(false)
+    val showKmlGoogleEarthSheet: StateFlow<Boolean> = _showKmlGoogleEarthSheet.asStateFlow()
+
+    private val _hiddenKmlFolders = MutableStateFlow<Set<String>>(emptySet())
+    val hiddenKmlFolders: StateFlow<Set<String>> = _hiddenKmlFolders.asStateFlow()
+
+    fun openKmlGoogleEarthSheet() { _showKmlGoogleEarthSheet.value = true }
+    fun dismissKmlGoogleEarthSheet() { _showKmlGoogleEarthSheet.value = false }
+
+    fun toggleFolderVisibility(folderName: String) {
+        val currentHidden = _hiddenKmlFolders.value.toMutableSet()
+        val willBeVisible = if (currentHidden.contains(folderName)) {
+            currentHidden.remove(folderName)
+            true
+        } else {
+            currentHidden.add(folderName)
+            false
+        }
+        _hiddenKmlFolders.value = currentHidden
+
+        // Mise à jour de la visibilité sur les tracks en mémoire et stockage
+        val updatedTracks = _allTracks.value.map { trk ->
+            val match = trk.folderName.equals(folderName, ignoreCase = true) ||
+                    (folderName == "Sans dossier" && trk.folderName.isBlank())
+            if (match) trk.copy(isVisible = willBeVisible) else trk
+        }
+        _allTracks.value = updatedTracks
+        docStorage.saveTracks(updatedTracks)
+
+        // Mise à jour de la visibilité sur les nodes en mémoire et stockage
+        val updatedNodes = _rawNodes.value.map { node ->
+            val match = node.folderName.equals(folderName, ignoreCase = true) ||
+                    (folderName == "Sans dossier" && node.folderName.isBlank())
+            if (match) node.copy(isVisible = willBeVisible) else node
+        }
+        _rawNodes.value = updatedNodes
+        docStorage.saveNodes(updatedNodes)
+
+        // Mise à jour de l'état du dossier KML
+        _kmlFolders.value = _kmlFolders.value.map { f ->
+            if (f.name.equals(folderName, ignoreCase = true)) f.copy(isVisible = willBeVisible) else f
+        }
+    }
+
+    fun setAllKmlFoldersVisibility(visible: Boolean) {
+        val folders = _kmlFolders.value
+        _hiddenKmlFolders.value = if (visible) emptySet() else folders.map { it.name }.toSet()
+
+        val updatedTracks = _allTracks.value.map { it.copy(isVisible = visible) }
+        _allTracks.value = updatedTracks
+        docStorage.saveTracks(updatedTracks)
+
+        val updatedNodes = _rawNodes.value.map { it.copy(isVisible = visible) }
+        _rawNodes.value = updatedNodes
+        docStorage.saveNodes(updatedNodes)
+
+        _kmlFolders.value = _kmlFolders.value.map { it.copy(isVisible = visible) }
+        showBanner(if (visible) "Tous les calques affichés" else "Tous les calques masqués")
+    }
+
+    fun zoomToKmlFolder(folderName: String) {
+        val tracksInFolder = _allTracks.value.filter {
+            it.folderName.equals(folderName, ignoreCase = true) || (folderName == "Sans dossier" && it.folderName.isBlank())
+        }
+        val nodesInFolder = _rawNodes.value.filter {
+            it.folderName.equals(folderName, ignoreCase = true) || (folderName == "Sans dossier" && it.folderName.isBlank())
+        }
+
+        val allPoints = mutableListOf<Pair<Double, Double>>()
+        tracksInFolder.forEach { trk ->
+            val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
+            pts.forEach { allPoints.add(Pair(it.latitude, it.longitude)) }
+        }
+        nodesInFolder.forEach { node ->
+            allPoints.add(Pair(node.latitude, node.longitude))
+        }
+
+        if (allPoints.isNotEmpty()) {
+            val avgLat = allPoints.map { it.first }.average()
+            val avgLon = allPoints.map { it.second }.average()
+            _mapFocusTarget.value = Pair(avgLat, avgLon)
+            showBanner("Vue centrée sur $folderName")
+        }
+    }
+
+    fun refreshKmlFolders() {
+        val tracks = _allTracks.value
+        val nodes = _rawNodes.value
+        val folderTracksMap = tracks.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val folderNodesMap = nodes.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val allFolderNames = (folderTracksMap.keys + folderNodesMap.keys).filter { it.isNotBlank() && it != "Sans dossier" }.distinct()
+
+        if (allFolderNames.isNotEmpty()) {
+            val hidden = _hiddenKmlFolders.value
+            _kmlFolders.value = allFolderNames.map { fName ->
+                val fTracks = folderTracksMap[fName] ?: emptyList()
+                val fNodes = folderNodesMap[fName] ?: emptyList()
+                val totalDist = fTracks.sumOf { it.totalDistanceMeters }
+                val color = fTracks.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+                    ?: fNodes.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+                com.example.data.import.RealImportService.KmlFolderInfo(
+                    name = fName,
+                    tracksCount = fTracks.size,
+                    nodesCount = fNodes.size,
+                    totalDistanceMeters = totalDist,
+                    colorHex = color,
+                    isVisible = !hidden.contains(fName)
+                )
+            }
+        }
+    }
+
     fun setImportMode(mode: com.example.data.import.RealImportService.ImportMode) {
         _importMode.value = mode
     }
@@ -652,9 +771,17 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     val filteredNodes: StateFlow<List<FtthNodeEntity>> = combine(
         rawNodes,
         _filterState,
-        _searchQuery
-    ) { nodes, filters, query ->
+        _searchQuery,
+        _hiddenKmlFolders
+    ) { nodes, filters, query, hiddenFolders ->
         nodes.filter { node ->
+            val fName = node.folderName.ifBlank { "Sans dossier" }
+            if (node.folderName.isNotBlank() && hiddenFolders.contains(fName)) {
+                return@filter false
+            }
+            if (!node.isVisible) {
+                return@filter false
+            }
             val matchesType = when (node.type) {
                 FtthNodeType.POTEAU -> filters.showPoteaux
                 FtthNodeType.CHAMBRE -> filters.showChambres
@@ -683,9 +810,17 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     val filteredTracks: StateFlow<List<StoredTrack>> = combine(
         allTracks,
-        _filterState
-    ) { tracks, filters ->
-        if (filters.showTracks) tracks else emptyList()
+        _filterState,
+        _hiddenKmlFolders
+    ) { tracks, filters, hiddenFolders ->
+        if (!filters.showTracks) emptyList()
+        else {
+            tracks.filter { trk ->
+                val fName = trk.folderName.ifBlank { "Sans dossier" }
+                if (trk.folderName.isNotBlank() && hiddenFolders.contains(fName)) false
+                else trk.isVisible
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -748,6 +883,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 _rawLinks.value = links
                 _allTracks.value = tracks.distinctBy { it.id }
                 _isLoading.value = false
+                refreshKmlFolders()
             }
             if (nodes.isNotEmpty() || tracks.isNotEmpty() || links.isNotEmpty()) {
                 _bannerMessage.value = "Données chargées : ${nodes.size} nœuds, ${tracks.size} infra_lineaire, ${links.size} câbles ($curProj)"
@@ -1951,6 +2087,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val hasTracks = result.tracks.isNotEmpty()
 
             if (hasNodes || hasLinks || hasTracks) {
+                if (result.documentTitle.isNotBlank()) {
+                    _kmlDocumentTitle.value = result.documentTitle
+                }
+                if (result.folders.isNotEmpty()) {
+                    _kmlFolders.value = result.folders
+                }
+
                 if (hasNodes) {
                     val currentNodes = _rawNodes.value.toMutableList()
                     currentNodes.addAll(result.nodes)
@@ -1978,6 +2121,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 withContext(Dispatchers.Main) {
+                    refreshKmlFolders()
+                    if (result.folders.isNotEmpty()) {
+                        _showKmlGoogleEarthSheet.value = true
+                    }
                     if (firstFocusLatLon != null) {
                         _mapFocusTarget.value = firstFocusLatLon
                     }

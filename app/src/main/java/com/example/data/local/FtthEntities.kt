@@ -83,7 +83,12 @@ data class FtthNodeEntity(
     val buildingConnectionMode: String = "souterrain", // façade, souterrain, aérien
 
     // Spécifique Villa/Pavillon
-    val villaConnectionMode: String = "aérien" // aérien, souterrain, façade
+    val villaConnectionMode: String = "aérien", // aérien, souterrain, façade
+
+    // Attributs KML / Google Earth
+    val folderName: String = "",
+    val colorHex: String? = null,
+    val isVisible: Boolean = true
 )
 
 @Entity(tableName = "ftth_links")
