@@ -85,8 +85,10 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.FtthLinkEntity
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
+import com.example.data.local.isNativeKmlFeature
 import com.example.data.storage.ProjectInfo
 import com.example.data.storage.StoredTrack
+import com.example.data.storage.isNativeKmlFeature
 import com.example.ui.theme.TelecomCyan
 import com.example.ui.theme.TelecomNavy
 import java.util.Locale
@@ -128,6 +130,9 @@ fun ProjectFolderDialog(
     val textColor = if (isDarkTheme) Color(0xFFF8FAFC) else Color(0xFF062A3D)
     val secondaryTextColor = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF5B6B7B)
     val dividerColor = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+
+    val ftthNodes = remember(nodes) { nodes.filter { !it.isNativeKmlFeature() } }
+    val ftthTracks = remember(tracks) { tracks.filter { !it.isNativeKmlFeature() } }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Projets, 1: Nœuds, 2: Infra, 3: Câbles
     var searchQuery by remember { mutableStateOf("") }
@@ -297,7 +302,7 @@ fun ProjectFolderDialog(
                             )
                             Column {
                                 Text(
-                                    text = "${nodes.size}",
+                                    text = "${ftthNodes.size}",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     lineHeight = 14.sp,
@@ -333,7 +338,7 @@ fun ProjectFolderDialog(
                             )
                             Column {
                                 Text(
-                                    text = "${tracks.size}",
+                                    text = "${ftthTracks.size}",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     lineHeight = 14.sp,
@@ -877,7 +882,7 @@ fun ProjectFolderDialog(
                         }
                         1 -> {
                             NodesListContent(
-                                nodes = nodes,
+                                nodes = ftthNodes,
                                 searchQuery = searchQuery,
                                 onSearchQueryChange = { searchQuery = it },
                                 selectedTypeFilter = selectedTypeFilter,
@@ -888,7 +893,7 @@ fun ProjectFolderDialog(
                         }
                         2 -> {
                             TracksListContent(
-                                tracks = tracks,
+                                tracks = ftthTracks,
                                 onSelectTrack = onSelectTrack,
                                 onRequestDelete = { itemToDelete = Pair("track", it) }
                             )

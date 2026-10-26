@@ -8,8 +8,10 @@ import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
 import com.example.data.local.GpsTrackEntity
 import com.example.data.local.GpsTrackPointEntity
+import com.example.data.local.isNativeKmlFeature
 import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPoint
+import com.example.data.storage.isNativeKmlFeature
 import com.example.ui.components.FtthNodeVisuals
 import org.json.JSONArray
 import org.json.JSONObject
@@ -240,10 +242,12 @@ object RealExportService {
         root.put("exportedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
         val features = JSONArray()
 
-        val nodesMap = nodes.associateBy { it.id }
+        val cleanNodes = nodes.filter { !it.isNativeKmlFeature() }
+        val cleanTracks = tracks.filter { !it.isNativeKmlFeature() }
+        val nodesMap = cleanNodes.associateBy { it.id }
 
         // 1. Points pour tous les Nœuds
-        for (node in nodes) {
+        for (node in cleanNodes) {
             features.put(createNodeFeature(node))
         }
 
@@ -254,7 +258,7 @@ object RealExportService {
         }
 
         // 3. LineStrings pour tous les Trajets / Traces GPS
-        val dedupedTracks = tracks.distinctBy { it.id }
+        val dedupedTracks = cleanTracks.distinctBy { it.id }
         for (track in dedupedTracks) {
             val trackFeat = createTrackFeature(track)
             if (trackFeat != null) features.put(trackFeat)
@@ -288,7 +292,8 @@ object RealExportService {
         root.put("exportedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.FRANCE).format(Date()))
         val features = JSONArray()
 
-        val dedupedTracks = tracks.distinctBy { it.id }
+        val cleanTracks = tracks.filter { !it.isNativeKmlFeature() }
+        val dedupedTracks = cleanTracks.distinctBy { it.id }
         for (track in dedupedTracks) {
             val feat = createTrackFeature(track)
             if (feat != null) features.put(feat)
@@ -307,7 +312,8 @@ object RealExportService {
         val result = mutableMapOf<FtthNodeType, File>()
         val ts = getTimestamp()
 
-        val grouped = nodes.groupBy { it.type }
+        val cleanNodes = nodes.filter { !it.isNativeKmlFeature() }
+        val grouped = cleanNodes.groupBy { it.type }
         for (type in FtthNodeType.values()) {
             val list = grouped[type] ?: emptyList()
             if (list.isEmpty()) continue
@@ -363,6 +369,7 @@ object RealExportService {
     fun exportCsv(context: Context, nodes: List<FtthNodeEntity>): File {
         val file = File(getExportDir(context), "bordereau_piquetage_complet_${getTimestamp()}.csv")
         val sb = StringBuilder()
+        val cleanNodes = nodes.filter { !it.isNativeKmlFeature() }
 
         // Entête complète en français avec séparateur point-virgule
         sb.append(
@@ -405,7 +412,7 @@ object RealExportService {
             ).joinToString(";")
         ).append("\n")
 
-        for (node in nodes) {
+        for (node in cleanNodes) {
             val cols = listOf(
                 escapeCsv(node.id),
                 escapeCsv(node.name),
@@ -468,15 +475,17 @@ object RealExportService {
         tracks: List<StoredTrack> = emptyList()
     ): File {
         val file = File(getExportDir(context), "reseau_ftth_toutes_couches_${getTimestamp()}.kml")
-        val nodesMap = nodes.associateBy { it.id }
+        val cleanNodes = nodes.filter { !it.isNativeKmlFeature() }
+        val cleanTracks = tracks.filter { !it.isNativeKmlFeature() }
+        val nodesMap = cleanNodes.associateBy { it.id }
 
-        val poles = nodes.filter { it.type == FtthNodeType.POTEAU }
-        val chambers = nodes.filter { it.type == FtthNodeType.CHAMBRE }
-        val boitiers = nodes.filter { it.type == FtthNodeType.BOITIER }
-        val sros = nodes.filter { it.type == FtthNodeType.SRO }
-        val buildings = nodes.filter { it.type == FtthNodeType.IMMEUBLE }
-        val villas = nodes.filter { it.type == FtthNodeType.VILLA }
-        val dedupedTracks = tracks.distinctBy { it.id }
+        val poles = cleanNodes.filter { it.type == FtthNodeType.POTEAU }
+        val chambers = cleanNodes.filter { it.type == FtthNodeType.CHAMBRE }
+        val boitiers = cleanNodes.filter { it.type == FtthNodeType.BOITIER }
+        val sros = cleanNodes.filter { it.type == FtthNodeType.SRO }
+        val buildings = cleanNodes.filter { it.type == FtthNodeType.IMMEUBLE }
+        val villas = cleanNodes.filter { it.type == FtthNodeType.VILLA }
+        val dedupedTracks = cleanTracks.distinctBy { it.id }
 
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -781,18 +790,20 @@ object RealExportService {
         tracks: List<StoredTrack> = emptyList()
     ): File {
         val zipFile = File(getExportDir(context), "dossier_releve_terrain_complet_${getTimestamp()}.zip")
+        val cleanNodes = nodes.filter { !it.isNativeKmlFeature() }
+        val cleanTracks = tracks.filter { !it.isNativeKmlFeature() }
 
         // 1. Fichiers globaux
-        val geoJsonGlobal = exportGeoJson(context, nodes, links, tracks)
-        val kmzFile = exportKmz(context, nodes, links, tracks)
-        val kmlFile = exportKml(context, nodes, links, tracks)
-        val csvFile = exportCsv(context, nodes)
+        val geoJsonGlobal = exportGeoJson(context, cleanNodes, links, cleanTracks)
+        val kmzFile = exportKmz(context, cleanNodes, links, cleanTracks)
+        val kmlFile = exportKml(context, cleanNodes, links, cleanTracks)
+        val csvFile = exportCsv(context, cleanNodes)
 
         // 2. Fichier dédié Trajets / Traces GPS
-        val tracksGeoJson = exportTracksGeoJson(context, tracks)
+        val tracksGeoJson = exportTracksGeoJson(context, cleanTracks)
 
         // 3. Fichiers GeoJSON séparés par type de nœud
-        val nodeTypeFiles = exportGeoJsonByNodeType(context, nodes)
+        val nodeTypeFiles = exportGeoJsonByNodeType(context, cleanNodes)
 
         ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
             // Fichiers racine
@@ -808,7 +819,7 @@ object RealExportService {
             }
 
             // Dossier des photos réelles
-            for (node in nodes) {
+            for (node in cleanNodes) {
                 for (photoPath in node.photos) {
                     val pFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, photoPath)
                     if (pFile.exists() && pFile.length() > 0) {
@@ -819,7 +830,7 @@ object RealExportService {
             }
 
             // Photos des traces GPS le cas échéant
-            for (track in tracks) {
+            for (track in cleanTracks) {
                 for (photo in track.photos) {
                     val pFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, photo.photoPath)
                     if (pFile.exists() && pFile.length() > 0) {
@@ -852,6 +863,179 @@ object RealExportService {
             fis.copyTo(zos)
         }
         zos.closeEntry()
+    }
+
+    /**
+     * Exporte un fichier importé sous forme de KMZ léger (doc.kml uniquement).
+     * Si des photos sont rattachées aux entités KML, crée une archive ZIP d'exportation
+     * contenant le fichier KMZ et le dossier des photos locales.
+     */
+    fun exportKmzForImportedFile(
+        context: Context,
+        fileName: String,
+        nodes: List<FtthNodeEntity>,
+        tracks: List<StoredTrack>
+    ): File {
+        val sanitizedKmzName = if (fileName.lowercase(Locale.ROOT).endsWith(".kmz")) {
+            fileName
+        } else if (fileName.lowercase(Locale.ROOT).endsWith(".kml")) {
+            fileName.dropLast(4) + ".kmz"
+        } else {
+            "$fileName.kmz"
+        }
+
+        val lightweightKmzFile = File(getExportDir(context), sanitizedKmzName)
+
+        // Filtrer les nœuds (Points) et tracés (Polylignes/Polygones) appartenant à ce fichier
+        val fileNodes = nodes.filter { node ->
+            val sFile = node.sourceFile.ifBlank { "Fichier principal" }
+            sFile.equals(fileName, ignoreCase = true)
+        }
+        val fileTracks = tracks.filter { track ->
+            val sFile = track.sourceFile.ifBlank { "Fichier principal" }
+            sFile.equals(fileName, ignoreCase = true)
+        }
+
+        // Collecter toutes les photos associées aux entités de ce fichier depuis le stockage local
+        val collectedPhotoFiles = mutableListOf<File>()
+
+        fun resolvePhoto(photoPath: String): File? {
+            if (photoPath.isBlank()) return null
+            val resolved = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, photoPath)
+            if (resolved.exists() && resolved.length() > 0) {
+                if (!collectedPhotoFiles.contains(resolved)) {
+                    collectedPhotoFiles.add(resolved)
+                }
+                return resolved
+            }
+            return null
+        }
+
+        val sb = StringBuilder()
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        sb.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n")
+        sb.append("  <Document>\n")
+        sb.append("    <name>${escapeXml(fileName)}</name>\n")
+
+        val tracksByFolder = fileTracks.groupBy { it.folderName.ifBlank { "Général" } }
+        val nodesByFolder = fileNodes.groupBy { it.folderName.ifBlank { "Général" } }
+        val allFolders = (tracksByFolder.keys + nodesByFolder.keys).distinct()
+
+        for (folder in allFolders) {
+            sb.append("    <Folder>\n")
+            sb.append("      <name>${escapeXml(folder)}</name>\n")
+
+            // Points
+            val fNodes = nodesByFolder[folder] ?: emptyList()
+            for (node in fNodes) {
+                val resolvedPhotos = node.photos.mapNotNull { resolvePhoto(it) }
+                val displayName = node.name.ifBlank { node.id }
+
+                sb.append("      <Placemark>\n")
+                sb.append("        <name>${escapeXml(displayName)}</name>\n")
+                sb.append("        <description><![CDATA[\n")
+                sb.append("<div style=\"font-family:sans-serif;font-size:13px;\">\n")
+                sb.append("  <h3 style=\"margin:0 0 8px;color:#0284C7;\">${escapeXml(displayName)} (Point)</h3>\n")
+                if (node.notes.isNotBlank()) {
+                    sb.append("  <p><b>Notes / Attributs :</b><br/>${escapeXml(node.notes).replace("\n", "<br/>")}</p>\n")
+                }
+                if (resolvedPhotos.isNotEmpty()) {
+                    sb.append("  <div style=\"margin-top:10px;\">\n")
+                    sb.append("    <b>Photo(s) rattachée(s) :</b><br/>\n")
+                    for (p in resolvedPhotos) {
+                        sb.append("    • ${escapeXml(p.name)} (enregistrée dans dossier photos)<br/>\n")
+                    }
+                    sb.append("  </div>\n")
+                }
+                sb.append("</div>\n")
+                sb.append("        ]]></description>\n")
+                sb.append("        <Point>\n")
+                sb.append("          <coordinates>${node.longitude},${node.latitude},0</coordinates>\n")
+                sb.append("        </Point>\n")
+                sb.append("      </Placemark>\n")
+            }
+
+            // Polylignes et Polygones
+            val fTracks = tracksByFolder[folder] ?: emptyList()
+            for (track in fTracks) {
+                val resolvedPhotos = track.photos.mapNotNull { resolvePhoto(it.photoPath) }
+                val displayName = track.name.ifBlank { track.id }
+                val isPolygon = track.type.equals("Polygone", ignoreCase = true)
+                val kindLabel = if (isPolygon) "Polygone" else "Polyligne"
+
+                val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+                if (pts.isNotEmpty()) {
+                    sb.append("      <Placemark>\n")
+                    sb.append("        <name>${escapeXml(displayName)}</name>\n")
+                    sb.append("        <description><![CDATA[\n")
+                    sb.append("<div style=\"font-family:sans-serif;font-size:13px;\">\n")
+                    sb.append("  <h3 style=\"margin:0 0 8px;color:#0284C7;\">${escapeXml(displayName)} ($kindLabel)</h3>\n")
+                    if (track.notes.isNotBlank()) {
+                        sb.append("  <p><b>Notes / Attributs :</b><br/>${escapeXml(track.notes).replace("\n", "<br/>")}</p>\n")
+                    }
+                    if (resolvedPhotos.isNotEmpty()) {
+                        sb.append("  <div style=\"margin-top:10px;\">\n")
+                        sb.append("    <b>Photo(s) rattachée(s) :</b><br/>\n")
+                        for (p in resolvedPhotos) {
+                            sb.append("    • ${escapeXml(p.name)} (enregistrée dans dossier photos)<br/>\n")
+                        }
+                        sb.append("  </div>\n")
+                    }
+                    sb.append("</div>\n")
+                    sb.append("        ]]></description>\n")
+
+                    val coordStr = pts.joinToString(" ") { "${it.longitude},${it.latitude},${it.altitude}" }
+                    if (isPolygon) {
+                        sb.append("        <Polygon>\n")
+                        sb.append("          <outerBoundaryIs><LinearRing>\n")
+                        sb.append("            <coordinates>$coordStr</coordinates>\n")
+                        sb.append("          </LinearRing></outerBoundaryIs>\n")
+                        sb.append("        </Polygon>\n")
+                    } else {
+                        sb.append("        <LineString>\n")
+                        sb.append("          <coordinates>$coordStr</coordinates>\n")
+                        sb.append("        </LineString>\n")
+                    }
+                    sb.append("      </Placemark>\n")
+                }
+            }
+
+            sb.append("    </Folder>\n")
+        }
+
+        sb.append("  </Document>\n")
+        sb.append("</kml>\n")
+
+        val kmlText = sb.toString()
+
+        // 1. Créer le KMZ léger (uniquement doc.kml)
+        ZipOutputStream(FileOutputStream(lightweightKmzFile)).use { zos ->
+            val kmlEntry = ZipEntry("doc.kml")
+            zos.putNextEntry(kmlEntry)
+            zos.write(kmlText.toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        // 2. Si des photos existent, créer une archive ZIP complète contenant le KMZ et le dossier photos
+        if (collectedPhotoFiles.isNotEmpty()) {
+            val baseNameWithoutExt = sanitizedKmzName.removeSuffix(".kmz")
+            val exportZipFile = File(getExportDir(context), "${baseNameWithoutExt}_export.zip")
+
+            ZipOutputStream(FileOutputStream(exportZipFile)).use { zos ->
+                // Ajouter le KMZ léger
+                addFileToZip(zos, lightweightKmzFile, sanitizedKmzName)
+
+                // Ajouter le dossier des photos
+                for (pFile in collectedPhotoFiles) {
+                    if (pFile.exists() && pFile.length() > 0) {
+                        addFileToZip(zos, pFile, "photos/${pFile.name}")
+                    }
+                }
+            }
+            return exportZipFile
+        }
+
+        return lightweightKmzFile
     }
 
     fun shareFile(context: Context, file: File, mimeType: String, title: String = "Exporter les données FTTH") {

@@ -590,6 +590,210 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _selectedKmlFeature.value = null
     }
 
+    fun startMovingKmlFeature(feature: KmlFeatureItem) {
+        _selectedKmlFeature.value = null
+        when (feature) {
+            is KmlFeatureItem.PointFeature -> {
+                startMoveNode(feature.node)
+            }
+            is KmlFeatureItem.LineFeature -> {
+                startTrackAdjustment(feature.track)
+            }
+        }
+    }
+
+    fun updateKmlFeature(feature: KmlFeatureItem, newName: String, newFolder: String, newNotes: String? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> {
+                    val oldNode = feature.node
+                    val updatedNode = oldNode.copy(
+                        name = newName,
+                        folderName = newFolder,
+                        notes = newNotes ?: oldNode.notes,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val list = _rawNodes.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldNode.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedNode
+                        _rawNodes.value = list
+                        docStorage.saveNodes(list)
+                    }
+                    withContext(Dispatchers.Main) {
+                        refreshKmlFolders()
+                        _selectedKmlFeature.value = KmlFeatureItem.PointFeature(updatedNode)
+                        showBanner("Point KML « $newName » mis à jour")
+                    }
+                }
+                is KmlFeatureItem.LineFeature -> {
+                    val oldTrack = feature.track
+                    val updatedTrack = oldTrack.copy(
+                        name = newName,
+                        folderName = newFolder,
+                        notes = newNotes ?: oldTrack.notes
+                    )
+                    val list = _allTracks.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldTrack.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedTrack
+                        _allTracks.value = list
+                        docStorage.saveTracks(list)
+                    }
+                    withContext(Dispatchers.Main) {
+                        refreshKmlFolders()
+                        _selectedKmlFeature.value = KmlFeatureItem.LineFeature(updatedTrack)
+                        showBanner("Ligne KML « $newName » mise à jour")
+                    }
+                }
+            }
+        }
+    }
+
+    fun deleteKmlFeature(feature: KmlFeatureItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> {
+                    val id = feature.node.id
+                    val name = feature.node.name.ifBlank { id }
+                    val list = _rawNodes.value.filter { it.id != id }
+                    _rawNodes.value = list
+                    docStorage.saveNodes(list)
+                    withContext(Dispatchers.Main) {
+                        refreshKmlFolders()
+                        _selectedKmlFeature.value = null
+                        showBanner("Point KML « $name » supprimé")
+                    }
+                }
+                is KmlFeatureItem.LineFeature -> {
+                    val id = feature.track.id
+                    val name = feature.track.name.ifBlank { id }
+                    val list = _allTracks.value.filter { it.id != id }
+                    _allTracks.value = list
+                    docStorage.saveTracks(list)
+                    withContext(Dispatchers.Main) {
+                        refreshKmlFolders()
+                        _selectedKmlFeature.value = null
+                        showBanner("Ligne KML « $name » supprimée")
+                    }
+                }
+            }
+        }
+    }
+
+    fun addKmlFeaturePhoto(feature: KmlFeatureItem, photoPath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> {
+                    val oldNode = feature.node
+                    val updatedPhotos = oldNode.photos + photoPath
+                    val updatedNode = oldNode.copy(
+                        photos = updatedPhotos,
+                        photoCount = updatedPhotos.size,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val list = _rawNodes.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldNode.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedNode
+                        _rawNodes.value = list
+                        docStorage.saveNodes(list)
+                    }
+                    withContext(Dispatchers.Main) {
+                        _selectedKmlFeature.value = KmlFeatureItem.PointFeature(updatedNode)
+                        showBanner("Photo rattachée au Point KML")
+                    }
+                }
+                is KmlFeatureItem.LineFeature -> {
+                    val oldTrack = feature.track
+                    val pts = if (oldTrack.points.isNotEmpty()) oldTrack.points else oldTrack.rawPoints
+                    val lat = pts.firstOrNull()?.latitude ?: 0.0
+                    val lon = pts.firstOrNull()?.longitude ?: 0.0
+                    val photoObj = com.example.data.storage.TrackPhoto(photoPath = photoPath, latitude = lat, longitude = lon)
+                    val updatedPhotos = oldTrack.photos + photoObj
+                    val updatedTrack = oldTrack.copy(photos = updatedPhotos)
+                    val list = _allTracks.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldTrack.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedTrack
+                        _allTracks.value = list
+                        docStorage.saveTracks(list)
+                    }
+                    withContext(Dispatchers.Main) {
+                        _selectedKmlFeature.value = KmlFeatureItem.LineFeature(updatedTrack)
+                        showBanner("Photo rattachée à la Ligne/Polygone KML")
+                    }
+                }
+            }
+        }
+    }
+
+    fun deleteKmlFeaturePhoto(feature: KmlFeatureItem, photoPath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> {
+                    val oldNode = feature.node
+                    val updatedPhotos = oldNode.photos.filter { it != photoPath }
+                    val updatedNode = oldNode.copy(
+                        photos = updatedPhotos,
+                        photoCount = updatedPhotos.size,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val list = _rawNodes.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldNode.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedNode
+                        _rawNodes.value = list
+                        docStorage.saveNodes(list)
+                    }
+                    com.example.data.photo.PhotoStorageManager.deletePhoto(photoPath)
+                    withContext(Dispatchers.Main) {
+                        _selectedKmlFeature.value = KmlFeatureItem.PointFeature(updatedNode)
+                        showBanner("Photo supprimée du Point KML")
+                    }
+                }
+                is KmlFeatureItem.LineFeature -> {
+                    val oldTrack = feature.track
+                    val updatedPhotos = oldTrack.photos.filter { it.photoPath != photoPath }
+                    val updatedTrack = oldTrack.copy(photos = updatedPhotos)
+                    val list = _allTracks.value.toMutableList()
+                    val idx = list.indexOfFirst { it.id == oldTrack.id }
+                    if (idx >= 0) {
+                        list[idx] = updatedTrack
+                        _allTracks.value = list
+                        docStorage.saveTracks(list)
+                    }
+                    com.example.data.photo.PhotoStorageManager.deletePhoto(photoPath)
+                    withContext(Dispatchers.Main) {
+                        _selectedKmlFeature.value = KmlFeatureItem.LineFeature(updatedTrack)
+                        showBanner("Photo supprimée de la Ligne/Polygone KML")
+                    }
+                }
+            }
+        }
+    }
+
+    fun exportKmzForFileAndShare(context: Context, fileName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = RealExportService.exportKmzForImportedFile(
+                context = context,
+                fileName = fileName,
+                nodes = _rawNodes.value,
+                tracks = _allTracks.value
+            )
+            withContext(Dispatchers.Main) {
+                val mimeType = if (file.name.lowercase(Locale.ROOT).endsWith(".zip")) {
+                    "application/zip"
+                } else {
+                    "application/vnd.google-earth.kmz"
+                }
+                val label = if (file.name.lowercase(Locale.ROOT).endsWith(".zip")) "Archive ZIP d'exportation" else "Fichier KMZ"
+                RealExportService.shareFile(context, file, mimeType, "Partager $fileName")
+                showBanner("$label « ${file.name} » généré et prêt au partage !")
+            }
+        }
+    }
+
     private val _selectedTrackForDetail = MutableStateFlow<StoredTrack?>(null)
     val selectedTrackForDetail: StateFlow<StoredTrack?> = _selectedTrackForDetail.asStateFlow()
 
@@ -1289,6 +1493,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         saveNode(node.copy(latitude = pos.first, longitude = pos.second))
         _movingNode.value = null
         _tempMoveNodePosition.value = null
+        refreshKmlFolders()
         _bannerMessage.value = "Nœud ${node.id} déplacé avec succès !"
     }
 

@@ -1192,24 +1192,6 @@ object RealImportService {
                 sourceFile = sourceFile
             )
         )
-
-        // Centroïde du polygone
-        val avgLat = pts.map { it.latitude }.average()
-        val avgLon = pts.map { it.longitude }.average()
-        nodes.add(
-            createNativeNode(
-                id = "NOD-POLY-${System.currentTimeMillis() % 100000}-$index",
-                name = name.ifBlank { "Polygone #${index + 1}" },
-                description = description,
-                folderName = folderName,
-                folderContext = folderContext,
-                colorHex = colorHex,
-                lat = avgLat,
-                lon = avgLon,
-                properties = properties,
-                sourceFile = sourceFile
-            )
-        )
     }
 
     private fun extractHtmlTableProperties(html: String, map: MutableMap<String, String>) {

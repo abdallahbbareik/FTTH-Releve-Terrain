@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -93,6 +94,7 @@ fun KmlGoogleEarthSheet(
     onZoomToNode: (FtthNodeEntity) -> Unit,
     onInspectTrack: ((StoredTrack) -> Unit)? = null,
     onInspectNode: ((FtthNodeEntity) -> Unit)? = null,
+    onExportFileKmz: ((String) -> Unit)? = null,
     onDeleteFile: (String) -> Unit = {},
     onDeleteFolder: ((folderName: String, fileName: String?) -> Unit)? = null,
     onDismiss: () -> Unit,
@@ -364,6 +366,21 @@ fun KmlGoogleEarthSheet(
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
+                                    }
+
+                                    // Exporter ce fichier sous son nom KMZ d'origine
+                                    if (onExportFileKmz != null) {
+                                        IconButton(
+                                            onClick = { onExportFileKmz(file.fileName) },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Share,
+                                                contentDescription = "Exporter KMZ (Nom d'origine)",
+                                                tint = MaterialTheme.colorScheme.secondary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
 
                                     // Masquer/Afficher le fichier entier

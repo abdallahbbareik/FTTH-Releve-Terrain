@@ -587,8 +587,20 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 onCancelPickOnMapMode = { viewModel.cancelPickOnMapMode() },
                 onUpdateStakingPosition = { lat, lon -> viewModel.updatePendingStakePosition(lat, lon) },
                 onLinkClick = { link -> viewModel.selectLinkForDetail(link) },
-                onTrackClick = { track -> viewModel.openTrackDetail(track) },
-                onNodeClick = { viewModel.selectNode(it) },
+                onTrackClick = { track ->
+                    if (viewModel.isFeatureNativeKml(track)) {
+                        viewModel.selectKmlFeature(KmlFeatureItem.LineFeature(track))
+                    } else {
+                        viewModel.openTrackDetail(track)
+                    }
+                },
+                onNodeClick = { node ->
+                    if (viewModel.isFeatureNativeKml(node)) {
+                        viewModel.selectKmlFeature(KmlFeatureItem.PointFeature(node))
+                    } else {
+                        viewModel.selectNode(node)
+                    }
+                },
                 onMapLongClick = { lat, lon -> viewModel.requestStakingAtMapPosition(lat, lon) },
                 onManualTrackAddPoint = { lat, lon -> viewModel.addManualTrackPoint(lat, lon) },
                 onConfirmStakingPosition = { lat, lon -> viewModel.confirmStakingPosition(lat, lon) },
@@ -1024,19 +1036,37 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onInspectNode = { node ->
                         viewModel.selectKmlFeature(KmlFeatureItem.PointFeature(node))
                     },
+                    onExportFileKmz = { fileName ->
+                        viewModel.exportKmzForFileAndShare(context, fileName)
+                    },
                     onDeleteFile = { fileName -> viewModel.deleteKmlFile(fileName) },
                     onDeleteFolder = { folder, file -> viewModel.deleteKmlFolder(folder, file) },
                     onDismiss = { viewModel.dismissKmlGoogleEarthSheet() }
                 )
             }
 
-            // Fiche de consultation dédiée KML / KMZ natif (View Mode avec tous les attributs)
+            // Fiche de consultation et d'édition dédiée KML / KMZ natif (View & Edit Mode)
             if (selectedKmlFeature != null) {
                 KmlFeatureDetailSheet(
                     feature = selectedKmlFeature!!,
                     onCenterOnMap = { lat, lon ->
                         viewModel.focusOnCoordinates(lat, lon)
                         viewModel.dismissKmlFeatureDetail()
+                    },
+                    onMoveOnMap = { feature ->
+                        viewModel.startMovingKmlFeature(feature)
+                    },
+                    onEditFeature = { feature, newName, newFolder, newNotes ->
+                        viewModel.updateKmlFeature(feature, newName, newFolder, newNotes)
+                    },
+                    onAddPhoto = { feature, photoPath ->
+                        viewModel.addKmlFeaturePhoto(feature, photoPath)
+                    },
+                    onDeletePhoto = { feature, photoPath ->
+                        viewModel.deleteKmlFeaturePhoto(feature, photoPath)
+                    },
+                    onDeleteFeature = { feature ->
+                        viewModel.deleteKmlFeature(feature)
                     },
                     onDismiss = { viewModel.dismissKmlFeatureDetail() }
                 )

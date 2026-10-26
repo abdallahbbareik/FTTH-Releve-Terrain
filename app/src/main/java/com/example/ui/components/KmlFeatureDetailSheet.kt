@@ -3,7 +3,10 @@ package com.example.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,28 +16,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -60,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -67,13 +76,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.StoredTrack
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 
 /**
- * Modèle scellé représentant un objet KML/KMZ sélectionné en mode consultation (View Mode).
+ * Modèle scellé représentant un objet KML/KMZ sélectionné en mode consultation ou édition.
  */
 sealed class KmlFeatureItem {
     data class PointFeature(val node: FtthNodeEntity) : KmlFeatureItem()
@@ -81,15 +93,25 @@ sealed class KmlFeatureItem {
 }
 
 /**
- * Fiche de consultation dédiée aux objets KML/KMZ natifs (Mode Affichage / View Mode).
- * Affiche l'ensemble des champs, attributs SIG (ExtendedData, SimpleData, description),
- * la géométrie et permet de centrer sur la carte, sans proposer de formulaire d'édition FTTH.
+ * Fiche de consultation et d'édition dédiée aux objets KML/KMZ natifs (Mode Affichage & Mode Édition).
+ * Classement des entités : Point / Polyligne / Polygone.
+ * Permet de :
+ *  1. Consulter les attributs SIG/KML et centrer sur la carte.
+ *  2. Déplacer un point ou un tracé/polygone sur la carte.
+ *  3. Modifier le nom, le dossier/calque, les notes et propriétés.
+ *  4. Ajouter des photos rattachées à l'entité KML.
+ *  5. Supprimer l'entité KML du projet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KmlFeatureDetailSheet(
     feature: KmlFeatureItem,
     onCenterOnMap: (lat: Double, lon: Double) -> Unit,
+    onMoveOnMap: ((KmlFeatureItem) -> Unit)? = null,
+    onEditFeature: ((feature: KmlFeatureItem, newName: String, newFolder: String, newNotes: String?) -> Unit)? = null,
+    onAddPhoto: ((feature: KmlFeatureItem, photoPath: String) -> Unit)? = null,
+    onDeletePhoto: ((feature: KmlFeatureItem, photoPath: String) -> Unit)? = null,
+    onDeleteFeature: ((KmlFeatureItem) -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -97,11 +119,66 @@ fun KmlFeatureDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     var fieldSearchQuery by remember { mutableStateOf("") }
 
-    // Extraction des métadonnées de base
+    var isEditingMode by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var tempPhotoFile by remember { mutableStateOf<File?>(null) }
+    var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
+
+    // Prise de photo par caméra
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempPhotoFile != null && tempPhotoFile!!.exists() && tempPhotoFile!!.length() > 0) {
+            val finalized = com.example.data.photo.PhotoStorageManager.syncAndFinalizePhoto(context, tempPhotoFile!!)
+            onAddPhoto?.invoke(feature, finalized)
+        } else {
+            tempPhotoFile?.let { if (it.exists() && it.length() == 0L) it.delete() }
+        }
+    }
+
+    // Extraction des photos rattachées
+    val photoPaths = remember(feature) {
+        when (feature) {
+            is KmlFeatureItem.PointFeature -> feature.node.photos
+            is KmlFeatureItem.LineFeature -> feature.track.photos.map { it.photoPath }
+        }
+    }
+
+    // Initialisation des champs d'édition
+    var editedName by remember(feature) {
+        mutableStateOf(
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> feature.node.name.ifBlank { feature.node.id }
+                is KmlFeatureItem.LineFeature -> feature.track.name.ifBlank { feature.track.id }
+            }
+        )
+    }
+
+    var editedFolder by remember(feature) {
+        mutableStateOf(
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> feature.node.folderName
+                is KmlFeatureItem.LineFeature -> feature.track.folderName
+            }
+        )
+    }
+
+    var editedNotes by remember(feature) {
+        mutableStateOf(
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> feature.node.notes
+                is KmlFeatureItem.LineFeature -> feature.track.notes
+            }
+        )
+    }
+
+    // Extraction des métadonnées de base et du classement géométrique (Point / Polyligne / Polygone)
     val title: String
     val folderName: String
     val colorHex: String?
     val isPoint: Boolean
+    val isPolygon: Boolean
+    val classificationLabel: String
     val centerLat: Double
     val centerLon: Double
     val totalLengthMeters: Double?
@@ -110,6 +187,8 @@ fun KmlFeatureDetailSheet(
     when (feature) {
         is KmlFeatureItem.PointFeature -> {
             isPoint = true
+            isPolygon = false
+            classificationLabel = "Point"
             val node = feature.node
             title = node.name.ifBlank { node.id }
             folderName = node.folderName
@@ -122,6 +201,8 @@ fun KmlFeatureDetailSheet(
         is KmlFeatureItem.LineFeature -> {
             isPoint = false
             val track = feature.track
+            isPolygon = track.type.contains("Polygone", ignoreCase = true)
+            classificationLabel = if (isPolygon) "Polygone" else "Polyligne"
             title = track.name.ifBlank { track.id }
             folderName = track.folderName
             colorHex = track.colorHex
@@ -200,16 +281,16 @@ fun KmlFeatureDetailSheet(
             }
         }
 
-        // Si aucun champ n'a été trouvé, ajouter les métadonnées de base
         if (map.isEmpty()) {
             map["Nom"] = title
-            if (folderName.isNotBlank()) map["Dossier KML"] = folderName
+            map["Classement géométrique"] = classificationLabel
+            if (folderName.isNotBlank()) map["Dossier / Calque"] = folderName
             if (colorHex != null) map["Couleur"] = colorHex
             if (isPoint) {
                 map["Latitude"] = String.format(Locale.ROOT, "%.6f", centerLat)
                 map["Longitude"] = String.format(Locale.ROOT, "%.6f", centerLon)
             } else {
-                map["Longueur"] = if ((totalLengthMeters ?: 0.0) < 1000.0) {
+                map["Périmètre / Longueur"] = if ((totalLengthMeters ?: 0.0) < 1000.0) {
                     "${(totalLengthMeters ?: 0.0).toInt()} m"
                 } else {
                     String.format(Locale.FRANCE, "%.2f km", (totalLengthMeters ?: 0.0) / 1000.0)
@@ -243,14 +324,13 @@ fun KmlFeatureDetailSheet(
                 .fillMaxHeight(0.88f)
                 .padding(bottom = 16.dp)
         ) {
-            // --- EN-TÊTE DU MODE CONSULTATION KML ---
+            // --- EN-TÊTE ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Icône marqueur personnalisée selon le type (Point ou Ligne)
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -274,26 +354,27 @@ fun KmlFeatureDetailSheet(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
+                            color = if (isEditingMode) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = "VIEW MODE",
+                                text = if (isEditingMode) "EDIT MODE" else "VIEW MODE",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = if (isEditingMode) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
 
+                        // Badge de classement KML (Point / Polyligne / Polygone)
                         Surface(
                             color = featureColor.copy(alpha = 0.18f),
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = if (isPoint) "Point KML" else "Ligne KML",
+                                text = classificationLabel,
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 color = featureColor,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -347,6 +428,272 @@ fun KmlFeatureDetailSheet(
                 }
             }
 
+            // --- BARRE D'ACTIONS : DÉPLACER / MODIFIER / SUPPRIMER ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        onMoveOnMap?.invoke(feature)
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("kml_move_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenWith,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Déplacer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { isEditingMode = !isEditingMode },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isEditingMode) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("kml_edit_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isEditingMode) Icons.Default.Close else Icons.Default.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (isEditingMode) "Fermer" else "Modifier", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { showDeleteConfirmDialog = true },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("kml_delete_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Supprimer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // --- SECTION PHOTOS RATTACHÉES À L'ENTITÉ KML ---
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Photos (${photoPaths.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val pFile = com.example.data.photo.PhotoStorageManager.createNewPhotoFile(context, "KML_PHOTO")
+                                tempPhotoFile = pFile
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    pFile
+                                )
+                                cameraLauncher.launch(uri)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddAPhoto,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Ajouter Photo", fontSize = 12.sp)
+                        }
+                    }
+
+                    if (photoPaths.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(photoPaths) { path ->
+                                val pFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, path)
+                                Box(
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black.copy(alpha = 0.1f))
+                                        .clickable { viewingPhotoPath = path }
+                                ) {
+                                    AsyncImage(
+                                        model = pFile,
+                                        contentDescription = "Photo KML",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+
+                                    // Bouton supprimer photo
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(2.dp)
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.65f))
+                                            .clickable { onDeletePhoto?.invoke(feature, path) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Supprimer",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- FORMULAIRE D'ÉDITION INLINE ---
+            AnimatedVisibility(visible = isEditingMode) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Mode Édition KML : Modifier l'entité",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        OutlinedTextField(
+                            value = editedName,
+                            onValueChange = { editedName = it },
+                            label = { Text("Nom de l'entité KML") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("kml_edit_name_input"),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = editedFolder,
+                            onValueChange = { editedFolder = it },
+                            label = { Text("Dossier / Calque KML") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("kml_edit_folder_input"),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = editedNotes,
+                            onValueChange = { editedNotes = it },
+                            label = { Text("Notes / Attributs") },
+                            maxLines = 4,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("kml_edit_notes_input"),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { isEditingMode = false },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Annuler")
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Button(
+                                onClick = {
+                                    onEditFeature?.invoke(feature, editedName, editedFolder, editedNotes)
+                                    isEditingMode = false
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Save,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Enregistrer")
+                            }
+                        }
+                    }
+                }
+            }
+
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 modifier = Modifier.padding(vertical = 4.dp)
@@ -391,7 +738,7 @@ fun KmlFeatureDetailSheet(
                                 String.format(Locale.FRANCE, "%.2f km", (totalLengthMeters ?: 0.0) / 1000.0)
                             }
                             Text(
-                                text = "Géométrie du tracé",
+                                text = if (isPolygon) "Périmètre du polygone" else "Géométrie de la polyligne",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -407,7 +754,6 @@ fun KmlFeatureDetailSheet(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Bouton copier coordonnées
                         IconButton(
                             onClick = {
                                 val textToCopy = if (isPoint) {
@@ -429,7 +775,6 @@ fun KmlFeatureDetailSheet(
                             )
                         }
 
-                        // Bouton centrer sur la carte
                         Button(
                             onClick = {
                                 onCenterOnMap(centerLat, centerLon)
@@ -452,7 +797,7 @@ fun KmlFeatureDetailSheet(
                 }
             }
 
-            // --- SECTION ATTRIBUTS / CHAMPS KML (TABLE DE PROPRIÉTÉS) ---
+            // --- SECTION ATTRIBUTS KML / SIG ---
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -494,7 +839,6 @@ fun KmlFeatureDetailSheet(
                     }
                 }
 
-                // Champ de recherche rapide si plus de 4 attributs
                 if (allAttributes.size > 4) {
                     Spacer(modifier = Modifier.height(6.dp))
                     OutlinedTextField(
@@ -504,7 +848,7 @@ fun KmlFeatureDetailSheet(
                             .fillMaxWidth()
                             .height(50.dp)
                             .testTag("kml_field_search_input"),
-                        placeholder = { Text("Rechercher un champ ou une valeur...", fontSize = 12.sp) },
+                        placeholder = { Text("Rechercher un champ...", fontSize = 12.sp) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Search,
@@ -534,7 +878,6 @@ fun KmlFeatureDetailSheet(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Liste déroulante des attributs KML
                 if (filteredAttributes.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -605,7 +948,6 @@ fun KmlFeatureDetailSheet(
                 }
             }
 
-            // Bouton inférieur de fermeture
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -619,6 +961,58 @@ fun KmlFeatureDetailSheet(
                     Text("Fermer la consultation")
                 }
             }
+        }
+
+        // --- APERÇU PHOTO PLEIN ÉCRAN ---
+        if (viewingPhotoPath != null) {
+            val resolvedFile = com.example.data.photo.PhotoStorageManager.resolvePhotoFile(context, viewingPhotoPath!!)
+            Dialog(onDismissRequest = { viewingPhotoPath = null }) {
+                Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Photo entité KML",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        AsyncImage(
+                            model = resolvedFile,
+                            contentDescription = "Photo KML",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { viewingPhotoPath = null }) {
+                            Text("Fermer")
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- DIALOGUE DE CONFIRMATION DE SUPPRESSION ---
+        if (showDeleteConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirmDialog = false },
+                title = { Text("Supprimer l'entité KML", fontWeight = FontWeight.Bold) },
+                text = { Text("Voulez-vous vraiment supprimer définitivement « $title » ? Cet objet sera retiré de votre projet.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showDeleteConfirmDialog = false
+                            onDeleteFeature?.invoke(feature)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Supprimer")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
+                        Text("Annuler")
+                    }
+                }
+            )
         }
     }
 }

@@ -160,3 +160,13 @@ data class GpsTrackPointEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+fun FtthNodeEntity.isNativeKmlFeature(): Boolean {
+    return isNativeKml ||
+            id.startsWith("KML-NOD-") ||
+            id.startsWith("NOD-POLY-") ||
+            kmlProperties.isNotBlank() ||
+            sourceFile.isNotBlank() ||
+            (folderName.isNotBlank() && (notes.contains("Attributs SIG") || notes.contains("Attributs KML")))
+}
+
+

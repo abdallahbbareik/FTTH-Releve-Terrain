@@ -9,6 +9,7 @@ import com.example.data.local.FtthNodeType
 import com.example.data.local.NodeConformity
 import com.example.data.local.NodeStatus
 import com.example.data.local.SyncState
+import com.example.data.local.isNativeKmlFeature
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -210,6 +211,16 @@ data class StoredTrack(
             )
         }
     }
+}
+
+fun StoredTrack.isNativeKmlFeature(): Boolean {
+    return isNativeKml ||
+            id.startsWith("TRK-NAT-") ||
+            id.startsWith("POLY-NAT-") ||
+            conduitType == "Natif" ||
+            kmlProperties.isNotBlank() ||
+            sourceFile.isNotBlank() ||
+            (folderName.isNotBlank() && (notes.contains("Attributs SIG") || notes.contains("Attributs KML")))
 }
 
 /**
@@ -497,8 +508,8 @@ class DocumentStorageManager(private val context: Context) {
             result.add(
                 ProjectInfo(
                     name = name,
-                    nodesCount = nodes.size,
-                    tracksCount = tracks.size,
+                    nodesCount = nodes.count { !it.isNativeKmlFeature() },
+                    tracksCount = tracks.count { !it.isNativeKmlFeature() },
                     linksCount = links.size,
                     lastModified = lastMod,
                     isCurrent = name == _currentProject
