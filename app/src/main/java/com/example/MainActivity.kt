@@ -79,6 +79,8 @@ import com.example.ui.components.BlockingTaskDialog
 import com.example.ui.components.ExportReportDialog
 import com.example.ui.components.FilterLayerSheet
 import com.example.ui.components.KmlGoogleEarthSheet
+import com.example.ui.components.KmlFeatureDetailSheet
+import com.example.ui.components.KmlFeatureItem
 import com.example.ui.components.GpsTrackControlBar
 import com.example.ui.components.ManualTrackEditorBar
 import com.example.ui.components.MoveNodeEditorBar
@@ -210,6 +212,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val showNodesListDialog by viewModel.showNodesListDialog.collectAsStateWithLifecycle()
     val showProjectFolderDialog by viewModel.showProjectFolderDialog.collectAsStateWithLifecycle()
     val selectedLinkForDetail by viewModel.selectedLinkForDetail.collectAsStateWithLifecycle()
+    val selectedKmlFeature by viewModel.selectedKmlFeature.collectAsStateWithLifecycle()
 
     var showGpsDetailsDialog by remember { mutableStateOf(false) }
     var showLinksListDialog by remember { mutableStateOf(false) }
@@ -253,6 +256,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val pendingLinkNodes by viewModel.pendingLinkNodes.collectAsStateWithLifecycle()
 
     val kmlDocumentTitle by viewModel.kmlDocumentTitle.collectAsStateWithLifecycle()
+    val kmlFiles by viewModel.kmlFiles.collectAsStateWithLifecycle()
     val kmlFolders by viewModel.kmlFolders.collectAsStateWithLifecycle()
     val showKmlGoogleEarthSheet by viewModel.showKmlGoogleEarthSheet.collectAsStateWithLifecycle()
 
@@ -306,6 +310,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
             showPhotoResolutionDialog = false
         } else if (isAdjustTrackMode) {
             viewModel.cancelTrackAdjustment()
+        } else if (selectedKmlFeature != null) {
+            viewModel.dismissKmlFeatureDetail()
         } else if (selectedNode != null) {
             viewModel.selectNode(null)
         } else if (viewingTrackPhoto != null) {
@@ -823,6 +829,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     isDarkTheme = isDarkTheme,
                     onImportFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
                     kmlDocumentTitle = kmlDocumentTitle,
+                    kmlFiles = kmlFiles,
                     kmlFolders = kmlFolders,
                     onDeleteKmlFile = { viewModel.deleteKmlFileAndFolders() },
                     onOpenKmlGoogleEarth = { viewModel.openKmlGoogleEarthSheet() },
@@ -993,12 +1000,15 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
             if (showKmlGoogleEarthSheet) {
                 KmlGoogleEarthSheet(
                     documentTitle = kmlDocumentTitle.ifBlank { currentProject },
+                    files = kmlFiles,
                     folders = kmlFolders,
                     allTracks = allTracks,
                     allNodes = rawNodes,
-                    onToggleFolderVisibility = { viewModel.toggleFolderVisibility(it) },
+                    onToggleFileVisibility = { viewModel.toggleFileVisibility(it) },
+                    onToggleFolderVisibility = { folder, file -> viewModel.toggleFolderVisibility(folder, file) },
                     onSetAllVisibility = { viewModel.setAllKmlFoldersVisibility(it) },
-                    onZoomToFolder = { viewModel.zoomToKmlFolder(it) },
+                    onZoomToFile = { viewModel.zoomToKmlFile(it) },
+                    onZoomToFolder = { folder, file -> viewModel.zoomToKmlFolder(folder, file) },
                     onZoomToTrack = { trk ->
                         val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
                         if (pts.isNotEmpty()) {
@@ -1008,9 +1018,27 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     onZoomToNode = { node ->
                         viewModel.focusOnCoordinates(node.latitude, node.longitude)
                     },
-                    onDeleteFile = { viewModel.deleteKmlFileAndFolders() },
-                    onDeleteFolder = { viewModel.deleteKmlFolder(it) },
+                    onInspectTrack = { trk ->
+                        viewModel.selectKmlFeature(KmlFeatureItem.LineFeature(trk))
+                    },
+                    onInspectNode = { node ->
+                        viewModel.selectKmlFeature(KmlFeatureItem.PointFeature(node))
+                    },
+                    onDeleteFile = { fileName -> viewModel.deleteKmlFile(fileName) },
+                    onDeleteFolder = { folder, file -> viewModel.deleteKmlFolder(folder, file) },
                     onDismiss = { viewModel.dismissKmlGoogleEarthSheet() }
+                )
+            }
+
+            // Fiche de consultation dédiée KML / KMZ natif (View Mode avec tous les attributs)
+            if (selectedKmlFeature != null) {
+                KmlFeatureDetailSheet(
+                    feature = selectedKmlFeature!!,
+                    onCenterOnMap = { lat, lon ->
+                        viewModel.focusOnCoordinates(lat, lon)
+                        viewModel.dismissKmlFeatureDetail()
+                    },
+                    onDismiss = { viewModel.dismissKmlFeatureDetail() }
                 )
             }
 

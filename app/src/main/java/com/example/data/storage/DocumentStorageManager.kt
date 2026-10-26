@@ -97,7 +97,10 @@ data class StoredTrack(
     val folderName: String = "", // Dossier KML / Calque d'origine (ex: POCHE 1 [144FO])
     val colorHex: String? = null, // Couleur KML (#AARRGGBB) pour affichage Google Earth
     val strokeWidth: Float? = null, // Épaisseur de ligne KML
-    val isVisible: Boolean = true // Visibilité sur la carte
+    val isVisible: Boolean = true, // Visibilité sur la carte
+    val isNativeKml: Boolean = false, // Objet KML natif (mode affichage seul)
+    val kmlProperties: String = "", // Données étendues KML / SIG (ExtendedData, SimpleData, etc.)
+    val sourceFile: String = "" // Nom du fichier KML/KMZ d'origine (ex: trace1.kmz)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -121,6 +124,9 @@ data class StoredTrack(
         put("colorHex", colorHex ?: JSONObject.NULL)
         put("strokeWidth", strokeWidth ?: JSONObject.NULL)
         put("isVisible", isVisible)
+        put("isNativeKml", isNativeKml)
+        put("kmlProperties", kmlProperties)
+        put("sourceFile", sourceFile)
 
         val rawArr = JSONArray()
         rawPoints.forEach { rawArr.put(it.toJson()) }
@@ -197,7 +203,10 @@ data class StoredTrack(
                 folderName = json.optString("folderName", ""),
                 colorHex = if (json.has("colorHex") && !json.isNull("colorHex")) json.optString("colorHex") else null,
                 strokeWidth = if (json.has("strokeWidth") && !json.isNull("strokeWidth")) json.optDouble("strokeWidth").toFloat() else null,
-                isVisible = json.optBoolean("isVisible", true)
+                isVisible = json.optBoolean("isVisible", true),
+                isNativeKml = json.optBoolean("isNativeKml", false),
+                kmlProperties = json.optString("kmlProperties", ""),
+                sourceFile = json.optString("sourceFile", "")
             )
         }
     }
@@ -1386,6 +1395,12 @@ class DocumentStorageManager(private val context: Context) {
         put("syndicContact", node.syndicContact)
         put("buildingConnectionMode", node.buildingConnectionMode)
         put("villaConnectionMode", node.villaConnectionMode)
+        put("folderName", node.folderName)
+        put("colorHex", node.colorHex ?: JSONObject.NULL)
+        put("isVisible", node.isVisible)
+        put("isNativeKml", node.isNativeKml)
+        put("kmlProperties", node.kmlProperties)
+        put("sourceFile", node.sourceFile)
     }
 
     private fun nodeFromJson(json: JSONObject): FtthNodeEntity {
@@ -1440,7 +1455,13 @@ class DocumentStorageManager(private val context: Context) {
             syndicAuthorization = json.optString("syndicAuthorization", "Non"),
             syndicContact = json.optString("syndicContact", ""),
             buildingConnectionMode = json.optString("buildingConnectionMode", "Souterrain"),
-            villaConnectionMode = json.optString("villaConnectionMode", "Aérien")
+            villaConnectionMode = json.optString("villaConnectionMode", "Aérien"),
+            folderName = json.optString("folderName", ""),
+            colorHex = if (json.has("colorHex") && !json.isNull("colorHex")) json.optString("colorHex") else null,
+            isVisible = json.optBoolean("isVisible", true),
+            isNativeKml = json.optBoolean("isNativeKml", false),
+            kmlProperties = json.optString("kmlProperties", ""),
+            sourceFile = json.optString("sourceFile", "")
         )
     }
 

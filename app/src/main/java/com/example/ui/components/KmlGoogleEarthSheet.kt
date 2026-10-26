@@ -24,16 +24,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.import.RealImportService.KmlFileInfo
 import com.example.data.import.RealImportService.KmlFolderInfo
 import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.StoredTrack
@@ -70,29 +71,59 @@ import java.util.Locale
 
 /**
  * Composant de calques Google Earth reproduisant l'arborescence native
- * des dossiers et éléments KML/KMZ avec gestion de la visibilité et du zoom.
+ * hiérarchique à 2 niveaux :
+ * Niveau 1 : Nom du fichier KMZ / KML
+ *   Niveau 2 : Dossier du fichier
+ *     Niveau 3 : Tracés et points du dossier
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KmlGoogleEarthSheet(
     documentTitle: String,
-    folders: List<KmlFolderInfo>,
+    files: List<KmlFileInfo> = emptyList(),
+    folders: List<KmlFolderInfo> = emptyList(),
     allTracks: List<StoredTrack>,
     allNodes: List<FtthNodeEntity>,
-    onToggleFolderVisibility: (String) -> Unit,
+    onToggleFileVisibility: (String) -> Unit = {},
+    onToggleFolderVisibility: (folderName: String, fileName: String?) -> Unit,
     onSetAllVisibility: (Boolean) -> Unit,
-    onZoomToFolder: (String) -> Unit,
+    onZoomToFile: (String) -> Unit = {},
+    onZoomToFolder: (folderName: String, fileName: String?) -> Unit,
     onZoomToTrack: (StoredTrack) -> Unit,
     onZoomToNode: (FtthNodeEntity) -> Unit,
-    onDeleteFile: () -> Unit = {},
-    onDeleteFolder: ((String) -> Unit)? = null,
+    onInspectTrack: ((StoredTrack) -> Unit)? = null,
+    onInspectNode: ((FtthNodeEntity) -> Unit)? = null,
+    onDeleteFile: (String) -> Unit = {},
+    onDeleteFolder: ((folderName: String, fileName: String?) -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val expandedFiles = remember { mutableStateMapOf<String, Boolean>() }
     val expandedFolders = remember { mutableStateMapOf<String, Boolean>() }
-    var showDeleteFileDialog by remember { mutableStateOf(false) }
-    var folderToDelete by remember { mutableStateOf<String?>(null) }
+
+    var fileToDelete by remember { mutableStateOf<String?>(null) }
+    var folderToDelete by remember { mutableStateOf<Pair<String, String?>?>(null) }
+
+    val displayFiles = remember(files, folders, documentTitle) {
+        if (files.isNotEmpty()) {
+            files
+        } else if (folders.isNotEmpty()) {
+            listOf(
+                KmlFileInfo(
+                    fileName = documentTitle.ifBlank { "Fichier importé" },
+                    title = documentTitle.ifBlank { "Fichier importé" },
+                    folders = folders,
+                    tracksCount = folders.sumOf { it.tracksCount },
+                    nodesCount = folders.sumOf { it.nodesCount },
+                    totalDistanceMeters = folders.sumOf { it.totalDistanceMeters },
+                    isVisible = folders.any { it.isVisible }
+                )
+            )
+        } else {
+            emptyList()
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -128,17 +159,16 @@ fun KmlGoogleEarthSheet(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = documentTitle.ifBlank { "Projet KML / KMZ" },
+                        text = "Arborescence KML / KMZ",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
-                    // Badges style Google Earth : "KML local", "Enregistré sur cet appareil"
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -148,7 +178,7 @@ fun KmlGoogleEarthSheet(
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = "KML local",
+                                text = "${displayFiles.size} fichier${if (displayFiles.size > 1) "s" else ""}",
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -161,7 +191,7 @@ fun KmlGoogleEarthSheet(
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = "Enregistré sur cet appareil",
+                                text = "Hiérarchie Google Earth",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
@@ -169,31 +199,10 @@ fun KmlGoogleEarthSheet(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Bouton de suppression du fichier et de tous ses dossiers
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    IconButton(
-                        onClick = { showDeleteFileDialog = true },
-                        modifier = Modifier.testTag("kml_sheet_delete_file")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Supprimer le fichier et tous ses dossiers",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
             }
 
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 6.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
 
@@ -205,8 +214,6 @@ fun KmlGoogleEarthSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val allVisible = folders.all { it.isVisible }
-
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = { onSetAllVisibility(true) },
@@ -237,8 +244,9 @@ fun KmlGoogleEarthSheet(
                     }
                 }
 
+                val totalFolders = displayFiles.sumOf { it.folders.size }
                 Text(
-                    text = "${folders.size} dossier${if (folders.size > 1) "s" else ""}",
+                    text = "$totalFolders dossier${if (totalFolders > 1) "s" else ""}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -246,8 +254,8 @@ fun KmlGoogleEarthSheet(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // --- LISTE DES DOSSIERS HIÉRARCHIQUES ---
-            if (folders.isEmpty()) {
+            // --- LISTE DE L'ARBORESCENCE HIÉRARCHIQUE ---
+            if (displayFiles.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -255,7 +263,7 @@ fun KmlGoogleEarthSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Aucun dossier KML trouvé.\nImportez un fichier KMZ/KML pour visualiser l'arborescence.",
+                        text = "Aucun fichier KML / KMZ importé.\nImportez des fichiers géospatiaux pour afficher la hiérarchie.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -267,270 +275,447 @@ fun KmlGoogleEarthSheet(
                         .fillMaxSize()
                         .padding(horizontal = 12.dp)
                 ) {
-                    items(folders, key = { it.name }) { folder ->
-                        val isExpanded = expandedFolders[folder.name] ?: false
-                        val defaultFolderColor = MaterialTheme.colorScheme.primary
-                        val folderColor = remember(folder.colorHex, defaultFolderColor) {
-                            val hex = folder.colorHex
-                            if (!hex.isNullOrBlank()) {
-                                try {
-                                    Color(android.graphics.Color.parseColor(hex))
-                                } catch (_: Exception) {
-                                    defaultFolderColor
-                                }
-                            } else {
-                                defaultFolderColor
-                            }
-                        }
+                    items(displayFiles, key = { it.fileName }) { file ->
+                        val isFileExpanded = expandedFiles[file.fileName] ?: true
+                        val fileColor = MaterialTheme.colorScheme.primary
 
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .testTag("kml_folder_${folder.name}"),
+                                .padding(vertical = 5.dp)
+                                .testTag("kml_file_${file.fileName}"),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (folder.isVisible) {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                containerColor = if (file.isVisible) {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
                                 }
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                // Ligne principale du dossier
+                                // --- NIVEAU 1 : NOM DU FICHIER ---
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            expandedFolders[folder.name] = !isExpanded
+                                            expandedFiles[file.fileName] = !isFileExpanded
                                         }
                                         .padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Flèche déplier/replier
                                     Icon(
-                                        imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
-                                        contentDescription = if (isExpanded) "Replier" else "Déplier",
+                                        imageVector = if (isFileExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                        contentDescription = if (isFileExpanded) "Replier" else "Déplier",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
 
                                     Spacer(modifier = Modifier.width(6.dp))
 
-                                    // Icône de dossier avec couleur spécifique
                                     Box(
                                         modifier = Modifier
                                             .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(folderColor.copy(alpha = 0.18f)),
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(fileColor.copy(alpha = 0.2f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = if (isExpanded) Icons.Default.FolderOpen else Icons.Default.Folder,
+                                            imageVector = Icons.Default.Description,
                                             contentDescription = null,
-                                            tint = folderColor,
-                                            modifier = Modifier.size(22.dp)
+                                            tint = fileColor,
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
 
                                     Spacer(modifier = Modifier.width(10.dp))
 
-                                    // Nom du dossier et statistiques
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = folder.name,
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            text = file.fileName,
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (folder.isVisible) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                            color = if (file.isVisible) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
 
-                                        val details = buildString {
-                                            if (folder.tracksCount > 0) {
-                                                append("${folder.tracksCount} tracé${if (folder.tracksCount > 1) "s" else ""}")
-                                                if (folder.totalDistanceMeters > 0) {
-                                                    val distStr = if (folder.totalDistanceMeters < 1000.0) {
-                                                        "${folder.totalDistanceMeters.toInt()} m"
-                                                    } else {
-                                                        String.format(Locale.FRANCE, "%.2f km", folder.totalDistanceMeters / 1000.0)
-                                                    }
-                                                    append(" • ").append(distStr)
-                                                }
-                                            }
-                                            if (folder.nodesCount > 0) {
-                                                if (isNotEmpty()) append(" • ")
-                                                append("${folder.nodesCount} point${if (folder.nodesCount > 1) "s" else ""}")
-                                            }
+                                        val fileDetails = buildString {
+                                            append("${file.folders.size} dossier${if (file.folders.size > 1) "s" else ""}")
+                                            if (file.tracksCount > 0) append(" • ${file.tracksCount} tracé${if (file.tracksCount > 1) "s" else ""}")
+                                            if (file.nodesCount > 0) append(" • ${file.nodesCount} point${if (file.nodesCount > 1) "s" else ""}")
                                         }
-
-                                        if (details.isNotBlank()) {
-                                            Text(
-                                                text = details,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (folder.isVisible) 0.85f else 0.4f)
-                                            )
-                                        }
+                                        Text(
+                                            text = fileDetails,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
 
-                                    // Bouton Centrer sur le dossier
+                                    // Centrer sur le fichier
                                     IconButton(
-                                        onClick = { onZoomToFolder(folder.name) },
-                                        modifier = Modifier.size(38.dp)
+                                        onClick = { onZoomToFile(file.fileName) },
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.MyLocation,
-                                            contentDescription = "Centrer",
+                                            contentDescription = "Centrer sur le fichier",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
 
-                                    // Bouton bascule visibilité (œil)
+                                    // Masquer/Afficher le fichier entier
                                     IconButton(
-                                        onClick = { onToggleFolderVisibility(folder.name) },
-                                        modifier = Modifier.size(38.dp)
+                                        onClick = { onToggleFileVisibility(file.fileName) },
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (folder.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                            contentDescription = if (folder.isVisible) "Masquer" else "Afficher",
-                                            tint = if (folder.isVisible) folderColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                            imageVector = if (file.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (file.isVisible) "Masquer" else "Afficher",
+                                            tint = if (file.isVisible) fileColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
 
-                                    // Bouton suppression dossier
-                                    if (onDeleteFolder != null) {
-                                        IconButton(
-                                            onClick = { folderToDelete = folder.name },
-                                            modifier = Modifier.size(38.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = "Supprimer le dossier",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
+                                    // Supprimer le fichier entier
+                                    IconButton(
+                                        onClick = { fileToDelete = file.fileName },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Supprimer le fichier",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
                                 }
 
-                                // Contenu déplié du dossier (liste des tracés et points)
-                                AnimatedVisibility(visible = isExpanded) {
+                                // --- NIVEAU 2 : DOSSIERS SOUS LE FICHIER ---
+                                AnimatedVisibility(visible = isFileExpanded) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(start = 28.dp, end = 12.dp, bottom = 8.dp)
+                                            .padding(start = 14.dp, end = 8.dp, bottom = 8.dp)
                                     ) {
-                                        val folderTracks = allTracks.filter {
-                                            it.folderName.equals(folder.name, ignoreCase = true) ||
-                                                    (folder.name == "Sans dossier" && it.folderName.isBlank())
-                                        }
-                                        val folderNodes = allNodes.filter {
-                                            it.folderName.equals(folder.name, ignoreCase = true) ||
-                                                    (folder.name == "Sans dossier" && it.folderName.isBlank())
-                                        }
+                                        file.folders.forEach { folder ->
+                                            val folderKey = "${file.fileName}::${folder.name}"
+                                            val isFolderExpanded = expandedFolders[folderKey] ?: false
 
-                                        if (folderTracks.isEmpty() && folderNodes.isEmpty()) {
-                                            Text(
-                                                text = "Dossier vide",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(vertical = 4.dp)
-                                            )
-                                        } else {
-                                            // Liste des tracés/lignes
-                                            folderTracks.forEach { track ->
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            onZoomToTrack(track)
-                                                            onDismiss()
-                                                        }
-                                                        .padding(vertical = 6.dp, horizontal = 4.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Route,
-                                                        contentDescription = null,
-                                                        tint = folderColor,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = track.name,
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            fontWeight = FontWeight.Medium,
-                                                            color = MaterialTheme.colorScheme.onSurface,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        val distLabel = if (track.totalDistanceMeters < 1000.0) {
-                                                            "${track.totalDistanceMeters.toInt()} m"
-                                                        } else {
-                                                            String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)
-                                                        }
-                                                        Text(
-                                                            text = "$distLabel • ${track.points.size} sommets",
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
+                                            val defaultFolderColor = MaterialTheme.colorScheme.secondary
+                                            val folderColor = remember(folder.colorHex, defaultFolderColor) {
+                                                val hex = folder.colorHex
+                                                if (!hex.isNullOrBlank()) {
+                                                    try {
+                                                        Color(android.graphics.Color.parseColor(hex))
+                                                    } catch (_: Exception) {
+                                                        defaultFolderColor
                                                     }
-                                                    Icon(
-                                                        imageVector = Icons.Default.MyLocation,
-                                                        contentDescription = "Zoomer",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
+                                                } else {
+                                                    defaultFolderColor
                                                 }
                                             }
 
-                                            // Liste des points/nœuds
-                                            folderNodes.forEach { node ->
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            onZoomToNode(node)
-                                                            onDismiss()
-                                                        }
-                                                        .padding(vertical = 6.dp, horizontal = 4.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(12.dp)
-                                                            .clip(CircleShape)
-                                                            .background(folderColor)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = node.name.ifBlank { node.id },
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            fontWeight = FontWeight.Medium,
-                                                            color = MaterialTheme.colorScheme.onSurface,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = "${String.format(Locale.ROOT, "%.5f", node.latitude)}, ${String.format(Locale.ROOT, "%.5f", node.longitude)}",
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
+                                            Card(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 3.dp)
+                                                    .testTag("kml_folder_${folder.name}"),
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (folder.isVisible) {
+                                                        MaterialTheme.colorScheme.surface
+                                                    } else {
+                                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.45f)
                                                     }
-                                                    Icon(
-                                                        imageVector = Icons.Default.MyLocation,
-                                                        contentDescription = "Zoomer",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
+                                                ),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Column(modifier = Modifier.fillMaxWidth()) {
+                                                    // Ligne du dossier
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clickable {
+                                                                expandedFolders[folderKey] = !isFolderExpanded
+                                                            }
+                                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (isFolderExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+
+                                                        Spacer(modifier = Modifier.width(4.dp))
+
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(32.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(folderColor.copy(alpha = 0.18f)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (isFolderExpanded) Icons.Default.FolderOpen else Icons.Default.Folder,
+                                                                contentDescription = null,
+                                                                tint = folderColor,
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+
+                                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = folder.name,
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = if (folder.isVisible) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+
+                                                            val details = buildString {
+                                                                if (folder.tracksCount > 0) {
+                                                                    append("${folder.tracksCount} tracé${if (folder.tracksCount > 1) "s" else ""}")
+                                                                    if (folder.totalDistanceMeters > 0) {
+                                                                        val distStr = if (folder.totalDistanceMeters < 1000.0) {
+                                                                            "${folder.totalDistanceMeters.toInt()} m"
+                                                                        } else {
+                                                                            String.format(Locale.FRANCE, "%.2f km", folder.totalDistanceMeters / 1000.0)
+                                                                        }
+                                                                        append(" • ").append(distStr)
+                                                                    }
+                                                                }
+                                                                if (folder.nodesCount > 0) {
+                                                                    if (isNotEmpty()) append(" • ")
+                                                                    append("${folder.nodesCount} point${if (folder.nodesCount > 1) "s" else ""}")
+                                                                }
+                                                            }
+
+                                                            if (details.isNotBlank()) {
+                                                                Text(
+                                                                    text = details,
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                        }
+
+                                                        // Centrer sur le dossier
+                                                        IconButton(
+                                                            onClick = { onZoomToFolder(folder.name, file.fileName) },
+                                                            modifier = Modifier.size(34.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.MyLocation,
+                                                                contentDescription = "Centrer",
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+
+                                                        // Visibilité du dossier
+                                                        IconButton(
+                                                            onClick = { onToggleFolderVisibility(folder.name, file.fileName) },
+                                                            modifier = Modifier.size(34.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (folder.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                                contentDescription = if (folder.isVisible) "Masquer" else "Afficher",
+                                                                tint = if (folder.isVisible) folderColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+
+                                                        // Supprimer le dossier
+                                                        if (onDeleteFolder != null) {
+                                                            IconButton(
+                                                                onClick = { folderToDelete = Pair(folder.name, file.fileName) },
+                                                                modifier = Modifier.size(34.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Delete,
+                                                                    contentDescription = "Supprimer le dossier",
+                                                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // --- NIVEAU 3 : ÉLÉMENTS DU DOSSIER ---
+                                                    AnimatedVisibility(visible = isFolderExpanded) {
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(start = 24.dp, end = 8.dp, bottom = 6.dp)
+                                                        ) {
+                                                            val folderTracks = allTracks.filter { trk ->
+                                                                val matchFolder = trk.folderName.equals(folder.name, ignoreCase = true) ||
+                                                                        ((folder.name == "Général" || folder.name == "Sans dossier") && trk.folderName.isBlank())
+                                                                val trkFile = trk.sourceFile.ifBlank { documentTitle.ifBlank { "Fichier principal" } }
+                                                                val matchFile = trkFile.equals(file.fileName, ignoreCase = true)
+                                                                matchFolder && matchFile
+                                                            }
+                                                            val folderNodes = allNodes.filter { node ->
+                                                                val matchFolder = node.folderName.equals(folder.name, ignoreCase = true) ||
+                                                                        ((folder.name == "Général" || folder.name == "Sans dossier") && node.folderName.isBlank())
+                                                                val nodeFile = node.sourceFile.ifBlank { documentTitle.ifBlank { "Fichier principal" } }
+                                                                val matchFile = nodeFile.equals(file.fileName, ignoreCase = true)
+                                                                matchFolder && matchFile
+                                                            }
+
+                                                            if (folderTracks.isEmpty() && folderNodes.isEmpty()) {
+                                                                Text(
+                                                                    text = "Dossier vide",
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                                )
+                                                            } else {
+                                                                // Tracés / Lignes
+                                                                folderTracks.forEach { track ->
+                                                                    Row(
+                                                                        modifier = Modifier
+                                                                            .fillMaxWidth()
+                                                                            .clickable {
+                                                                                onZoomToTrack(track)
+                                                                                onDismiss()
+                                                                            }
+                                                                            .padding(vertical = 5.dp, horizontal = 4.dp),
+                                                                        verticalAlignment = Alignment.CenterVertically
+                                                                    ) {
+                                                                        Icon(
+                                                                            imageVector = Icons.Default.Route,
+                                                                            contentDescription = null,
+                                                                            tint = folderColor,
+                                                                            modifier = Modifier.size(15.dp)
+                                                                        )
+                                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                                        Column(modifier = Modifier.weight(1f)) {
+                                                                            Text(
+                                                                                text = track.name,
+                                                                                style = MaterialTheme.typography.bodySmall,
+                                                                                fontWeight = FontWeight.Medium,
+                                                                                color = MaterialTheme.colorScheme.onSurface,
+                                                                                maxLines = 1,
+                                                                                overflow = TextOverflow.Ellipsis
+                                                                            )
+                                                                            val distLabel = if (track.totalDistanceMeters < 1000.0) {
+                                                                                "${track.totalDistanceMeters.toInt()} m"
+                                                                            } else {
+                                                                                String.format(Locale.FRANCE, "%.2f km", track.totalDistanceMeters / 1000.0)
+                                                                            }
+                                                                            Text(
+                                                                                text = "$distLabel • ${track.points.size} sommets",
+                                                                                style = MaterialTheme.typography.bodySmall,
+                                                                                fontSize = 10.sp,
+                                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                            )
+                                                                        }
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                                        ) {
+                                                                            if (onInspectTrack != null) {
+                                                                                IconButton(
+                                                                                    onClick = {
+                                                                                        onInspectTrack(track)
+                                                                                        onDismiss()
+                                                                                    },
+                                                                                    modifier = Modifier.size(30.dp)
+                                                                                ) {
+                                                                                    Icon(
+                                                                                        imageVector = Icons.Default.Info,
+                                                                                        contentDescription = "Attributs",
+                                                                                        tint = MaterialTheme.colorScheme.primary,
+                                                                                        modifier = Modifier.size(16.dp)
+                                                                                    )
+                                                                                }
+                                                                            }
+                                                                            Icon(
+                                                                                imageVector = Icons.Default.MyLocation,
+                                                                                contentDescription = "Zoomer",
+                                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                                                modifier = Modifier.size(15.dp)
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+
+                                                                // Points / Nœuds
+                                                                folderNodes.forEach { node ->
+                                                                    Row(
+                                                                        modifier = Modifier
+                                                                            .fillMaxWidth()
+                                                                            .clickable {
+                                                                                onZoomToNode(node)
+                                                                                onDismiss()
+                                                                            }
+                                                                            .padding(vertical = 5.dp, horizontal = 4.dp),
+                                                                        verticalAlignment = Alignment.CenterVertically
+                                                                    ) {
+                                                                        Box(
+                                                                            modifier = Modifier
+                                                                                .size(11.dp)
+                                                                                .clip(CircleShape)
+                                                                                .background(folderColor)
+                                                                        )
+                                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                                        Column(modifier = Modifier.weight(1f)) {
+                                                                            Text(
+                                                                                text = node.name.ifBlank { node.id },
+                                                                                style = MaterialTheme.typography.bodySmall,
+                                                                                fontWeight = FontWeight.Medium,
+                                                                                color = MaterialTheme.colorScheme.onSurface,
+                                                                                maxLines = 1,
+                                                                                overflow = TextOverflow.Ellipsis
+                                                                            )
+                                                                            Text(
+                                                                                text = "${String.format(Locale.ROOT, "%.5f", node.latitude)}, ${String.format(Locale.ROOT, "%.5f", node.longitude)}",
+                                                                                style = MaterialTheme.typography.bodySmall,
+                                                                                fontSize = 10.sp,
+                                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                            )
+                                                                        }
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                                        ) {
+                                                                            if (onInspectNode != null) {
+                                                                                IconButton(
+                                                                                    onClick = {
+                                                                                        onInspectNode(node)
+                                                                                        onDismiss()
+                                                                                    },
+                                                                                    modifier = Modifier.size(30.dp)
+                                                                                ) {
+                                                                                    Icon(
+                                                                                        imageVector = Icons.Default.Info,
+                                                                                        contentDescription = "Attributs",
+                                                                                        tint = MaterialTheme.colorScheme.primary,
+                                                                                        modifier = Modifier.size(16.dp)
+                                                                                    )
+                                                                                }
+                                                                            }
+                                                                            Icon(
+                                                                                imageVector = Icons.Default.MyLocation,
+                                                                                contentDescription = "Zoomer",
+                                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                                                modifier = Modifier.size(15.dp)
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -544,10 +729,11 @@ fun KmlGoogleEarthSheet(
         }
     }
 
-    // Dialogue de confirmation de suppression du fichier et de tous ses dossiers
-    if (showDeleteFileDialog) {
+    // --- DIALOGUE DE CONFIRMATION SUPPRESSION DU FICHIER ---
+    if (fileToDelete != null) {
+        val fName = fileToDelete ?: ""
         AlertDialog(
-            onDismissRequest = { showDeleteFileDialog = false },
+            onDismissRequest = { fileToDelete = null },
             icon = {
                 Icon(
                     imageVector = Icons.Default.DeleteForever,
@@ -565,32 +751,35 @@ fun KmlGoogleEarthSheet(
             },
             text = {
                 Text(
-                    text = "Voulez-vous supprimer le fichier « ${documentTitle.ifBlank { "Projet KML" }} » ?\n\nTous les dossiers associés (${folders.size} dossier${if (folders.size > 1) "s" else ""}) ainsi que tous leurs tracés et points seront définitivement supprimés.",
+                    text = "Voulez-vous supprimer le fichier « $fName » ?\n\nTous ses dossiers ainsi que tous leurs tracés et points seront définitivement supprimés.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        showDeleteFileDialog = false
-                        onDeleteFile()
+                        val toDel = fName
+                        fileToDelete = null
+                        onDeleteFile(toDel)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Supprimer tout", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Supprimer le fichier", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showDeleteFileDialog = false }) {
+                OutlinedButton(onClick = { fileToDelete = null }) {
                     Text("Annuler")
                 }
             }
         )
     }
 
-    // Dialogue de confirmation de suppression d'un dossier spécifique
+    // --- DIALOGUE DE CONFIRMATION SUPPRESSION D'UN DOSSIER ---
     if (folderToDelete != null) {
-        val fName = folderToDelete ?: ""
+        val pair = folderToDelete
+        val fName = pair?.first ?: ""
+        val fFile = pair?.second
         AlertDialog(
             onDismissRequest = { folderToDelete = null },
             icon = {
@@ -605,9 +794,8 @@ fun KmlGoogleEarthSheet(
             confirmButton = {
                 Button(
                     onClick = {
-                        val toDel = fName
                         folderToDelete = null
-                        onDeleteFolder?.invoke(toDel)
+                        onDeleteFolder?.invoke(fName, fFile)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {

@@ -677,12 +677,19 @@ fun OsmMapView(
             }
         }
 
-        // Marqueurs Nœuds FTTH
+        // Marqueurs Nœuds FTTH et Points KML Natifs
         for (node in nodes) {
             if (!node.isVisible) continue
+            val isNativeNode = node.isNativeKml ||
+                    node.id.startsWith("KML-NOD-") ||
+                    node.id.startsWith("NOD-POLY-") ||
+                    node.kmlProperties.isNotBlank() ||
+                    (node.folderName.isNotBlank() && (node.notes.contains("Attributs SIG") || node.notes.contains("Attributs KML")))
+
             val marker = Marker(mapView).apply {
                 position = GeoPoint(node.latitude, node.longitude)
                 title = when {
+                    isNativeNode -> if (node.name.isNotBlank()) node.name else node.id
                     (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.buildingName.isNotBlank() ->
                         "${node.id} • ${node.buildingName}"
                     (node.type == FtthNodeType.IMMEUBLE || node.type == FtthNodeType.VILLA) && node.name.isNotBlank() && node.name != node.id ->
@@ -690,8 +697,16 @@ fun OsmMapView(
                     node.operator.isNotBlank() -> "${node.id} • ${node.operator}"
                     else -> "${node.id} • ${node.type.label}"
                 }
-                snippet = if (node.address.isNotBlank()) "${node.type.label}\n${node.address}" else node.type.label
-                icon = MapMarkerHelper.createNodeMarkerDrawable(context, node.type, node.etat)
+                snippet = when {
+                    isNativeNode -> if (node.folderName.isNotBlank()) "Dossier : ${node.folderName}" else "Point KML"
+                    node.address.isNotBlank() -> "${node.type.label}\n${node.address}"
+                    else -> node.type.label
+                }
+                icon = if (isNativeNode) {
+                    MapMarkerHelper.createKmlPointMarkerDrawable(context, node.colorHex)
+                } else {
+                    MapMarkerHelper.createNodeMarkerDrawable(context, node.type, node.etat)
+                }
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
                     if (currentIsManualTrackMode) {

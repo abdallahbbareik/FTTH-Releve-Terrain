@@ -88,7 +88,10 @@ data class FtthNodeEntity(
     // Attributs KML / Google Earth
     val folderName: String = "",
     val colorHex: String? = null,
-    val isVisible: Boolean = true
+    val isVisible: Boolean = true,
+    val isNativeKml: Boolean = false,
+    val kmlProperties: String = "", // JSON des champs et attributs KML (ExtendedData, SimpleData, etc.)
+    val sourceFile: String = "" // Nom du fichier KML/KMZ d'origine (ex: reseau1.kmz)
 )
 
 @Entity(tableName = "ftth_links")

@@ -45,10 +45,21 @@ object RealImportService {
 
     data class KmlFolderInfo(
         val name: String,
+        val sourceFile: String = "",
         val tracksCount: Int = 0,
         val nodesCount: Int = 0,
         val totalDistanceMeters: Double = 0.0,
         val colorHex: String? = null,
+        val isVisible: Boolean = true
+    )
+
+    data class KmlFileInfo(
+        val fileName: String,
+        val title: String = "",
+        val folders: List<KmlFolderInfo> = emptyList(),
+        val tracksCount: Int = 0,
+        val nodesCount: Int = 0,
+        val totalDistanceMeters: Double = 0.0,
         val isVisible: Boolean = true
     )
 
@@ -63,7 +74,8 @@ object RealImportService {
         val tracks: List<StoredTrack>,
         val message: String,
         val documentTitle: String = "",
-        val folders: List<KmlFolderInfo> = emptyList()
+        val folders: List<KmlFolderInfo> = emptyList(),
+        val fileName: String = ""
     )
 
     /**
@@ -95,29 +107,29 @@ object RealImportService {
 
             when {
                 isZip || fileNameLower.endsWith(".kmz") -> {
-                    importKmzFromBytes(bytes, existingNodes, mode, originalFileName)
+                    importKmzFromBytes(bytes, existingNodes, mode, originalFileName, originalFileName)
                 }
                 fileNameLower.endsWith(".kml") -> {
                     val kmlText = String(bytes, StandardCharsets.UTF_8)
-                    parseKmlString(kmlText, existingNodes, mode, originalFileName)
+                    parseKmlString(kmlText, existingNodes, mode, originalFileName, originalFileName)
                 }
                 fileNameLower.endsWith(".geojson") || fileNameLower.endsWith(".json") -> {
                     val jsonText = String(bytes, StandardCharsets.UTF_8)
-                    parseGeoJsonString(jsonText, existingNodes, mode)
+                    parseGeoJsonString(jsonText, existingNodes, mode, originalFileName)
                 }
                 else -> {
                     val text = String(bytes, StandardCharsets.UTF_8).trim()
                     if (text.startsWith("{") || text.startsWith("[")) {
-                        parseGeoJsonString(text, existingNodes, mode)
+                        parseGeoJsonString(text, existingNodes, mode, originalFileName)
                     } else if (text.contains("<kml", ignoreCase = true) || text.contains("<?xml", ignoreCase = true) || text.contains("<Document", ignoreCase = true)) {
-                        parseKmlString(text, existingNodes, mode, originalFileName)
+                        parseKmlString(text, existingNodes, mode, originalFileName, originalFileName)
                     } else {
                         // Essai KML puis GeoJSON
-                        val kmlRes = parseKmlString(text, existingNodes, mode, originalFileName)
+                        val kmlRes = parseKmlString(text, existingNodes, mode, originalFileName, originalFileName)
                         if (kmlRes.nodes.isNotEmpty() || kmlRes.links.isNotEmpty() || kmlRes.tracks.isNotEmpty()) {
                             kmlRes
                         } else {
-                            parseGeoJsonString(text, existingNodes, mode)
+                            parseGeoJsonString(text, existingNodes, mode, originalFileName)
                         }
                     }
                 }
@@ -167,8 +179,10 @@ object RealImportService {
         bytes: ByteArray,
         existingNodes: List<FtthNodeEntity>,
         mode: ImportMode,
-        fallbackDocTitle: String = ""
+        fallbackDocTitle: String = "",
+        fileName: String = ""
     ): ImportResult {
+        val fileSourceName = fileName.ifBlank { fallbackDocTitle.ifBlank { "Fichier KMZ" } }
         val kmlContents = mutableListOf<String>()
         try {
             val zipStream = ZipInputStream(ByteArrayInputStream(bytes))
@@ -205,7 +219,7 @@ object RealImportService {
 
             for (kml in kmlContents) {
                 val combinedExisting = existingNodes + allNodes
-                val res = parseKmlString(kml, combinedExisting, mode, fallbackDocTitle)
+                val res = parseKmlString(kml, combinedExisting, mode, fallbackDocTitle, fileSourceName)
                 allNodes.addAll(res.nodes)
                 allLinks.addAll(res.links)
                 allTracks.addAll(res.tracks)
@@ -215,12 +229,13 @@ object RealImportService {
                 }
             }
 
-            // Dédupliquer les dossiers KML par nom
+            // Dédupliquer les dossiers KML par nom en conservant le sourceFile
             val mergedFolders = allFolders
                 .groupBy { it.name }
                 .map { (name, list) ->
                     KmlFolderInfo(
                         name = name,
+                        sourceFile = fileSourceName,
                         tracksCount = list.sumOf { it.tracksCount },
                         nodesCount = list.sumOf { it.nodesCount },
                         totalDistanceMeters = list.sumOf { it.totalDistanceMeters },
@@ -236,6 +251,7 @@ object RealImportService {
                 tracks = allTracks,
                 message = msg,
                 documentTitle = docTitle.ifBlank { fallbackDocTitle },
+                fileName = fileSourceName,
                 folders = mergedFolders
             )
         }
@@ -369,8 +385,10 @@ object RealImportService {
         kml: String,
         existingNodes: List<FtthNodeEntity>,
         mode: ImportMode = ImportMode.NATIVE,
-        fallbackDocTitle: String = ""
+        fallbackDocTitle: String = "",
+        fileName: String = ""
     ): ImportResult {
+        val fileSourceName = fileName.ifBlank { fallbackDocTitle.ifBlank { "Fichier KML" } }
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
@@ -468,11 +486,11 @@ object RealImportService {
                 val folderContext = if (folderHierarchy.isNotEmpty()) "$folderHierarchy / $name" else name
 
                 // Extraire ExtendedData : <Data name="..."> et <SimpleData name="..."> (GIS / QGIS)
-                val properties = mutableMapOf<String, String>()
+                val properties = linkedMapOf<String, String>()
                 val dataNodes = pm.getElementsByTagName("Data")
                 for (j in 0 until dataNodes.length) {
                     val dataEl = dataNodes.item(j) as? Element ?: continue
-                    val key = dataEl.getAttribute("name")
+                    val key = dataEl.getAttribute("name").ifBlank { getDirectOrFirstChildValue(dataEl, "displayName") ?: "" }
                     val value = getDirectOrFirstChildValue(dataEl, "value") ?: ""
                     if (key.isNotBlank()) properties[key] = value
                 }
@@ -482,6 +500,10 @@ object RealImportService {
                     val key = sEl.getAttribute("name")
                     val value = sEl.textContent.trim()
                     if (key.isNotBlank()) properties[key] = value
+                }
+                // Extraire également les attributs des tables HTML dans <description> (format QGIS / ArcGIS / Google Earth)
+                if (desc.isNotBlank()) {
+                    extractHtmlTableProperties(desc, properties)
                 }
 
                 // Résolution de couleur et style
@@ -516,7 +538,8 @@ object RealImportService {
                                     properties = properties,
                                     pts = pts,
                                     tracks = tracks,
-                                    index = tracks.size
+                                    index = tracks.size,
+                                    sourceFile = fileSourceName
                                 )
                             } else {
                                 processLineStringClassification(
@@ -530,7 +553,8 @@ object RealImportService {
                                     nodes = nodes,
                                     links = links,
                                     tracks = tracks,
-                                    index = tracks.size + links.size
+                                    index = tracks.size + links.size,
+                                    sourceFile = fileSourceName
                                 )
                             }
                         }
@@ -558,7 +582,8 @@ object RealImportService {
                                         colorHex = itemColor,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
-                                        properties = properties
+                                        properties = properties,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             } else {
@@ -571,7 +596,8 @@ object RealImportService {
                                         description = desc,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
-                                        properties = properties
+                                        properties = properties,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             }
@@ -600,7 +626,8 @@ object RealImportService {
                                     pts = pts,
                                     tracks = tracks,
                                     nodes = nodes,
-                                    index = tracks.size
+                                    index = tracks.size,
+                                    sourceFile = fileSourceName
                                 )
                             } else {
                                 val lat = pts.map { it.latitude }.average()
@@ -614,7 +641,8 @@ object RealImportService {
                                         description = desc,
                                         lat = lat,
                                         lon = lon,
-                                        properties = properties
+                                        properties = properties,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             }
@@ -640,7 +668,8 @@ object RealImportService {
                                     properties = properties,
                                     pts = pts,
                                     tracks = tracks,
-                                    index = tracks.size
+                                    index = tracks.size,
+                                    sourceFile = fileSourceName
                                 )
                             } else {
                                 processLineStringClassification(
@@ -654,7 +683,8 @@ object RealImportService {
                                     nodes = nodes,
                                     links = links,
                                     tracks = tracks,
-                                    index = tracks.size + links.size
+                                    index = tracks.size + links.size,
+                                    sourceFile = fileSourceName
                                 )
                             }
                         } else if (pts.isNotEmpty()) {
@@ -670,7 +700,8 @@ object RealImportService {
                                         colorHex = itemColor,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
-                                        properties = properties
+                                        properties = properties,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             } else {
@@ -683,7 +714,8 @@ object RealImportService {
                                         description = desc,
                                         lat = pt.latitude,
                                         lon = pt.longitude,
-                                        properties = properties
+                                        properties = properties,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             }
@@ -712,6 +744,7 @@ object RealImportService {
 
             KmlFolderInfo(
                 name = fName,
+                sourceFile = fileSourceName,
                 tracksCount = fTracks.size,
                 nodesCount = fNodes.size,
                 totalDistanceMeters = totalDist,
@@ -727,6 +760,7 @@ object RealImportService {
             tracks = tracks,
             message = msg,
             documentTitle = extractedDocTitle.ifBlank { fallbackDocTitle },
+            fileName = fileSourceName,
             folders = kmlFolders
         )
     }
@@ -794,8 +828,10 @@ object RealImportService {
     fun parseGeoJsonString(
         jsonStr: String,
         existingNodes: List<FtthNodeEntity>,
-        mode: ImportMode = ImportMode.NATIVE
+        mode: ImportMode = ImportMode.NATIVE,
+        fileName: String = ""
     ): ImportResult {
+        val fileSourceName = fileName.ifBlank { "Fichier GeoJSON" }
         val nodes = mutableListOf<FtthNodeEntity>()
         val links = mutableListOf<FtthLinkEntity>()
         val tracks = mutableListOf<StoredTrack>()
@@ -841,7 +877,8 @@ object RealImportService {
                                         folderContext = name,
                                         lat = lat,
                                         lon = lon,
-                                        properties = propMap
+                                        properties = propMap,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             } else {
@@ -854,7 +891,8 @@ object RealImportService {
                                         description = description,
                                         lat = lat,
                                         lon = lon,
-                                        properties = propMap
+                                        properties = propMap,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             }
@@ -881,7 +919,8 @@ object RealImportService {
                                     properties = propMap,
                                     pts = points,
                                     tracks = tracks,
-                                    index = i
+                                    index = i,
+                                    sourceFile = fileSourceName
                                 )
                             } else {
                                 processLineStringClassification(
@@ -895,7 +934,8 @@ object RealImportService {
                                     nodes = nodes,
                                     links = links,
                                     tracks = tracks,
-                                    index = i
+                                    index = i,
+                                    sourceFile = fileSourceName
                                 )
                             }
                         }
@@ -924,7 +964,8 @@ object RealImportService {
                                         properties = propMap,
                                         pts = points,
                                         tracks = tracks,
-                                        index = i * 100 + m
+                                        index = i * 100 + m,
+                                        sourceFile = fileSourceName
                                     )
                                 } else {
                                     processLineStringClassification(
@@ -938,7 +979,8 @@ object RealImportService {
                                         nodes = nodes,
                                         links = links,
                                         tracks = tracks,
-                                        index = i * 100 + m
+                                        index = i * 100 + m,
+                                        sourceFile = fileSourceName
                                     )
                                 }
                             }
@@ -963,7 +1005,8 @@ object RealImportService {
                                     pts = points,
                                     tracks = tracks,
                                     nodes = nodes,
-                                    index = i
+                                    index = i,
+                                    sourceFile = fileSourceName
                                 )
                             } else {
                                 val lat = points.map { it.latitude }.average()
@@ -977,7 +1020,8 @@ object RealImportService {
                                         description = description,
                                         lat = lat,
                                         lon = lon,
-                                        properties = propMap
+                                        properties = propMap,
+                                        sourceFile = fileSourceName
                                     )
                                 )
                             }
@@ -990,8 +1034,33 @@ object RealImportService {
             return ImportResult(emptyList(), emptyList(), emptyList(), "Erreur d'analyse GeoJSON : ${e.localizedMessage}")
         }
 
+        val folderTracksMap = tracks.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val folderNodesMap = nodes.groupBy { it.folderName.ifBlank { "Sans dossier" } }
+        val allFolderNames = (folderTracksMap.keys + folderNodesMap.keys).distinct()
+        val geoFolders = allFolderNames.map { fName ->
+            val fTracks = folderTracksMap[fName] ?: emptyList()
+            val fNodes = folderNodesMap[fName] ?: emptyList()
+            KmlFolderInfo(
+                name = fName,
+                sourceFile = fileSourceName,
+                tracksCount = fTracks.size,
+                nodesCount = fNodes.size,
+                totalDistanceMeters = fTracks.sumOf { it.totalDistanceMeters },
+                colorHex = getFolderDefaultColor(fName),
+                isVisible = true
+            )
+        }
+
         val msg = buildSummaryMessage(nodes.size, links.size, tracks.size, "GeoJSON", mode)
-        return ImportResult(nodes, links, tracks, msg)
+        return ImportResult(
+            nodes = nodes,
+            links = links,
+            tracks = tracks,
+            message = msg,
+            documentTitle = fileSourceName,
+            fileName = fileSourceName,
+            folders = geoFolders
+        )
     }
 
     // =========================================================================================
@@ -1009,11 +1078,13 @@ object RealImportService {
         properties: Map<String, String>,
         pts: List<TrackPoint>,
         tracks: MutableList<StoredTrack>,
-        index: Int
+        index: Int,
+        sourceFile: String = ""
     ) {
         val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
         val trackId = "TRK-NAT-${System.currentTimeMillis() % 100000}-$index"
         val notes = buildNativeNotes(description, folderContext, properties)
+        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
 
         tracks.add(
             StoredTrack(
@@ -1030,7 +1101,10 @@ object RealImportService {
                 folderName = folderName,
                 colorHex = colorHex,
                 strokeWidth = strokeWidth,
-                isVisible = true
+                isVisible = true,
+                isNativeKml = true,
+                kmlProperties = propsJson,
+                sourceFile = sourceFile
             )
         )
     }
@@ -1044,11 +1118,13 @@ object RealImportService {
         colorHex: String? = null,
         lat: Double,
         lon: Double,
-        properties: Map<String, String>
+        properties: Map<String, String>,
+        sourceFile: String = ""
     ): FtthNodeEntity {
         val notes = buildNativeNotes(description, folderContext, properties)
         val address = properties["address"] ?: properties["adresse"] ?: ""
         val operator = properties["operator"] ?: properties["operateur"] ?: properties["layer"] ?: ""
+        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
 
         return FtthNodeEntity(
             id = id,
@@ -1064,7 +1140,10 @@ object RealImportService {
             notes = notes,
             folderName = folderName,
             colorHex = colorHex,
-            isVisible = true
+            isVisible = true,
+            isNativeKml = true,
+            kmlProperties = propsJson,
+            sourceFile = sourceFile
         )
     }
 
@@ -1079,7 +1158,8 @@ object RealImportService {
         pts: List<TrackPoint>,
         tracks: MutableList<StoredTrack>,
         nodes: MutableList<FtthNodeEntity>,
-        index: Int
+        index: Int,
+        sourceFile: String = ""
     ) {
         if (pts.isEmpty()) return
         val closedPts = if (pts.first().latitude != pts.last().latitude || pts.first().longitude != pts.last().longitude) {
@@ -1089,6 +1169,7 @@ object RealImportService {
         }
         val dist = TrackGeometryHelper.computeTotalDistanceMeters(closedPts)
         val notes = buildNativeNotes(description, folderContext, properties)
+        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
 
         tracks.add(
             StoredTrack(
@@ -1105,7 +1186,10 @@ object RealImportService {
                 folderName = folderName,
                 colorHex = colorHex,
                 strokeWidth = strokeWidth,
-                isVisible = true
+                isVisible = true,
+                isNativeKml = true,
+                kmlProperties = propsJson,
+                sourceFile = sourceFile
             )
         )
 
@@ -1122,9 +1206,23 @@ object RealImportService {
                 colorHex = colorHex,
                 lat = avgLat,
                 lon = avgLon,
-                properties = properties
+                properties = properties,
+                sourceFile = sourceFile
             )
         )
+    }
+
+    private fun extractHtmlTableProperties(html: String, map: MutableMap<String, String>) {
+        try {
+            val rowRegex = Regex("""<tr[^>]*>\s*<(?:td|th)[^>]*>(.*?)</(?:td|th)>\s*<td[^>]*>(.*?)</td>\s*</tr>""", RegexOption.IGNORE_CASE)
+            for (match in rowRegex.findAll(html)) {
+                val rawKey = match.groupValues[1].replace(Regex("<[^>]+>"), "").replace("&nbsp;", " ").trim()
+                val rawVal = match.groupValues[2].replace(Regex("<[^>]+>"), "").replace("&nbsp;", " ").trim()
+                if (rawKey.isNotBlank() && rawVal.isNotBlank() && !map.containsKey(rawKey)) {
+                    map[rawKey] = rawVal
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     private fun buildNativeNotes(description: String, folderContext: String, properties: Map<String, String>): String {
@@ -1169,7 +1267,8 @@ object RealImportService {
         nodes: MutableList<FtthNodeEntity>,
         links: MutableList<FtthLinkEntity>,
         tracks: MutableList<StoredTrack>,
-        index: Int
+        index: Int,
+        sourceFile: String = ""
     ) {
         val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
         val lineInfo = classifyLineString(name, description, styleUrl, folderContext, properties)
@@ -1198,7 +1297,8 @@ object RealImportService {
                     name = "Extrémité $name",
                     latitude = startPt.latitude,
                     longitude = startPt.longitude,
-                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO"
+                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO",
+                    sourceFile = sourceFile
                 )
                 nodes.add(fromNode)
             }
@@ -1215,7 +1315,8 @@ object RealImportService {
                     name = "Extrémité $name (B)",
                     latitude = endPt.latitude,
                     longitude = endPt.longitude,
-                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO"
+                    notes = "Généré automatiquement lors de l'import du câble ${lineInfo.capacityFO} FO",
+                    sourceFile = sourceFile
                 )
                 nodes.add(toNode)
             }
@@ -1242,7 +1343,8 @@ object RealImportService {
                     notes = "Câble ${lineInfo.capacityFO} FO [${lineInfo.cableType} - ${lineInfo.installationType}]",
                     totalDistanceMeters = dist,
                     rawPoints = pts,
-                    points = pts
+                    points = pts,
+                    sourceFile = sourceFile
                 )
             )
 
@@ -1262,7 +1364,8 @@ object RealImportService {
                     notes = description.ifBlank { "Infrastructure ${lineInfo.infrastructureType}" },
                     totalDistanceMeters = dist,
                     rawPoints = pts,
-                    points = pts
+                    points = pts,
+                    sourceFile = sourceFile
                 )
             )
         }
@@ -1455,7 +1558,8 @@ object RealImportService {
         description: String,
         lat: Double,
         lon: Double,
-        properties: Map<String, String>
+        properties: Map<String, String>,
+        sourceFile: String = ""
     ): FtthNodeEntity {
         val address = properties["address"] ?: properties["adresse"] ?: description
         val operator = properties["operator"] ?: properties["operateur"] ?: properties["owner"] ?: "Tunisie Telecom"
@@ -1483,7 +1587,8 @@ object RealImportService {
             etat = NodeConformity.CONFORME,
             address = address,
             operator = operator,
-            notes = notes
+            notes = notes,
+            sourceFile = sourceFile
         )
     }
 

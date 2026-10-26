@@ -14,7 +14,7 @@ import androidx.room.TypeConverters
         GpsTrackEntity::class,
         GpsTrackPointEntity::class
     ],
-    version = 7,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(FtthTypeConverters::class)

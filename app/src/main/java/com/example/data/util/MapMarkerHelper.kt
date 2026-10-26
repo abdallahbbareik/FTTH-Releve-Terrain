@@ -95,6 +95,83 @@ object MapMarkerHelper {
         return BitmapDrawable(context.resources, bitmap)
     }
 
+    /**
+     * Marqueur distinctif pour les points KML natifs (non classés).
+     * Style repère Google Earth / épingle avec couleur KML dynamique et pointe orientée.
+     */
+    fun createKmlPointMarkerDrawable(
+        context: Context,
+        colorHex: String?,
+        sizeDp: Int = 38
+    ): Drawable {
+        val density = context.resources.displayMetrics.density
+        val px = (sizeDp * density).toInt()
+
+        val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val baseColor = try {
+            if (!colorHex.isNullOrBlank()) Color.parseColor(colorHex) else Color.parseColor("#0284C7")
+        } catch (_: Exception) {
+            Color.parseColor("#0284C7")
+        }
+
+        val centerX = px / 2f
+        val headRadius = px * 0.32f
+        val headCenterY = headRadius + (2f * density)
+        val tipY = px - (2f * density)
+
+        // 1. Ombre douce sous la pointe
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(90, 0, 0, 0)
+            style = Paint.Style.FILL
+        }
+        canvas.drawOval(centerX - (4f * density), tipY - (1.5f * density), centerX + (4f * density), tipY + (2.5f * density), shadowPaint)
+
+        // 2. Trajet de la punaise / pin (Goutte inversée style Google Earth)
+        val path = android.graphics.Path().apply {
+            arcTo(
+                centerX - headRadius, headCenterY - headRadius,
+                centerX + headRadius, headCenterY + headRadius,
+                -150f, 300f, false
+            )
+            lineTo(centerX, tipY)
+            close()
+        }
+
+        // Remplissage avec la couleur KML
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = baseColor
+            style = Paint.Style.FILL
+        }
+        canvas.drawPath(path, fillPaint)
+
+        // Bordure blanche nette pour contraste élevé (satellite ou plan)
+        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f * density
+            strokeJoin = Paint.Join.ROUND
+        }
+        canvas.drawPath(path, strokePaint)
+
+        // 3. Centre blanc / œil de repère (waypoint dot)
+        val innerCirclePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(centerX, headCenterY, headRadius * 0.45f, innerCirclePaint)
+
+        // 4. Petit point central coloré
+        val innerDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = baseColor
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(centerX, headCenterY, headRadius * 0.22f, innerDotPaint)
+
+        return BitmapDrawable(context.resources, bitmap)
+    }
+
     fun createTechnicianLocationDrawable(context: Context): Drawable {
         val density = context.resources.displayMetrics.density
         val px = (32 * density).toInt()

@@ -24,6 +24,7 @@ import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
 import com.example.ui.components.BlockingTaskState
+import com.example.ui.components.KmlFeatureItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -562,6 +563,33 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedNode = MutableStateFlow<FtthNodeEntity?>(null)
     val selectedNode: StateFlow<FtthNodeEntity?> = _selectedNode.asStateFlow()
 
+    // Mode Consultation KML / KMZ (View Mode pour points et lignes natifs non classés)
+    private val _selectedKmlFeature = MutableStateFlow<KmlFeatureItem?>(null)
+    val selectedKmlFeature: StateFlow<KmlFeatureItem?> = _selectedKmlFeature.asStateFlow()
+
+    fun isFeatureNativeKml(node: FtthNodeEntity): Boolean =
+        node.isNativeKml ||
+        node.id.startsWith("KML-NOD-") ||
+        node.id.startsWith("NOD-POLY-") ||
+        node.kmlProperties.isNotBlank() ||
+        (node.folderName.isNotBlank() && (node.notes.contains("Attributs SIG") || node.notes.contains("Attributs KML")))
+
+    fun isFeatureNativeKml(track: StoredTrack): Boolean =
+        track.isNativeKml ||
+        track.id.startsWith("TRK-NAT-") ||
+        track.id.startsWith("POLY-NAT-") ||
+        track.conduitType == "Natif" ||
+        track.kmlProperties.isNotBlank() ||
+        (track.folderName.isNotBlank() && (track.notes.contains("Attributs SIG") || track.notes.contains("Attributs KML")))
+
+    fun selectKmlFeature(feature: KmlFeatureItem?) {
+        _selectedKmlFeature.value = feature
+    }
+
+    fun dismissKmlFeatureDetail() {
+        _selectedKmlFeature.value = null
+    }
+
     private val _selectedTrackForDetail = MutableStateFlow<StoredTrack?>(null)
     val selectedTrackForDetail: StateFlow<StoredTrack?> = _selectedTrackForDetail.asStateFlow()
 
@@ -622,6 +650,9 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     private val _kmlDocumentTitle = MutableStateFlow<String>("")
     val kmlDocumentTitle: StateFlow<String> = _kmlDocumentTitle.asStateFlow()
 
+    private val _kmlFiles = MutableStateFlow<List<com.example.data.import.RealImportService.KmlFileInfo>>(emptyList())
+    val kmlFiles: StateFlow<List<com.example.data.import.RealImportService.KmlFileInfo>> = _kmlFiles.asStateFlow()
+
     private val _kmlFolders = MutableStateFlow<List<com.example.data.import.RealImportService.KmlFolderInfo>>(emptyList())
     val kmlFolders: StateFlow<List<com.example.data.import.RealImportService.KmlFolderInfo>> = _kmlFolders.asStateFlow()
 
@@ -634,39 +665,63 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun openKmlGoogleEarthSheet() { _showKmlGoogleEarthSheet.value = true }
     fun dismissKmlGoogleEarthSheet() { _showKmlGoogleEarthSheet.value = false }
 
-    fun toggleFolderVisibility(folderName: String) {
-        val currentHidden = _hiddenKmlFolders.value.toMutableSet()
-        val willBeVisible = if (currentHidden.contains(folderName)) {
-            currentHidden.remove(folderName)
-            true
-        } else {
-            currentHidden.add(folderName)
-            false
-        }
-        _hiddenKmlFolders.value = currentHidden
+    fun toggleFileVisibility(fileName: String) {
+        val fileInfo = _kmlFiles.value.firstOrNull { it.fileName.equals(fileName, ignoreCase = true) }
+        val newVisible = if (fileInfo != null) !fileInfo.isVisible else false
 
-        // Mise à jour de la visibilité sur les tracks en mémoire et stockage
         val updatedTracks = _allTracks.value.map { trk ->
-            val match = trk.folderName.equals(folderName, ignoreCase = true) ||
-                    (folderName == "Sans dossier" && trk.folderName.isBlank())
-            if (match) trk.copy(isVisible = willBeVisible) else trk
+            val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            if (sFile.equals(fileName, ignoreCase = true)) trk.copy(isVisible = newVisible) else trk
         }
         _allTracks.value = updatedTracks
         docStorage.saveTracks(updatedTracks)
 
-        // Mise à jour de la visibilité sur les nodes en mémoire et stockage
         val updatedNodes = _rawNodes.value.map { node ->
-            val match = node.folderName.equals(folderName, ignoreCase = true) ||
-                    (folderName == "Sans dossier" && node.folderName.isBlank())
-            if (match) node.copy(isVisible = willBeVisible) else node
+            val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            if (sFile.equals(fileName, ignoreCase = true)) node.copy(isVisible = newVisible) else node
         }
         _rawNodes.value = updatedNodes
         docStorage.saveNodes(updatedNodes)
 
-        // Mise à jour de l'état du dossier KML
-        _kmlFolders.value = _kmlFolders.value.map { f ->
-            if (f.name.equals(folderName, ignoreCase = true)) f.copy(isVisible = willBeVisible) else f
+        refreshKmlFolders()
+    }
+
+    fun toggleFolderVisibility(folderName: String, fileName: String? = null) {
+        val currentHidden = _hiddenKmlFolders.value.toMutableSet()
+        val key = if (!fileName.isNullOrBlank()) "$fileName::$folderName" else folderName
+        val willBeVisible = if (currentHidden.contains(key) || currentHidden.contains(folderName)) {
+            currentHidden.remove(key)
+            currentHidden.remove(folderName)
+            true
+        } else {
+            currentHidden.add(key)
+            false
         }
+        _hiddenKmlFolders.value = currentHidden
+
+        val updatedTracks = _allTracks.value.map { trk ->
+            val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
+                    (folderName == "Général" && trk.folderName.isBlank()) ||
+                    (folderName == "Sans dossier" && trk.folderName.isBlank())
+            val trkFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            val matchFile = fileName.isNullOrBlank() || trkFile.equals(fileName, ignoreCase = true)
+            if (matchFolder && matchFile) trk.copy(isVisible = willBeVisible) else trk
+        }
+        _allTracks.value = updatedTracks
+        docStorage.saveTracks(updatedTracks)
+
+        val updatedNodes = _rawNodes.value.map { node ->
+            val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
+                    (folderName == "Général" && node.folderName.isBlank()) ||
+                    (folderName == "Sans dossier" && node.folderName.isBlank())
+            val nodeFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            val matchFile = fileName.isNullOrBlank() || nodeFile.equals(fileName, ignoreCase = true)
+            if (matchFolder && matchFile) node.copy(isVisible = willBeVisible) else node
+        }
+        _rawNodes.value = updatedNodes
+        docStorage.saveNodes(updatedNodes)
+
+        refreshKmlFolders()
     }
 
     fun setAllKmlFoldersVisibility(visible: Boolean) {
@@ -681,16 +736,51 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _rawNodes.value = updatedNodes
         docStorage.saveNodes(updatedNodes)
 
-        _kmlFolders.value = _kmlFolders.value.map { it.copy(isVisible = visible) }
+        refreshKmlFolders()
         showBanner(if (visible) "Tous les calques affichés" else "Tous les calques masqués")
     }
 
-    fun zoomToKmlFolder(folderName: String) {
-        val tracksInFolder = _allTracks.value.filter {
-            it.folderName.equals(folderName, ignoreCase = true) || (folderName == "Sans dossier" && it.folderName.isBlank())
+    fun zoomToKmlFile(fileName: String) {
+        val tracksInFile = _allTracks.value.filter { trk ->
+            val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            sFile.equals(fileName, ignoreCase = true)
         }
-        val nodesInFolder = _rawNodes.value.filter {
-            it.folderName.equals(folderName, ignoreCase = true) || (folderName == "Sans dossier" && it.folderName.isBlank())
+        val nodesInFile = _rawNodes.value.filter { node ->
+            val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            sFile.equals(fileName, ignoreCase = true)
+        }
+
+        val allPoints = mutableListOf<Pair<Double, Double>>()
+        tracksInFile.forEach { trk ->
+            val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
+            pts.forEach { allPoints.add(Pair(it.latitude, it.longitude)) }
+        }
+        nodesInFile.forEach { node ->
+            allPoints.add(Pair(node.latitude, node.longitude))
+        }
+
+        if (allPoints.isNotEmpty()) {
+            val avgLat = allPoints.map { it.first }.average()
+            val avgLon = allPoints.map { it.second }.average()
+            _mapFocusTarget.value = Pair(avgLat, avgLon)
+            showBanner("Vue centrée sur $fileName")
+        }
+    }
+
+    fun zoomToKmlFolder(folderName: String, fileName: String? = null) {
+        val tracksInFolder = _allTracks.value.filter { trk ->
+            val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
+                    ((folderName == "Général" || folderName == "Sans dossier") && trk.folderName.isBlank())
+            val trkFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            val matchFile = fileName.isNullOrBlank() || trkFile.equals(fileName, ignoreCase = true)
+            matchFolder && matchFile
+        }
+        val nodesInFolder = _rawNodes.value.filter { node ->
+            val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
+                    ((folderName == "Général" || folderName == "Sans dossier") && node.folderName.isBlank())
+            val nodeFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+            val matchFile = fileName.isNullOrBlank() || nodeFile.equals(fileName, ignoreCase = true)
+            matchFolder && matchFile
         }
 
         val allPoints = mutableListOf<Pair<Double, Double>>()
@@ -713,28 +803,76 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshKmlFolders() {
         val tracks = _allTracks.value
         val nodes = _rawNodes.value
-        val folderTracksMap = tracks.groupBy { it.folderName.ifBlank { "Sans dossier" } }
-        val folderNodesMap = nodes.groupBy { it.folderName.ifBlank { "Sans dossier" } }
-        val allFolderNames = (folderTracksMap.keys + folderNodesMap.keys).filter { it.isNotBlank() && it != "Sans dossier" }.distinct()
+        val hidden = _hiddenKmlFolders.value
 
-        if (allFolderNames.isNotEmpty()) {
-            val hidden = _hiddenKmlFolders.value
-            _kmlFolders.value = allFolderNames.map { fName ->
-                val fTracks = folderTracksMap[fName] ?: emptyList()
-                val fNodes = folderNodesMap[fName] ?: emptyList()
-                val totalDist = fTracks.sumOf { it.totalDistanceMeters }
-                val color = fTracks.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
-                    ?: fNodes.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
-                com.example.data.import.RealImportService.KmlFolderInfo(
-                    name = fName,
-                    tracksCount = fTracks.size,
-                    nodesCount = fNodes.size,
-                    totalDistanceMeters = totalDist,
-                    colorHex = color,
-                    isVisible = !hidden.contains(fName)
+        val fileMap = mutableMapOf<String, Pair<MutableList<StoredTrack>, MutableList<FtthNodeEntity>>>()
+
+        tracks.forEach { trk ->
+            val sFile = trk.sourceFile.ifBlank {
+                _kmlDocumentTitle.value.ifBlank { "Fichier principal" }
+            }
+            val pair = fileMap.getOrPut(sFile) { Pair(mutableListOf(), mutableListOf()) }
+            pair.first.add(trk)
+        }
+
+        nodes.forEach { node ->
+            val sFile = node.sourceFile.ifBlank {
+                _kmlDocumentTitle.value.ifBlank { "Fichier principal" }
+            }
+            val pair = fileMap.getOrPut(sFile) { Pair(mutableListOf(), mutableListOf()) }
+            pair.second.add(node)
+        }
+
+        if (fileMap.isNotEmpty()) {
+            val fileInfos = fileMap.map { (sFile, pair) ->
+                val fTracks = pair.first
+                val fNodes = pair.second
+
+                val folderTracksMap = fTracks.groupBy { it.folderName.ifBlank { "Général" } }
+                val folderNodesMap = fNodes.groupBy { it.folderName.ifBlank { "Général" } }
+                val allFolderNames = (folderTracksMap.keys + folderNodesMap.keys).filter { it.isNotBlank() }.distinct()
+
+                val folders = allFolderNames.map { fName ->
+                    val trks = folderTracksMap[fName] ?: emptyList()
+                    val nds = folderNodesMap[fName] ?: emptyList()
+                    val totalDist = trks.sumOf { it.totalDistanceMeters }
+                    val color = trks.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+                        ?: nds.firstOrNull { !it.colorHex.isNullOrBlank() }?.colorHex
+
+                    val key = "$sFile::$fName"
+                    val isVisible = !hidden.contains(key) && !hidden.contains(fName)
+
+                    com.example.data.import.RealImportService.KmlFolderInfo(
+                        name = fName,
+                        sourceFile = sFile,
+                        tracksCount = trks.size,
+                        nodesCount = nds.size,
+                        totalDistanceMeters = totalDist,
+                        colorHex = color,
+                        isVisible = isVisible
+                    )
+                }
+
+                val totalTracksCount = fTracks.size
+                val totalNodesCount = fNodes.size
+                val totalDistMeters = fTracks.sumOf { it.totalDistanceMeters }
+                val isFileVisible = folders.any { it.isVisible }
+
+                com.example.data.import.RealImportService.KmlFileInfo(
+                    fileName = sFile,
+                    title = sFile,
+                    folders = folders,
+                    tracksCount = totalTracksCount,
+                    nodesCount = totalNodesCount,
+                    totalDistanceMeters = totalDistMeters,
+                    isVisible = isFileVisible
                 )
             }
+
+            _kmlFiles.value = fileInfos
+            _kmlFolders.value = fileInfos.flatMap { it.folders }
         } else {
+            _kmlFiles.value = emptyList()
             _kmlFolders.value = emptyList()
         }
     }
@@ -743,73 +881,79 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
      * Supprime le fichier KML/KMZ et TOUS les dossiers et tracés/nœuds associés
      */
     fun deleteKmlFileAndFolders() {
-        val fileName = _kmlDocumentTitle.value.ifBlank { "Fichier importé" }
-        val folderNames = _kmlFolders.value.map { it.name.trim().lowercase(Locale.ROOT) }.toSet()
+        val fileName = _kmlDocumentTitle.value.ifBlank { "Fichier principal" }
+        deleteKmlFile(fileName)
+    }
 
-        val initialTracksCount = _allTracks.value.size
-        val initialNodesCount = _rawNodes.value.size
+    fun deleteKmlFile(fileName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val remainingTracks = _allTracks.value.filterNot { trk ->
+                val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                sFile.equals(fileName, ignoreCase = true)
+            }
+            val remainingNodes = _rawNodes.value.filterNot { node ->
+                val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                sFile.equals(fileName, ignoreCase = true)
+            }
 
-        // Supprimer tous les tracés appartenant aux dossiers de ce fichier
-        val remainingTracks = _allTracks.value.filterNot { trk ->
-            val f = trk.folderName.trim().lowercase(Locale.ROOT)
-            if (folderNames.isNotEmpty()) {
-                f.isNotBlank() && folderNames.contains(f)
-            } else {
-                // S'il n'y avait aucun sous-dossier, le fichier représente l'ensemble des tracés importés
-                true
+            _allTracks.value = remainingTracks
+            _rawNodes.value = remainingNodes
+
+            docStorage.saveTracks(remainingTracks)
+            docStorage.saveNodes(remainingNodes)
+
+            withContext(Dispatchers.Main) {
+                refreshKmlFolders()
+                if (_kmlFiles.value.isEmpty()) {
+                    _kmlDocumentTitle.value = ""
+                    docStorage.clearKmlDocumentTitle()
+                    _showKmlGoogleEarthSheet.value = false
+                }
+                showBanner("Fichier « $fileName » et tous ses dossiers supprimés")
             }
         }
-
-        // Supprimer tous les nœuds appartenant aux dossiers de ce fichier
-        val remainingNodes = _rawNodes.value.filterNot { node ->
-            val f = node.folderName.trim().lowercase(Locale.ROOT)
-            if (folderNames.isNotEmpty()) {
-                f.isNotBlank() && folderNames.contains(f)
-            } else {
-                true
-            }
-        }
-
-        _allTracks.value = remainingTracks
-        _rawNodes.value = remainingNodes
-        _kmlFolders.value = emptyList()
-        _kmlDocumentTitle.value = ""
-        _hiddenKmlFolders.value = emptySet()
-        _showKmlGoogleEarthSheet.value = false
-
-        docStorage.clearKmlDocumentTitle()
-        docStorage.saveTracks(remainingTracks)
-        docStorage.saveNodes(remainingNodes)
-
-        val deletedTracks = initialTracksCount - remainingTracks.size
-        val deletedNodes = initialNodesCount - remainingNodes.size
-        _bannerMessage.value = "Fichier « $fileName » et tous ses dossiers supprimés ($deletedTracks tracés, $deletedNodes nœuds)"
     }
 
     /**
      * Supprime un dossier spécifique et l'ensemble de ses tracés et nœuds
      */
     fun deleteKmlFolder(folderName: String) {
-        val remainingTracks = _allTracks.value.filterNot {
-            it.folderName.equals(folderName, ignoreCase = true)
-        }
-        val remainingNodes = _rawNodes.value.filterNot {
-            it.folderName.equals(folderName, ignoreCase = true)
-        }
-        _allTracks.value = remainingTracks
-        _rawNodes.value = remainingNodes
-        docStorage.saveTracks(remainingTracks)
-        docStorage.saveNodes(remainingNodes)
+        deleteKmlFolder(folderName, null)
+    }
 
-        val updatedFolders = _kmlFolders.value.filterNot {
-            it.name.equals(folderName, ignoreCase = true)
+    fun deleteKmlFolder(folderName: String, fileName: String? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val remainingTracks = _allTracks.value.filterNot { trk ->
+                val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
+                        ((folderName == "Général" || folderName == "Sans dossier") && trk.folderName.isBlank())
+                val trkFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                val matchFile = fileName.isNullOrBlank() || trkFile.equals(fileName, ignoreCase = true)
+                matchFolder && matchFile
+            }
+            val remainingNodes = _rawNodes.value.filterNot { node ->
+                val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
+                        ((folderName == "Général" || folderName == "Sans dossier") && node.folderName.isBlank())
+                val nodeFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                val matchFile = fileName.isNullOrBlank() || nodeFile.equals(fileName, ignoreCase = true)
+                matchFolder && matchFile
+            }
+
+            _allTracks.value = remainingTracks
+            _rawNodes.value = remainingNodes
+
+            docStorage.saveTracks(remainingTracks)
+            docStorage.saveNodes(remainingNodes)
+
+            withContext(Dispatchers.Main) {
+                refreshKmlFolders()
+                if (_kmlFiles.value.isEmpty()) {
+                    _kmlDocumentTitle.value = ""
+                    docStorage.clearKmlDocumentTitle()
+                    _showKmlGoogleEarthSheet.value = false
+                }
+                showBanner("Dossier « $folderName » et son contenu supprimés")
+            }
         }
-        _kmlFolders.value = updatedFolders
-        if (updatedFolders.isEmpty()) {
-            _kmlDocumentTitle.value = ""
-            docStorage.clearKmlDocumentTitle()
-        }
-        _bannerMessage.value = "Dossier « $folderName » et son contenu supprimés"
     }
 
     fun setImportMode(mode: com.example.data.import.RealImportService.ImportMode) {
@@ -857,7 +1001,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (!node.isVisible) {
                 return@filter false
             }
-            val matchesType = when (node.type) {
+            val isNative = isFeatureNativeKml(node)
+            val matchesType = if (isNative) true else when (node.type) {
                 FtthNodeType.POTEAU -> filters.showPoteaux
                 FtthNodeType.CHAMBRE -> filters.showChambres
                 FtthNodeType.BOITIER -> filters.showBoitiers
@@ -865,8 +1010,8 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
                 FtthNodeType.IMMEUBLE -> filters.showImmeubles
                 FtthNodeType.VILLA -> filters.showVillas
             }
-            val matchesStatus = filters.selectedStatus == null || node.status == filters.selectedStatus
-            val matchesConformity = filters.selectedConformity == null || node.etat == filters.selectedConformity
+            val matchesStatus = isNative || filters.selectedStatus == null || node.status == filters.selectedStatus
+            val matchesConformity = isNative || filters.selectedConformity == null || node.etat == filters.selectedConformity
             val matchesQuery = query.isBlank() ||
                     node.name.contains(query, ignoreCase = true) ||
                     node.id.contains(query, ignoreCase = true) ||
@@ -1739,11 +1884,22 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 5. Mode Normal : ouverture de la fiche de consultation/modification du nœud
+        // 5. Mode Consultation KML (View Mode) pour les points natifs non classés
+        if (isFeatureNativeKml(node)) {
+            _selectedKmlFeature.value = KmlFeatureItem.PointFeature(node)
+            return
+        }
+
+        // 6. Mode Normal : ouverture de la fiche de consultation/modification du nœud
         _selectedNode.value = node
     }
 
     fun openTrackDetail(track: StoredTrack, fullEdit: Boolean = false) {
+        if (!fullEdit && isFeatureNativeKml(track)) {
+            _selectedKmlFeature.value = KmlFeatureItem.LineFeature(track)
+            _showTracksListDialog.value = false
+            return
+        }
         _selectedTrackForDetail.value = track
         _showFullTrackDetail.value = fullEdit
         _showTracksListDialog.value = false
@@ -2170,25 +2326,23 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val hasTracks = result.tracks.isNotEmpty()
 
             if (hasNodes || hasLinks || hasTracks) {
-                // Remplacer les anciennes données KML importées pour que le nouveau fichier remplace le précédent
-                val oldFolderNames = _kmlFolders.value.map { it.name.trim().lowercase(Locale.ROOT) }.toSet()
+                // Ne supprimer les anciennes entités que si le fichier entrant a exactement le même sourceFile / nom
+                val incomingFileName = result.fileName.ifBlank { result.documentTitle.ifBlank { "Fichier KML" } }
+                
                 val cleanedTracks = _allTracks.value.filterNot { trk ->
-                    val f = trk.folderName.trim().lowercase(Locale.ROOT)
-                    if (oldFolderNames.isNotEmpty()) f.isNotBlank() && oldFolderNames.contains(f) else true
+                    trk.sourceFile.isNotBlank() && trk.sourceFile.equals(incomingFileName, ignoreCase = true)
                 }
                 val cleanedNodes = _rawNodes.value.filterNot { node ->
-                    val f = node.folderName.trim().lowercase(Locale.ROOT)
-                    if (oldFolderNames.isNotEmpty()) f.isNotBlank() && oldFolderNames.contains(f) else true
+                    node.sourceFile.isNotBlank() && node.sourceFile.equals(incomingFileName, ignoreCase = true)
                 }
                 val cleanedLinks = _rawLinks.value
 
-                if (result.documentTitle.isNotBlank()) {
-                    _kmlDocumentTitle.value = result.documentTitle
-                    docStorage.saveKmlDocumentTitle(result.documentTitle)
+                // Conserver tous les dossiers des autres fichiers et ajouter les nouveaux
+                val existingOtherFolders = _kmlFolders.value.filterNot { f ->
+                    f.sourceFile.isNotBlank() && f.sourceFile.equals(incomingFileName, ignoreCase = true)
                 }
-                if (result.folders.isNotEmpty()) {
-                    _kmlFolders.value = result.folders
-                }
+                val finalFolders = existingOtherFolders + result.folders
+                _kmlFolders.value = finalFolders
 
                 val finalNodes = (cleanedNodes + result.nodes).distinctBy { it.id }
                 val finalLinks = (cleanedLinks + result.links).distinctBy { it.id }
