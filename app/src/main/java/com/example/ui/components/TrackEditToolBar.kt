@@ -233,6 +233,9 @@ fun StraightenEditorBar(
 fun MoveNodeEditorBar(
     node: FtthNodeEntity,
     tempPosition: Pair<Double, Double>?,
+    snappedTargetName: String? = null,
+    isSnappingActive: Boolean = false,
+    onToggleSnapping: () -> Unit = {},
     onConfirmMove: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
@@ -257,17 +260,83 @@ fun MoveNodeEditorBar(
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Déplacer le nœud ${node.id} (${node.type.label})",
+                        text = "Déplacer le point ${node.id} (${node.type.label})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                     val statusText = if (tempPosition == null) {
-                        "Touchez la carte au nouvel emplacement souhaité"
+                        "Touchez la carte ou glissez le point pour le repositionner"
+                    } else if (snappedTargetName != null) {
+                        "🧲 Calé sur la même position que $snappedTargetName"
                     } else {
-                        "Nouvelle position : ${String.format(Locale.FRANCE, "%.6f, %.6f", tempPosition.first, tempPosition.second)}"
+                        "Position libre : ${String.format(Locale.FRANCE, "%.6f, %.6f", tempPosition.first, tempPosition.second)}"
                     }
-                    Text(text = statusText, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = statusText,
+                        fontSize = 11.sp,
+                        color = if (snappedTargetName != null) Color(0xFF16A34A) else MaterialTheme.colorScheme.primary,
+                        fontWeight = if (snappedTargetName != null) FontWeight.SemiBold else FontWeight.Normal
+                    )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Sélecteur de mode : Déplacement Libre vs Accrochage
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = !isSnappingActive,
+                    onClick = { if (isSnappingActive) onToggleSnapping() },
+                    label = { Text("🕊️ Déplacement libre", fontSize = 11.sp, fontWeight = if (!isSnappingActive) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("mode_free_move_chip")
+                )
+
+                FilterChip(
+                    selected = isSnappingActive,
+                    onClick = { if (!isSnappingActive) onToggleSnapping() },
+                    label = { Text("🧲 Accrochage", fontSize = 11.sp, fontWeight = if (isSnappingActive) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("mode_snapping_chip")
+                )
+            }
+
+            if (snappedTargetName != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF16A34A).copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🧲 Accroché sur : $snappedTargetName (même position)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = if (isSnappingActive) {
+                        "Aimante aux nœuds et sommets proches (< 6 m) ou sur clic direct"
+                    } else {
+                        "Déplacement libre : touchez n'importe où sur la carte pour placer le point librement"
+                    },
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -303,6 +372,9 @@ fun MoveVertexEditorBar(
     trackName: String,
     vertexIndex: Int?,
     tempPosition: Pair<Double, Double>?,
+    snappedTargetName: String? = null,
+    isSnappingActive: Boolean = false,
+    onToggleSnapping: () -> Unit = {},
     onConfirmMove: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
@@ -335,11 +407,77 @@ fun MoveVertexEditorBar(
                         "Touchez le sommet à déplacer sur la carte"
                     } else if (tempPosition == null) {
                         "Sommet #$vertexIndex sélectionné. Touchez le nouvel endroit sur la carte."
+                    } else if (snappedTargetName != null) {
+                        "🧲 Calé sur la même position que $snappedTargetName"
                     } else {
-                        "Nouvel emplacement sélectionné pour le sommet #$vertexIndex"
+                        "Nouvel emplacement : ${String.format(Locale.FRANCE, "%.6f, %.6f", tempPosition.first, tempPosition.second)}"
                     }
-                    Text(text = statusText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = statusText,
+                        fontSize = 11.sp,
+                        color = if (snappedTargetName != null) Color(0xFF16A34A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (snappedTargetName != null) FontWeight.SemiBold else FontWeight.Normal
+                    )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Sélecteur de mode : Déplacement Libre vs Accrochage
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = !isSnappingActive,
+                    onClick = { if (isSnappingActive) onToggleSnapping() },
+                    label = { Text("🕊️ Déplacement libre", fontSize = 11.sp, fontWeight = if (!isSnappingActive) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("mode_free_vertex_chip")
+                )
+
+                FilterChip(
+                    selected = isSnappingActive,
+                    onClick = { if (!isSnappingActive) onToggleSnapping() },
+                    label = { Text("🧲 Accrochage", fontSize = 11.sp, fontWeight = if (isSnappingActive) FontWeight.Bold else FontWeight.Normal) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("mode_snapping_vertex_chip")
+                )
+            }
+
+            if (snappedTargetName != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF16A34A).copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🧲 Accroché sur : $snappedTargetName (même position)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = if (isSnappingActive) {
+                        "Aimante aux nœuds et sommets proches (< 6 m) ou sur clic direct"
+                    } else {
+                        "Déplacement libre : touchez n'importe où sur la carte pour placer le sommet librement"
+                    },
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -392,6 +530,7 @@ fun TrackAdjustmentBottomBar(
     onResetOriginal: (() -> Unit)? = null,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
+    snappedTargetName: String? = null,
     modifier: Modifier = Modifier
 ) {
     val distStr = if (distanceMeters < 1000.0) "${distanceMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distanceMeters / 1000.0)
@@ -519,22 +658,24 @@ fun TrackAdjustmentBottomBar(
                 // Notification / Guide text
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = if (isStraightenActive || selectedVertexIdx != null || isDeleteActive || isAddActive) Color(0xFFFEF3C7)
+                    color = if (!snappedTargetName.isNullOrBlank()) Color(0xFFD1FAE5)
+                            else if (isStraightenActive || selectedVertexIdx != null || isDeleteActive || isAddActive) Color(0xFFFEF3C7)
                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     val guideText = when {
+                        !snappedTargetName.isNullOrBlank() -> "🧲 Calé sur $snappedTargetName (même position)"
                         isDeleteActive -> "Mode Suppression : Touchez un sommet"
-                        isAddActive -> "Mode Ajout : Touchez la carte"
+                        isAddActive -> "Mode Ajout : Touchez la carte ou un nœud"
                         isStraightenActive -> if (straightenStartIdx == null) "Touchez 1er sommet" else "Touchez 2ème sommet"
-                        selectedVertexIdx != null -> "Sommet #${selectedVertexIdx + 1} sélectionné"
-                        else -> "Glissez un sommet pour modifier"
+                        selectedVertexIdx != null -> "Sommet #${selectedVertexIdx + 1} sélectionné (glissez ou touchez un nœud)"
+                        else -> "Glissez un sommet pour modifier (accrochage 🧲 actif)"
                     }
                     Text(
                         text = guideText,
                         fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF92400E),
+                        fontWeight = FontWeight.Bold,
+                        color = if (!snappedTargetName.isNullOrBlank()) Color(0xFF065F46) else Color(0xFF92400E),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                         maxLines = 1
                     )

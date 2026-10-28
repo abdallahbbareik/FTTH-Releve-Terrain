@@ -69,6 +69,7 @@ import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.MapMarkerHelper
+import com.example.data.util.TrackGeometryHelper
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
@@ -125,6 +126,7 @@ fun OsmMapView(
     selectedTrackToMoveVertex: StoredTrack? = null,
     movingVertexIndex: Int? = null,
     tempVertexPosition: Pair<Double, Double>? = null,
+    isSnappingActive: Boolean = false,
     isPickOnMapMode: Boolean = false,
     isAdjustTrackMode: Boolean = false,
     selectedAdjustTrack: StoredTrack? = null,
@@ -145,6 +147,7 @@ fun OsmMapView(
     onLinkClick: ((FtthLinkEntity) -> Unit)? = null,
     onTrackClick: ((StoredTrack) -> Unit)? = null,
     onNodeClick: (FtthNodeEntity) -> Unit,
+    onMultipleEntitiesFound: ((List<NearbyEntityItem>) -> Unit)? = null,
     onMapLongClick: (latitude: Double, longitude: Double) -> Unit,
     onManualTrackAddPoint: (latitude: Double, longitude: Double) -> Unit,
     onConfirmStakingPosition: (latitude: Double, longitude: Double) -> Unit,
@@ -280,14 +283,18 @@ fun OsmMapView(
     val currentOnMapLongClick by rememberUpdatedState(onMapLongClick)
     val currentIsAdjustAddActive by rememberUpdatedState(isAdjustAddActive)
     val currentOnAddVertexToAdjustTrack by rememberUpdatedState(onAddVertexToAdjustTrack)
+    val currentOnMultipleEntitiesFound by rememberUpdatedState(onMultipleEntitiesFound)
+    val currentIsSnappingActive by rememberUpdatedState(isSnappingActive)
+    var isActivelyDraggingVertex by remember { mutableStateOf(false) }
 
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
-        movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition,
-        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx,
+        movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition, isSnappingActive,
+        isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack?.id, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx,
         isAdjustDeleteActive, isAdjustAddActive
     ) {
+        if (isActivelyDraggingVertex) return@LaunchedEffect
         mapView.overlays.clear()
 
         val rotationGesture = RotationGestureOverlay(mapView)
@@ -316,6 +323,29 @@ fun OsmMapView(
                             currentOnMapLongClick(p.latitude, p.longitude)
                         }
                         return true
+                    }
+
+                    // En mode normal de consultation/édition : vérifier si le clic touche une ou plusieurs entités proches
+                    if (!isStraightenMode && !isMoveVertexMode && !isAdjustTrackMode) {
+                        val nearby = EntityProximityHelper.findNearbyEntities(
+                            lat = p.latitude,
+                            lon = p.longitude,
+                            nodes = nodes,
+                            tracks = allTracks,
+                            links = links,
+                            mapView = mapView
+                        )
+                        if (nearby.size > 1 && currentOnMultipleEntitiesFound != null) {
+                            currentOnMultipleEntitiesFound?.invoke(nearby)
+                            return true
+                        } else if (nearby.size == 1) {
+                            when (val e = nearby.first().entity) {
+                                is MapSelectableEntity.NodeEntity -> currentOnNodeClick(e.node)
+                                is MapSelectableEntity.TrackEntity -> onTrackClick?.invoke(e.track)
+                                is MapSelectableEntity.LinkEntity -> onLinkClick?.invoke(e.link)
+                            }
+                            return true
+                        }
                     }
                 }
                 return false
@@ -354,26 +384,22 @@ fun OsmMapView(
                         else -> android.graphics.Color.parseColor("#16A34A")
                     }
                     title = "Câble ${link.capacityFO} FO (${link.cableType} - ${link.installationType})"
-                    setOnClickListener { _, _, _ ->
-                        onLinkClick?.invoke(link)
-                        true
-                    }
-                }
-                mapView.overlays.add(polyline)
-            } else if (from != null && to != null) {
-                val polyline = Polyline(mapView).apply {
-                    addPoint(GeoPoint(from.latitude, from.longitude))
-                    addPoint(GeoPoint(to.latitude, to.longitude))
-                    outlinePaint.strokeWidth = 7f
-                    outlinePaint.isAntiAlias = true
-                    outlinePaint.color = when (link.installationType.lowercase(Locale.ROOT)) {
-                        "aérien" -> android.graphics.Color.parseColor("#EA580C")
-                        "façade" -> android.graphics.Color.parseColor("#0284C7")
-                        else -> android.graphics.Color.parseColor("#16A34A")
-                    }
-                    title = "${link.id} (${link.capacityFO} FO - ${link.cableType})"
-                    setOnClickListener { _, _, _ ->
-                        onLinkClick?.invoke(link)
+                    setOnClickListener { _, _, eventPos ->
+                        val checkLat = eventPos?.latitude ?: from?.latitude ?: 0.0
+                        val checkLon = eventPos?.longitude ?: from?.longitude ?: 0.0
+                        val nearby = EntityProximityHelper.findNearbyEntities(
+                            lat = checkLat,
+                            lon = checkLon,
+                            nodes = nodes,
+                            tracks = allTracks,
+                            links = links,
+                            mapView = mapView
+                        )
+                        if (nearby.size > 1 && currentOnMultipleEntitiesFound != null) {
+                            currentOnMultipleEntitiesFound?.invoke(nearby)
+                        } else {
+                            onLinkClick?.invoke(link)
+                        }
                         true
                     }
                 }
@@ -381,8 +407,18 @@ fun OsmMapView(
             }
         }
 
+        val tracksToRender = if (isAdjustTrackMode && selectedAdjustTrack != null && allTracks.none { it.id == selectedAdjustTrack.id }) {
+            allTracks + selectedAdjustTrack
+        } else {
+            allTracks
+        }
+
+        var adjustTrackPolyline: Polyline? = null
+        var adjustTrackPoints: List<TrackPoint>? = null
+
         // Tracés GPS / Infras linéaires
-        for (track in allTracks) {
+        for (trackItem in tracksToRender) {
+            val track = if (isAdjustTrackMode && selectedAdjustTrack?.id == trackItem.id) selectedAdjustTrack!! else trackItem
             if (!track.isVisible) continue
             val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
             if (pts.size >= 2) {
@@ -416,134 +452,33 @@ fun OsmMapView(
                     if (isCurrentAdjusted) {
                         outlinePaint.strokeWidth = 10f
                     }
-                    setOnClickListener { _, _, _ ->
+                    setOnClickListener { _, _, eventPos ->
                         if (!isStraightenMode && !isMoveVertexMode && !isAdjustTrackMode) {
-                            onTrackClick?.invoke(track)
+                            val checkLat = eventPos?.latitude ?: pts.firstOrNull()?.latitude ?: 0.0
+                            val checkLon = eventPos?.longitude ?: pts.firstOrNull()?.longitude ?: 0.0
+                            val nearby = EntityProximityHelper.findNearbyEntities(
+                                lat = checkLat,
+                                lon = checkLon,
+                                nodes = nodes,
+                                tracks = allTracks,
+                                links = links,
+                                mapView = mapView
+                            )
+                            if (nearby.size > 1 && currentOnMultipleEntitiesFound != null) {
+                                currentOnMultipleEntitiesFound?.invoke(nearby)
+                            } else {
+                                onTrackClick?.invoke(track)
+                            }
                             true
                         } else false
                     }
                 }
                 mapView.overlays.add(polyline)
 
-                // Sommets en mode Modification du tracé (Glissement automatique et sélection directe de chaque sommet)
+                // Enregistrer la polyligne et les points du tracé en cours d'ajustement
                 if (isAdjustTrackMode && selectedAdjustTrack?.id == track.id) {
-                    val adjustVertexMarkers = mutableListOf<Marker>()
-
-                    for ((idx, pt) in pts.withIndex()) {
-                        val isSelected = (idx == selectedAdjustVertexIdx) || (isAdjustStraightenActive && idx == adjustStraightenStartIdx)
-                        val vertexMarker = Marker(mapView).apply {
-                            position = GeoPoint(pt.latitude, pt.longitude)
-                            title = "Sommet #${idx + 1}"
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = MapMarkerHelper.createVertexDrawable(context, idx + 1, isSelected, isDeleteMode = isAdjustDeleteActive)
-                            isDraggable = false
-                        }
-                        adjustVertexMarkers.add(vertexMarker)
-                        mapView.overlays.add(vertexMarker)
-                    }
-
-                    // Overlay tactile unique gérant le glissement fluide et le clic sur n'importe quel sommet
-                    val vertexTouchOverlay = object : Overlay() {
-                        private var activeDraggedIdx: Int? = null
-                        private var downX = 0f
-                        private var downY = 0f
-                        private var isDragging = false
-                        private val density = context.resources.displayMetrics.density
-                        private val touchSlop = 6f * density
-                        private val touchRadiusPx = 36f * density // 36dp de rayon = 72dp de zone tactile
-
-                        private fun findTouchedVertexIndex(touchX: Float, touchY: Float): Int? {
-                            val pj = mapView.projection ?: return null
-                            var bestIdx: Int? = null
-                            var bestDistSq = touchRadiusPx * touchRadiusPx
-
-                            val points = polyline.actualPoints
-                            for (i in points.indices) {
-                                val pt = points[i]
-                                val screenPt = pj.toPixels(pt, null)
-                                val dx = touchX - screenPt.x
-                                val dy = touchY - screenPt.y
-                                val distSq = dx * dx + dy * dy
-                                if (distSq <= bestDistSq) {
-                                    bestDistSq = distSq
-                                    bestIdx = i
-                                }
-                            }
-                            return bestIdx
-                        }
-
-                        override fun onTouchEvent(event: android.view.MotionEvent, mapView: MapView): Boolean {
-                            when (event.actionMasked) {
-                                android.view.MotionEvent.ACTION_DOWN -> {
-                                    val touched = findTouchedVertexIndex(event.x, event.y)
-                                    if (touched != null) {
-                                        activeDraggedIdx = touched
-                                        downX = event.x
-                                        downY = event.y
-                                        isDragging = false
-                                        mapView.parent?.requestDisallowInterceptTouchEvent(true)
-                                        return true
-                                    }
-                                    return false
-                                }
-                                android.view.MotionEvent.ACTION_MOVE -> {
-                                    val idx = activeDraggedIdx ?: return false
-                                    val dx = event.x - downX
-                                    val dy = event.y - downY
-                                    if (!isDragging && (dx * dx + dy * dy) > (touchSlop * touchSlop)) {
-                                        isDragging = true
-                                    }
-                                    if (isDragging) {
-                                        mapView.parent?.requestDisallowInterceptTouchEvent(true)
-                                        val pj = mapView.projection
-                                        if (pj != null) {
-                                            val currentGeo = pj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
-                                            val ptsList = polyline.actualPoints
-                                            if (idx in ptsList.indices) {
-                                                ptsList[idx] = currentGeo
-                                                polyline.setPoints(ptsList)
-                                            }
-                                            if (idx in adjustVertexMarkers.indices) {
-                                                adjustVertexMarkers[idx].position = currentGeo
-                                            }
-                                            mapView.invalidate()
-                                            onVertexDragged?.invoke(idx, currentGeo.latitude, currentGeo.longitude)
-                                        }
-                                        return true
-                                    }
-                                    return true
-                                }
-                                android.view.MotionEvent.ACTION_UP -> {
-                                    val idx = activeDraggedIdx
-                                    activeDraggedIdx = null
-                                    mapView.parent?.requestDisallowInterceptTouchEvent(false)
-                                    if (idx != null) {
-                                        if (isDragging) {
-                                            isDragging = false
-                                            val pj = mapView.projection
-                                            if (pj != null) {
-                                                val currentGeo = pj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
-                                                onVertexDragEnded?.invoke(idx, currentGeo.latitude, currentGeo.longitude)
-                                            }
-                                        } else {
-                                            // Tap simple sur le sommet spécifique touché !
-                                            onAdjustVertexClick?.invoke(idx)
-                                        }
-                                        return true
-                                    }
-                                    return false
-                                }
-                                android.view.MotionEvent.ACTION_CANCEL -> {
-                                    activeDraggedIdx = null
-                                    isDragging = false
-                                    mapView.parent?.requestDisallowInterceptTouchEvent(false)
-                                    return false
-                                }
-                            }
-                            return false
-                        }
-                    }
-                    mapView.overlays.add(vertexTouchOverlay)
+                    adjustTrackPolyline = polyline
+                    adjustTrackPoints = pts
                 }
 
                 // Sommets en mode Redressement
@@ -579,9 +514,26 @@ fun OsmMapView(
                             title = "Sommet #$idx à déplacer"
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                             icon = MapMarkerHelper.createVertexDrawable(context, idx, isBeingMoved)
+                            if (isBeingMoved) {
+                                isDraggable = true
+                                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                                    override fun onMarkerDrag(marker: Marker?) {}
+                                    override fun onMarkerDragStart(marker: Marker?) {}
+                                    override fun onMarkerDragEnd(marker: Marker?) {
+                                        marker?.position?.let { gp ->
+                                            currentOnMapClickForMove?.invoke(gp.latitude, gp.longitude)
+                                        }
+                                    }
+                                })
+                            }
                             setOnMarkerClickListener { _, _ ->
-                                onSelectVertexToMove?.invoke(idx)
-                                true
+                                if (isMoveVertexMode && movingVertexIndex != null && idx != movingVertexIndex) {
+                                    currentOnMapClickForMove?.invoke(pt.latitude, pt.longitude)
+                                    true
+                                } else {
+                                    onSelectVertexToMove?.invoke(idx)
+                                    true
+                                }
                             }
                         }
                         mapView.overlays.add(vertexMarker)
@@ -709,12 +661,33 @@ fun OsmMapView(
                 }
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { _, _ ->
-                    if (currentIsManualTrackMode) {
-                        currentOnManualTrackAddPoint(node.latitude, node.longitude)
-                    } else {
+                    if (isAdjustTrackMode && (selectedAdjustVertexIdx != null || isAdjustAddActive)) {
                         currentOnNodeClick(node)
+                        true
+                    } else if (currentIsSnappingActive && (currentMovingNode != null || (currentIsMoveVertexMode && currentMovingVertexIndex != null))) {
+                        currentOnMapClickForMove?.invoke(node.latitude, node.longitude)
+                        true
+                    } else if (currentIsManualTrackMode) {
+                        currentOnManualTrackAddPoint(node.latitude, node.longitude)
+                        true
+                    } else if (currentMovingNode != null || currentIsMoveVertexMode || isAdjustTrackMode) {
+                        false
+                    } else {
+                        val nearby = EntityProximityHelper.findNearbyEntities(
+                            lat = node.latitude,
+                            lon = node.longitude,
+                            nodes = nodes,
+                            tracks = allTracks,
+                            links = links,
+                            mapView = mapView
+                        )
+                        if (nearby.size > 1 && currentOnMultipleEntitiesFound != null) {
+                            currentOnMultipleEntitiesFound?.invoke(nearby)
+                        } else {
+                            currentOnNodeClick(node)
+                        }
+                        true
                     }
-                    true
                 }
             }
             mapView.overlays.add(marker)
@@ -722,15 +695,32 @@ fun OsmMapView(
 
         // Repositionnement de Nœud sur la Carte
         if (movingNode != null) {
-            if (tempMoveNodePosition != null) {
-                val tempMarker = Marker(mapView).apply {
-                    position = GeoPoint(tempMoveNodePosition.first, tempMoveNodePosition.second)
-                    title = "Nouvelle position pour ${movingNode.id}"
-                    icon = MapMarkerHelper.createNodeMarkerDrawable(context, movingNode.type, movingNode.etat)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            val currentPos = tempMoveNodePosition ?: Pair(movingNode.latitude, movingNode.longitude)
+            val isNative = movingNode.isNativeKml
+            val tempMarker = Marker(mapView).apply {
+                position = GeoPoint(currentPos.first, currentPos.second)
+                title = "Déplacer : ${movingNode.id}"
+                snippet = if (currentIsSnappingActive) "Glissez ou touchez (🧲 Accrochage actif)" else "Glissez ou touchez (🕊️ Déplacement libre)"
+                icon = if (isNative) {
+                    MapMarkerHelper.createKmlPointMarkerDrawable(context, movingNode.colorHex)
+                } else {
+                    MapMarkerHelper.createNodeMarkerDrawable(context, movingNode.type, movingNode.etat)
                 }
-                mapView.overlays.add(tempMarker)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                isDraggable = true
+                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                    override fun onMarkerDrag(marker: Marker?) {}
+                    override fun onMarkerDragStart(marker: Marker?) {}
+                    override fun onMarkerDragEnd(marker: Marker?) {
+                        marker?.position?.let { gp ->
+                            currentOnMapClickForMove?.invoke(gp.latitude, gp.longitude)
+                        }
+                    }
+                })
+            }
+            mapView.overlays.add(tempMarker)
 
+            if (tempMoveNodePosition != null && (tempMoveNodePosition.first != movingNode.latitude || tempMoveNodePosition.second != movingNode.longitude)) {
                 val linkLine = Polyline(mapView).apply {
                     addPoint(GeoPoint(movingNode.latitude, movingNode.longitude))
                     addPoint(GeoPoint(tempMoveNodePosition.first, tempMoveNodePosition.second))
@@ -776,6 +766,265 @@ fun OsmMapView(
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             }
             mapView.overlays.add(userMarker)
+        }
+
+        // Sommets et overlay tactile haute performance en mode Modification du tracé (Canvas pass + touch + 1.0m snapping)
+        if (isAdjustTrackMode && selectedAdjustTrack != null && adjustTrackPolyline != null && adjustTrackPoints != null) {
+            val polyline = adjustTrackPolyline!!
+            val pts = adjustTrackPoints!!
+
+            val vertexTouchOverlay = object : Overlay() {
+                private var activeDraggedIdx: Int? = null
+                private var downX = 0f
+                private var downY = 0f
+                private var isDragging = false
+                private var startVertexLat = 0.0
+                private var startVertexLon = 0.0
+                private val density = context.resources.displayMetrics.density
+                private val touchSlop = 6f * density
+                private val touchRadiusPx = 36f * density
+
+                private val vertexPaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.FILL
+                }
+                private val strokePaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    style = android.graphics.Paint.Style.STROKE
+                    color = android.graphics.Color.WHITE
+                    strokeWidth = 2.5f * density
+                }
+                private val textPaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = android.graphics.Color.WHITE
+                    textSize = 10f * density
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    textAlign = android.graphics.Paint.Align.CENTER
+                }
+                private val reusableScreenPt = android.graphics.Point()
+
+                override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
+                    if (shadow) return
+                    val pj = mapView.projection ?: return
+                    val points = polyline.actualPoints
+                    if (points.isEmpty()) return
+
+                    val screenW = mapView.width.toFloat()
+                    val screenH = mapView.height.toFloat()
+                    val margin = 60f * density
+
+                    for (idx in points.indices) {
+                        val pt = points[idx]
+                        pj.toPixels(pt, reusableScreenPt)
+                        val px = reusableScreenPt.x.toFloat()
+                        val py = reusableScreenPt.y.toFloat()
+
+                        if (px < -margin || px > screenW + margin || py < -margin || py > screenH + margin) {
+                            continue
+                        }
+
+                        val isSelected = (idx == selectedAdjustVertexIdx) || (isAdjustStraightenActive && idx == adjustStraightenStartIdx)
+                        vertexPaint.color = when {
+                            isSelected -> android.graphics.Color.parseColor("#F59E0B") // Amber
+                            isAdjustDeleteActive -> android.graphics.Color.parseColor("#DC2626") // Red
+                            else -> android.graphics.Color.parseColor("#2563EB") // Blue
+                        }
+
+                        val radius = if (isSelected) 16f * density else 13f * density
+                        canvas.drawCircle(px, py, radius, vertexPaint)
+                        canvas.drawCircle(px, py, radius, strokePaint)
+
+                        val textY = py + (textPaint.textSize / 3f)
+                        canvas.drawText("${idx + 1}", px, textY, textPaint)
+                    }
+                }
+
+                private fun findTouchedVertexIndex(touchX: Float, touchY: Float): Int? {
+                    val pj = mapView.projection ?: return null
+                    var bestIdx: Int? = null
+                    var bestDistSq = touchRadiusPx * touchRadiusPx
+
+                    val points = polyline.actualPoints
+                    for (i in points.indices) {
+                        val pt = points[i]
+                        pj.toPixels(pt, reusableScreenPt)
+                        val dx = touchX - reusableScreenPt.x
+                        val dy = touchY - reusableScreenPt.y
+                        val distSq = dx * dx + dy * dy
+                        if (distSq <= bestDistSq) {
+                            bestDistSq = distSq
+                            bestIdx = i
+                        }
+                    }
+                    return bestIdx
+                }
+
+                override fun onTouchEvent(event: android.view.MotionEvent, mapView: MapView): Boolean {
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            val touched = findTouchedVertexIndex(event.x, event.y)
+                            if (touched != null) {
+                                activeDraggedIdx = touched
+                                downX = event.x
+                                downY = event.y
+                                isDragging = false
+                                isActivelyDraggingVertex = true
+                                val curPt = polyline.actualPoints.getOrNull(touched)
+                                startVertexLat = curPt?.latitude ?: 0.0
+                                startVertexLon = curPt?.longitude ?: 0.0
+                                mapView.parent?.requestDisallowInterceptTouchEvent(true)
+                                return true
+                            }
+                            return false
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            val idx = activeDraggedIdx ?: return false
+                            val dx = event.x - downX
+                            val dy = event.y - downY
+                            if (!isDragging && (dx * dx + dy * dy) > (touchSlop * touchSlop)) {
+                                isDragging = true
+                            }
+                            if (isDragging) {
+                                mapView.parent?.requestDisallowInterceptTouchEvent(true)
+                                val pj = mapView.projection
+                                if (pj != null) {
+                                    val currentGeo = pj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                    var dragLat = currentGeo.latitude
+                                    var dragLon = currentGeo.longitude
+
+                                    // Accrochage précis à 1.0 m avec filtre rapide de boîte englobante
+                                    val SNAP_THRESHOLD_METERS = 1.0
+                                    val degBoxLimit = 0.00035
+
+                                    var snapped = false
+                                    for (n in nodes) {
+                                        if (!n.isVisible) continue
+                                        if (Math.abs(n.latitude - dragLat) > degBoxLimit || Math.abs(n.longitude - dragLon) > degBoxLimit) continue
+
+                                        val distFromStart = TrackGeometryHelper.calculateDistanceMeters(n.latitude, n.longitude, startVertexLat, startVertexLon)
+                                        if (distFromStart < 0.2) continue
+
+                                        val d = TrackGeometryHelper.calculateDistanceMeters(dragLat, dragLon, n.latitude, n.longitude)
+                                        if (d <= SNAP_THRESHOLD_METERS) {
+                                            dragLat = n.latitude
+                                            dragLon = n.longitude
+                                            snapped = true
+                                            break
+                                        }
+                                    }
+                                    if (!snapped) {
+                                        for (t in allTracks) {
+                                            if (!t.isVisible) continue
+                                            val tPts = if (t.points.isNotEmpty()) t.points else t.rawPoints
+                                            for ((vIdx, pt) in tPts.withIndex()) {
+                                                if (t.id == selectedAdjustTrack?.id && vIdx == idx) continue
+                                                if (Math.abs(pt.latitude - dragLat) > degBoxLimit || Math.abs(pt.longitude - dragLon) > degBoxLimit) continue
+
+                                                val distFromStart = TrackGeometryHelper.calculateDistanceMeters(pt.latitude, pt.longitude, startVertexLat, startVertexLon)
+                                                if (distFromStart < 0.2) continue
+
+                                                val d = TrackGeometryHelper.calculateDistanceMeters(dragLat, dragLon, pt.latitude, pt.longitude)
+                                                if (d <= SNAP_THRESHOLD_METERS) {
+                                                    dragLat = pt.latitude
+                                                    dragLon = pt.longitude
+                                                    snapped = true
+                                                    break
+                                                }
+                                            }
+                                            if (snapped) break
+                                        }
+                                    }
+
+                                    val finalGeo = GeoPoint(dragLat, dragLon)
+                                    val ptsList = polyline.actualPoints
+                                    if (idx in ptsList.indices) {
+                                        ptsList[idx] = finalGeo
+                                        polyline.setPoints(ptsList)
+                                    }
+                                    mapView.invalidate()
+                                    onVertexDragged?.invoke(idx, dragLat, dragLon)
+                                }
+                                return true
+                            }
+                            return true
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            val idx = activeDraggedIdx
+                            activeDraggedIdx = null
+                            isActivelyDraggingVertex = false
+                            mapView.parent?.requestDisallowInterceptTouchEvent(false)
+                            if (idx != null) {
+                                if (isDragging) {
+                                    isDragging = false
+                                    val pj = mapView.projection
+                                    if (pj != null) {
+                                        val currentGeo = pj.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint
+                                        var dragLat = currentGeo.latitude
+                                        var dragLon = currentGeo.longitude
+
+                                        val SNAP_THRESHOLD_METERS = 1.0
+                                        val degBoxLimit = 0.00035
+
+                                        var snapped = false
+                                        for (n in nodes) {
+                                            if (!n.isVisible) continue
+                                            if (Math.abs(n.latitude - dragLat) > degBoxLimit || Math.abs(n.longitude - dragLon) > degBoxLimit) continue
+
+                                            val distFromStart = TrackGeometryHelper.calculateDistanceMeters(n.latitude, n.longitude, startVertexLat, startVertexLon)
+                                            if (distFromStart < 0.2) continue
+
+                                            val d = TrackGeometryHelper.calculateDistanceMeters(dragLat, dragLon, n.latitude, n.longitude)
+                                            if (d <= SNAP_THRESHOLD_METERS) {
+                                                dragLat = n.latitude
+                                                dragLon = n.longitude
+                                                snapped = true
+                                                break
+                                            }
+                                        }
+                                        if (!snapped) {
+                                            for (t in allTracks) {
+                                                if (!t.isVisible) continue
+                                                val tPts = if (t.points.isNotEmpty()) t.points else t.rawPoints
+                                                for ((vIdx, pt) in tPts.withIndex()) {
+                                                    if (t.id == selectedAdjustTrack?.id && vIdx == idx) continue
+                                                    if (Math.abs(pt.latitude - dragLat) > degBoxLimit || Math.abs(pt.longitude - dragLon) > degBoxLimit) continue
+
+                                                    val distFromStart = TrackGeometryHelper.calculateDistanceMeters(pt.latitude, pt.longitude, startVertexLat, startVertexLon)
+                                                    if (distFromStart < 0.2) continue
+
+                                                    val d = TrackGeometryHelper.calculateDistanceMeters(dragLat, dragLon, pt.latitude, pt.longitude)
+                                                    if (d <= SNAP_THRESHOLD_METERS) {
+                                                        dragLat = pt.latitude
+                                                        dragLon = pt.longitude
+                                                        snapped = true
+                                                        break
+                                                    }
+                                                }
+                                                if (snapped) break
+                                            }
+                                        }
+
+                                        onVertexDragEnded?.invoke(idx, dragLat, dragLon)
+                                    }
+                                } else {
+                                    onAdjustVertexClick?.invoke(idx)
+                                }
+                                return true
+                            }
+                            return false
+                        }
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            activeDraggedIdx = null
+                            isDragging = false
+                            isActivelyDraggingVertex = false
+                            mapView.parent?.requestDisallowInterceptTouchEvent(false)
+                            return false
+                        }
+                    }
+                    return false
+                }
+            }
+            mapView.overlays.add(vertexTouchOverlay)
         }
 
         mapView.invalidate()

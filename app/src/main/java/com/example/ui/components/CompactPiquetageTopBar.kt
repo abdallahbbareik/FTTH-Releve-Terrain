@@ -39,6 +39,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Route
@@ -85,6 +86,8 @@ fun CompactPiquetageTopBar(
     matchingNodes: List<FtthNodeEntity> = emptyList(),
     isDarkTheme: Boolean = false,
     onToggleTheme: () -> Unit = {},
+    isSnappingActive: Boolean = true,
+    onToggleSnapping: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
     onSelectNode: (FtthNodeEntity) -> Unit = {},
     onOpenProjectFolder: () -> Unit,
@@ -325,6 +328,34 @@ fun CompactPiquetageTopBar(
                                 onToggleTheme()
                             }
                         )
+
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (isSnappingActive) "Accrochage magnétique : Actif 🧲" else "Accrochage magnétique : Off",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Caler sur la même position d'entité",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.NearMe,
+                                    contentDescription = null,
+                                    tint = if (isSnappingActive) Color(0xFF16A34A) else Color.Gray
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onToggleSnapping()
+                            }
+                        )
                     }
                 }
 
@@ -411,36 +442,6 @@ fun CompactPiquetageTopBar(
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Bouton compact Mode Clair / Sombre (on/off)
-                Surface(
-                    onClick = onToggleTheme,
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White.copy(alpha = 0.18f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
-                    modifier = Modifier.testTag("theme_toggle_button")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = if (isDarkTheme) "Passer en mode clair" else "Passer en mode sombre",
-                            tint = if (isDarkTheme) Color(0xFFFACC15) else Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (isDarkTheme) "Sombre" else "Clair",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

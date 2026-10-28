@@ -81,6 +81,7 @@ import com.example.ui.components.FilterLayerSheet
 import com.example.ui.components.KmlGoogleEarthSheet
 import com.example.ui.components.KmlFeatureDetailSheet
 import com.example.ui.components.KmlFeatureItem
+import com.example.ui.components.map.EntitySelectionDialog
 import com.example.ui.components.GpsTrackControlBar
 import com.example.ui.components.ManualTrackEditorBar
 import com.example.ui.components.MoveNodeEditorBar
@@ -196,6 +197,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
 
     val movingNode by viewModel.movingNode.collectAsStateWithLifecycle()
     val tempMoveNodePosition by viewModel.tempMoveNodePosition.collectAsStateWithLifecycle()
+    val isSnappingActive by viewModel.isSnappingActive.collectAsStateWithLifecycle()
+    val snappedEntityLabel by viewModel.snappedEntityLabel.collectAsStateWithLifecycle()
 
     val isMoveVertexMode by viewModel.isMoveVertexMode.collectAsStateWithLifecycle()
     val selectedTrackToMoveVertex by viewModel.selectedTrackToMoveVertex.collectAsStateWithLifecycle()
@@ -213,6 +216,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val showProjectFolderDialog by viewModel.showProjectFolderDialog.collectAsStateWithLifecycle()
     val selectedLinkForDetail by viewModel.selectedLinkForDetail.collectAsStateWithLifecycle()
     val selectedKmlFeature by viewModel.selectedKmlFeature.collectAsStateWithLifecycle()
+    val disambiguationEntities by viewModel.disambiguationEntities.collectAsStateWithLifecycle()
 
     var showGpsDetailsDialog by remember { mutableStateOf(false) }
     var showLinksListDialog by remember { mutableStateOf(false) }
@@ -363,6 +367,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         matchingNodes = filteredNodes,
                         isDarkTheme = isDarkTheme,
                         onToggleTheme = { viewModel.toggleTheme() },
+                        isSnappingActive = isSnappingActive,
+                        onToggleSnapping = { viewModel.toggleSnapping() },
                         onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                         onSelectNode = { viewModel.zoomAndFocusOnNode(it) },
                         onOpenProjectFolder = { viewModel.openProjectFolder() },
@@ -385,6 +391,9 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         MoveNodeEditorBar(
                             node = movingNode!!,
                             tempPosition = tempMoveNodePosition,
+                            snappedTargetName = snappedEntityLabel,
+                            isSnappingActive = isSnappingActive,
+                            onToggleSnapping = { viewModel.toggleSnapping() },
                             onConfirmMove = { viewModel.confirmMoveNode() },
                             onCancel = { viewModel.cancelMoveNode() }
                         )
@@ -396,6 +405,9 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                             trackName = selectedTrackToMoveVertex?.name ?: "Trajet",
                             vertexIndex = movingVertexIndex,
                             tempPosition = tempVertexPosition,
+                            snappedTargetName = snappedEntityLabel,
+                            isSnappingActive = isSnappingActive,
+                            onToggleSnapping = { viewModel.toggleSnapping() },
                             onConfirmMove = { viewModel.confirmMoveVertex() },
                             onCancel = { viewModel.cancelMoveVertex() }
                         )
@@ -458,7 +470,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                             },
                             onResetOriginal = { viewModel.restoreOriginalTrack() },
                             onConfirm = { viewModel.confirmTrackAdjustment() },
-                            onCancel = { viewModel.cancelTrackAdjustment() }
+                            onCancel = { viewModel.cancelTrackAdjustment() },
+                            snappedTargetName = snappedEntityLabel
                         )
                     }
                 }
@@ -555,6 +568,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 selectedTrackToMoveVertex = selectedTrackToMoveVertex,
                 movingVertexIndex = movingVertexIndex,
                 tempVertexPosition = tempVertexPosition,
+                isSnappingActive = isSnappingActive,
                 isPickOnMapMode = isPickOnMapMode,
                 isAdjustTrackMode = isAdjustTrackMode,
                 selectedAdjustTrack = selectedAdjustTrack,
@@ -595,11 +609,10 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     }
                 },
                 onNodeClick = { node ->
-                    if (viewModel.isFeatureNativeKml(node)) {
-                        viewModel.selectKmlFeature(KmlFeatureItem.PointFeature(node))
-                    } else {
-                        viewModel.selectNode(node)
-                    }
+                    viewModel.onNodeClick(node)
+                },
+                onMultipleEntitiesFound = { list ->
+                    viewModel.showDisambiguationChooser(list)
                 },
                 onMapLongClick = { lat, lon -> viewModel.requestStakingAtMapPosition(lat, lon) },
                 onManualTrackAddPoint = { lat, lon -> viewModel.addManualTrackPoint(lat, lon) },
@@ -1069,6 +1082,19 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         viewModel.deleteKmlFeature(feature)
                     },
                     onDismiss = { viewModel.dismissKmlFeatureDetail() }
+                )
+            }
+
+            // Dialogue de sélection d'entités superposées (Disambiguation Chooser)
+            if (!disambiguationEntities.isNullOrEmpty()) {
+                EntitySelectionDialog(
+                    items = disambiguationEntities!!,
+                    onSelectEntity = { entity ->
+                        viewModel.selectDisambiguatedEntity(entity)
+                    },
+                    onDismiss = {
+                        viewModel.dismissDisambiguationChooser()
+                    }
                 )
             }
 

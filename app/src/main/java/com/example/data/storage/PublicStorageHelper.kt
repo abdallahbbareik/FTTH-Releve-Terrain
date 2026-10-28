@@ -43,24 +43,37 @@ object PublicStorageHelper {
     fun getDownloadFolderName(context: Context? = null): String = DIR_NAME
     private const val PREFS_NAME = "ReleveTerrainDeletedProjects"
 
-    private fun getDeletedProjects(context: Context): Set<String> {
+    fun getDeletedProjects(context: Context): Set<String> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getStringSet("deleted_projects", emptySet()) ?: emptySet()
+    }
+
+    fun isProjectDeleted(context: Context, projectName: String): Boolean {
+        val deleted = getDeletedProjects(context)
+        val sanitized = projectName.trim().replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+        return deleted.contains(projectName) || deleted.contains(projectName.lowercase()) || deleted.contains(sanitized)
     }
 
     fun markProjectDeleted(context: Context, projectName: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
+        val sanitized = projectName.trim().replace("[\\\\/:*?\"<>|]".toRegex(), "_")
         current.add(projectName)
+        current.add(projectName.lowercase())
+        current.add(sanitized)
+        current.add(sanitized.lowercase())
         prefs.edit().putStringSet("deleted_projects", current).apply()
     }
 
     fun unmarkProjectDeleted(context: Context, projectName: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = prefs.getStringSet("deleted_projects", emptySet())?.toMutableSet() ?: mutableSetOf()
-        if (current.remove(projectName)) {
-            prefs.edit().putStringSet("deleted_projects", current).apply()
-        }
+        val sanitized = projectName.trim().replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+        current.remove(projectName)
+        current.remove(projectName.lowercase())
+        current.remove(sanitized)
+        current.remove(sanitized.lowercase())
+        prefs.edit().putStringSet("deleted_projects", current).apply()
     }
 
     /**

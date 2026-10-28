@@ -461,6 +461,13 @@ class DocumentStorageManager(private val context: Context) {
 
     fun listAllProjects(): List<ProjectInfo> {
         val projectMap = mutableMapOf<String, Long>()
+        val deleted = PublicStorageHelper.getDeletedProjects(context)
+
+        fun isDeleted(pName: String): Boolean {
+            val lower = pName.lowercase()
+            val sanitized = sanitizeProjectName(pName)
+            return deleted.contains(pName) || deleted.contains(lower) || deleted.contains(sanitized)
+        }
 
         // 1. Scanner Download/Releve-Terrain
         try {
@@ -468,7 +475,9 @@ class DocumentStorageManager(private val context: Context) {
                 publicDownloadsDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
                     if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
-                        projectMap[file.name] = file.lastModified()
+                        if (!isDeleted(file.name)) {
+                            projectMap[file.name] = file.lastModified()
+                        }
                     }
                 }
             }
@@ -482,7 +491,9 @@ class DocumentStorageManager(private val context: Context) {
                 appExtBaseDir.listFiles()?.forEach { file ->
                     val lower = file.name.lowercase()
                     if (file.isDirectory && lower != "photos" && lower != "exports" && !file.name.startsWith(".")) {
-                        projectMap.putIfAbsent(file.name, file.lastModified())
+                        if (!isDeleted(file.name)) {
+                            projectMap.putIfAbsent(file.name, file.lastModified())
+                        }
                     }
                 }
             }
@@ -493,11 +504,14 @@ class DocumentStorageManager(private val context: Context) {
         // 4. Scanner via MediaStore (secours persistant après réinstallation)
         val mediaStoreProjects = PublicStorageHelper.listPublicProjects(context)
         for (p in mediaStoreProjects) {
-            projectMap.putIfAbsent(p, System.currentTimeMillis())
+            if (!isDeleted(p)) {
+                projectMap.putIfAbsent(p, System.currentTimeMillis())
+            }
         }
 
         if (projectMap.isEmpty()) {
             projectMap["projet01"] = System.currentTimeMillis()
+            PublicStorageHelper.unmarkProjectDeleted(context, "projet01")
         }
 
         val result = mutableListOf<ProjectInfo>()
@@ -522,6 +536,14 @@ class DocumentStorageManager(private val context: Context) {
 
     fun createProject(projectName: String, copyCurrent: Boolean = false): Boolean {
         val sanitized = sanitizeProjectName(projectName)
+        if (sanitized.isBlank()) return false
+
+        // Vérifier si un projet existe déjà avec ce nom pour ne pas l'écraser
+        val existingProjects = listAllProjects()
+        if (existingProjects.any { it.name.equals(sanitized, ignoreCase = true) }) {
+            return false
+        }
+
         ensureProjectDirectoriesExist(sanitized)
         PublicStorageHelper.unmarkProjectDeleted(context, sanitized)
 

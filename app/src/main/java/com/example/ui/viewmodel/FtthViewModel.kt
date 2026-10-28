@@ -25,6 +25,8 @@ import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
 import com.example.ui.components.BlockingTaskState
 import com.example.ui.components.KmlFeatureItem
+import com.example.ui.components.map.MapSelectableEntity
+import com.example.ui.components.map.NearbyEntityItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -131,6 +133,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _tempMoveNodePosition = MutableStateFlow<Pair<Double, Double>?>(null)
     val tempMoveNodePosition: StateFlow<Pair<Double, Double>?> = _tempMoveNodePosition.asStateFlow()
+
+    // Option d'Accrochage Magnétique (Snapping)
+    private val _isSnappingActive = MutableStateFlow(true)
+    val isSnappingActive: StateFlow<Boolean> = _isSnappingActive.asStateFlow()
+
+    private val _snappedEntityLabel = MutableStateFlow<String?>(null)
+    val snappedEntityLabel: StateFlow<String?> = _snappedEntityLabel.asStateFlow()
 
     // Mode Ajustement & Simplification de tracé (Fenêtre flottante persistante)
     private val _isAdjustTrackMode = MutableStateFlow(false)
@@ -251,9 +260,14 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _adjustHistory.add(pts.toList())
         _canUndoAdjust.value = true
 
-        val insertIdx = TrackGeometryHelper.findBestInsertionIndex(pts, lat, lon)
+        val snap = findSnapPosition(lat, lon, maxSnapDistanceMeters = 1.0, excludeTrackId = track.id)
+        val finalLat = snap.latitude
+        val finalLon = snap.longitude
+        _snappedEntityLabel.value = snap.snappedTargetName
 
-        val newPt = TrackPoint(latitude = lat, longitude = lon)
+        val insertIdx = TrackGeometryHelper.findBestInsertionIndex(pts, finalLat, finalLon)
+
+        val newPt = TrackPoint(latitude = finalLat, longitude = finalLon)
         if (insertIdx >= pts.size) {
             pts.add(newPt)
         } else {
@@ -270,10 +284,15 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         if (tIdx >= 0) {
             all[tIdx] = updated
             _allTracks.value = all
+            viewModelScope.launch(Dispatchers.IO) { docStorage.saveTracks(all) }
         }
 
         _selectedAdjustVertexIdx.value = insertIdx
-        showBanner("Sommet #${insertIdx + 1} inséré au tracé (${pts.size} sommets au total)")
+        if (snap.isSnapped) {
+            showBanner("🧲 Sommet #${insertIdx + 1} inséré et calé sur ${snap.snappedTargetName}")
+        } else {
+            showBanner("Sommet #${insertIdx + 1} inséré au tracé (${pts.size} sommets au total)")
+        }
     }
 
     fun deleteAdjustTrackVertex(index: Int) {
@@ -297,6 +316,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (tIdx >= 0) {
                 all[tIdx] = updated
                 _allTracks.value = all
+                viewModelScope.launch(Dispatchers.IO) { docStorage.saveTracks(all) }
             }
             _selectedAdjustVertexIdx.value = null
             showBanner("Sommet #${index + 1} supprimé (${pts.size} sommets restants)")
@@ -323,7 +343,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             val mid = curPts[curPts.size / 2]
             _mapFocusTarget.value = Pair(mid.latitude, mid.longitude)
         }
-        showBanner("Modification tracé : Glissez directement les sommets sur la carte")
+        showBanner("Modification tracé : Glissez un sommet (accrochage 🧲 à 1 m)")
     }
 
     fun setAdjustTolerance(tolerance: Double) {
@@ -334,15 +354,20 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         val track = _selectedAdjustTrack.value ?: return
         val pts = (if (track.points.isNotEmpty()) track.points else track.rawPoints).toMutableList()
         if (index in pts.indices) {
+            val snap = findSnapPosition(lat, lon, maxSnapDistanceMeters = 1.0, excludeTrackId = track.id, excludeVertexIdx = index)
+            val finalLat = snap.latitude
+            val finalLon = snap.longitude
+
             if (!isDragEnd) {
-                pts[index] = pts[index].copy(latitude = lat, longitude = lon)
-                val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
-                _liveAdjustDistance.value = dist
+                if (_snappedEntityLabel.value != snap.snappedTargetName) {
+                    _snappedEntityLabel.value = snap.snappedTargetName
+                }
                 return
             }
+            _snappedEntityLabel.value = snap.snappedTargetName
             _adjustHistory.add(pts.toList())
             _canUndoAdjust.value = true
-            pts[index] = pts[index].copy(latitude = lat, longitude = lon)
+            pts[index] = pts[index].copy(latitude = finalLat, longitude = finalLon)
             val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
             val updated = track.copy(points = pts, totalDistanceMeters = dist)
             _selectedAdjustTrack.value = updated
@@ -353,8 +378,13 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (idx >= 0) {
                 all[idx] = updated
                 _allTracks.value = all
+                viewModelScope.launch(Dispatchers.IO) { docStorage.saveTracks(all) }
             }
-            showBanner("Sommet #${index + 1} repositionné (${String.format(Locale.FRANCE, "%.1f m", dist)})")
+            if (snap.isSnapped) {
+                showBanner("🧲 Sommet #${index + 1} calé et accroché sur ${snap.snappedTargetName} (même position)")
+            } else {
+                showBanner("Sommet #${index + 1} repositionné (${String.format(Locale.FRANCE, "%.1f m", dist)})")
+            }
         }
     }
 
@@ -584,6 +614,41 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectKmlFeature(feature: KmlFeatureItem?) {
         _selectedKmlFeature.value = feature
+    }
+
+    // Gestion de la sélection d'entités multiples / superposées sur le même point
+    private val _disambiguationEntities = MutableStateFlow<List<NearbyEntityItem>?>(null)
+    val disambiguationEntities: StateFlow<List<NearbyEntityItem>?> = _disambiguationEntities.asStateFlow()
+
+    fun showDisambiguationChooser(entities: List<NearbyEntityItem>) {
+        _disambiguationEntities.value = entities
+    }
+
+    fun dismissDisambiguationChooser() {
+        _disambiguationEntities.value = null
+    }
+
+    fun selectDisambiguatedEntity(entity: MapSelectableEntity) {
+        _disambiguationEntities.value = null
+        when (entity) {
+            is MapSelectableEntity.NodeEntity -> {
+                if (isFeatureNativeKml(entity.node)) {
+                    selectKmlFeature(KmlFeatureItem.PointFeature(entity.node))
+                } else {
+                    selectNode(entity.node)
+                }
+            }
+            is MapSelectableEntity.TrackEntity -> {
+                if (isFeatureNativeKml(entity.track)) {
+                    selectKmlFeature(KmlFeatureItem.LineFeature(entity.track))
+                } else {
+                    openTrackDetail(entity.track)
+                }
+            }
+            is MapSelectableEntity.LinkEntity -> {
+                selectLinkForDetail(entity.link)
+            }
+        }
     }
 
     fun dismissKmlFeatureDetail() {
@@ -873,21 +938,44 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         val fileInfo = _kmlFiles.value.firstOrNull { it.fileName.equals(fileName, ignoreCase = true) }
         val newVisible = if (fileInfo != null) !fileInfo.isVisible else false
 
+        // Mettre à jour l'état des dossiers masqués pour ce fichier
+        val currentHidden = _hiddenKmlFolders.value.toMutableSet()
+        val fileFolders = fileInfo?.folders ?: emptyList()
+        for (f in fileFolders) {
+            val key = "$fileName::${f.name}"
+            if (newVisible) {
+                currentHidden.remove(key)
+                currentHidden.remove(f.name)
+            } else {
+                currentHidden.add(key)
+            }
+        }
+        _hiddenKmlFolders.value = currentHidden
+
+        // Mise à jour immédiate en mémoire (UI fluide, sans blocage)
         val updatedTracks = _allTracks.value.map { trk ->
             val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
             if (sFile.equals(fileName, ignoreCase = true)) trk.copy(isVisible = newVisible) else trk
         }
         _allTracks.value = updatedTracks
-        docStorage.saveTracks(updatedTracks)
 
         val updatedNodes = _rawNodes.value.map { node ->
             val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
             if (sFile.equals(fileName, ignoreCase = true)) node.copy(isVisible = newVisible) else node
         }
         _rawNodes.value = updatedNodes
-        docStorage.saveNodes(updatedNodes)
 
         refreshKmlFolders()
+
+        // Sauvegarde asynchrone en arrière-plan sans bloquer l'UI
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                docStorage.saveTracks(updatedTracks, updateGeoJson = false)
+                docStorage.saveNodes(updatedNodes, updateGeoJson = false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun toggleFolderVisibility(folderName: String, fileName: String? = null) {
@@ -903,6 +991,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
         _hiddenKmlFolders.value = currentHidden
 
+        // Mise à jour immédiate en mémoire
         val updatedTracks = _allTracks.value.map { trk ->
             val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
                     (folderName == "Général" && trk.folderName.isBlank()) ||
@@ -912,7 +1001,6 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (matchFolder && matchFile) trk.copy(isVisible = willBeVisible) else trk
         }
         _allTracks.value = updatedTracks
-        docStorage.saveTracks(updatedTracks)
 
         val updatedNodes = _rawNodes.value.map { node ->
             val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
@@ -923,9 +1011,18 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             if (matchFolder && matchFile) node.copy(isVisible = willBeVisible) else node
         }
         _rawNodes.value = updatedNodes
-        docStorage.saveNodes(updatedNodes)
 
         refreshKmlFolders()
+
+        // Sauvegarde asynchrone en arrière-plan sans bloquer l'UI
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                docStorage.saveTracks(updatedTracks, updateGeoJson = false)
+                docStorage.saveNodes(updatedNodes, updateGeoJson = false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun setAllKmlFoldersVisibility(visible: Boolean) {
@@ -934,14 +1031,22 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
         val updatedTracks = _allTracks.value.map { it.copy(isVisible = visible) }
         _allTracks.value = updatedTracks
-        docStorage.saveTracks(updatedTracks)
 
         val updatedNodes = _rawNodes.value.map { it.copy(isVisible = visible) }
         _rawNodes.value = updatedNodes
-        docStorage.saveNodes(updatedNodes)
 
         refreshKmlFolders()
         showBanner(if (visible) "Tous les calques affichés" else "Tous les calques masqués")
+
+        // Sauvegarde asynchrone en arrière-plan sans bloquer l'UI
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                docStorage.saveTracks(updatedTracks, updateGeoJson = false)
+                docStorage.saveNodes(updatedNodes, updateGeoJson = false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun zoomToKmlFile(fileName: String) {
@@ -1090,30 +1195,59 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteKmlFile(fileName: String) {
+        _showProjectFolderDialog.value = false
+        _showKmlGoogleEarthSheet.value = false
+        _blockingTaskState.value = BlockingTaskState(
+            isRunning = true,
+            title = "Suppression du fichier importé",
+            message = "Suppression de « $fileName » et de tous ses dossiers...",
+            progress = 0.20f
+        )
         viewModelScope.launch(Dispatchers.IO) {
-            val remainingTracks = _allTracks.value.filterNot { trk ->
-                val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
-                sFile.equals(fileName, ignoreCase = true)
-            }
-            val remainingNodes = _rawNodes.value.filterNot { node ->
-                val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
-                sFile.equals(fileName, ignoreCase = true)
-            }
-
-            _allTracks.value = remainingTracks
-            _rawNodes.value = remainingNodes
-
-            docStorage.saveTracks(remainingTracks)
-            docStorage.saveNodes(remainingNodes)
-
-            withContext(Dispatchers.Main) {
-                refreshKmlFolders()
-                if (_kmlFiles.value.isEmpty()) {
-                    _kmlDocumentTitle.value = ""
-                    docStorage.clearKmlDocumentTitle()
-                    _showKmlGoogleEarthSheet.value = false
+            try {
+                val remainingTracks = _allTracks.value.filterNot { trk ->
+                    val sFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                    sFile.equals(fileName, ignoreCase = true)
                 }
-                showBanner("Fichier « $fileName » et tous ses dossiers supprimés")
+                val remainingNodes = _rawNodes.value.filterNot { node ->
+                    val sFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                    sFile.equals(fileName, ignoreCase = true)
+                }
+
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression du fichier importé",
+                    message = "Nettoyage et mise à jour du stockage local...",
+                    progress = 0.65f
+                )
+
+                _allTracks.value = remainingTracks
+                _rawNodes.value = remainingNodes
+
+                docStorage.saveTracks(remainingTracks)
+                docStorage.saveNodes(remainingNodes)
+
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression terminée",
+                    message = "Fichier « $fileName » supprimé avec succès.",
+                    progress = 1.0f
+                )
+                delay(300L)
+
+                withContext(Dispatchers.Main) {
+                    refreshKmlFolders()
+                    if (_kmlFiles.value.isEmpty()) {
+                        _kmlDocumentTitle.value = ""
+                        docStorage.clearKmlDocumentTitle()
+                        _showKmlGoogleEarthSheet.value = false
+                    }
+                    showBanner("Fichier « $fileName » et tous ses dossiers supprimés")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _blockingTaskState.value = null
             }
         }
     }
@@ -1126,36 +1260,65 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteKmlFolder(folderName: String, fileName: String? = null) {
+        _showProjectFolderDialog.value = false
+        _showKmlGoogleEarthSheet.value = false
+        _blockingTaskState.value = BlockingTaskState(
+            isRunning = true,
+            title = "Suppression du dossier",
+            message = "Suppression du dossier « $folderName »...",
+            progress = 0.25f
+        )
         viewModelScope.launch(Dispatchers.IO) {
-            val remainingTracks = _allTracks.value.filterNot { trk ->
-                val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
-                        ((folderName == "Général" || folderName == "Sans dossier") && trk.folderName.isBlank())
-                val trkFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
-                val matchFile = fileName.isNullOrBlank() || trkFile.equals(fileName, ignoreCase = true)
-                matchFolder && matchFile
-            }
-            val remainingNodes = _rawNodes.value.filterNot { node ->
-                val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
-                        ((folderName == "Général" || folderName == "Sans dossier") && node.folderName.isBlank())
-                val nodeFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
-                val matchFile = fileName.isNullOrBlank() || nodeFile.equals(fileName, ignoreCase = true)
-                matchFolder && matchFile
-            }
-
-            _allTracks.value = remainingTracks
-            _rawNodes.value = remainingNodes
-
-            docStorage.saveTracks(remainingTracks)
-            docStorage.saveNodes(remainingNodes)
-
-            withContext(Dispatchers.Main) {
-                refreshKmlFolders()
-                if (_kmlFiles.value.isEmpty()) {
-                    _kmlDocumentTitle.value = ""
-                    docStorage.clearKmlDocumentTitle()
-                    _showKmlGoogleEarthSheet.value = false
+            try {
+                val remainingTracks = _allTracks.value.filterNot { trk ->
+                    val matchFolder = trk.folderName.equals(folderName, ignoreCase = true) ||
+                            ((folderName == "Général" || folderName == "Sans dossier") && trk.folderName.isBlank())
+                    val trkFile = trk.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                    val matchFile = fileName.isNullOrBlank() || trkFile.equals(fileName, ignoreCase = true)
+                    matchFolder && matchFile
                 }
-                showBanner("Dossier « $folderName » et son contenu supprimés")
+                val remainingNodes = _rawNodes.value.filterNot { node ->
+                    val matchFolder = node.folderName.equals(folderName, ignoreCase = true) ||
+                            ((folderName == "Général" || folderName == "Sans dossier") && node.folderName.isBlank())
+                    val nodeFile = node.sourceFile.ifBlank { _kmlDocumentTitle.value.ifBlank { "Fichier principal" } }
+                    val matchFile = fileName.isNullOrBlank() || nodeFile.equals(fileName, ignoreCase = true)
+                    matchFolder && matchFile
+                }
+
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression du dossier",
+                    message = "Enregistrement des modifications locales...",
+                    progress = 0.70f
+                )
+
+                _allTracks.value = remainingTracks
+                _rawNodes.value = remainingNodes
+
+                docStorage.saveTracks(remainingTracks)
+                docStorage.saveNodes(remainingNodes)
+
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Suppression terminée",
+                    message = "Dossier « $folderName » supprimé.",
+                    progress = 1.0f
+                )
+                delay(300L)
+
+                withContext(Dispatchers.Main) {
+                    refreshKmlFolders()
+                    if (_kmlFiles.value.isEmpty()) {
+                        _kmlDocumentTitle.value = ""
+                        docStorage.clearKmlDocumentTitle()
+                        _showKmlGoogleEarthSheet.value = false
+                    }
+                    showBanner("Dossier « $folderName » et son contenu supprimés")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _blockingTaskState.value = null
             }
         }
     }
@@ -1368,96 +1531,122 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveNode(node: FtthNodeEntity, oldId: String? = null, isNew: Boolean = false, closeSheet: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) {
-            val list = _rawNodes.value.toMutableList()
-            val targetId = oldId ?: node.id
-            val idx = list.indexOfFirst { it.id == targetId }
-            if (idx >= 0) {
-                list[idx] = node
-            } else {
-                val existingById = list.indexOfFirst { it.id == node.id }
-                if (existingById >= 0) {
-                    list[existingById] = node
-                } else {
-                    list.add(0, node)
-                }
+            val isCreatingDouble = node.hasBoitierFtth && node.type != FtthNodeType.BOITIER
+            if (isCreatingDouble) {
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Création du support & du Boîtier",
+                    message = "Création simultanée du nœud ${node.id} et de son boîtier associé...",
+                    progress = 0.50f
+                )
             }
-
-            // Si l'identifiant a été modifié, mettre à jour les liaisons (câbles) associées
-            if (oldId != null && oldId != node.id) {
-                val currentLinks = _rawLinks.value
-                val updatedLinks = currentLinks.map { link ->
-                    when {
-                        link.fromNodeId == oldId -> link.copy(fromNodeId = node.id)
-                        link.toNodeId == oldId -> link.copy(toNodeId = node.id)
-                        else -> link
+            try {
+                val list = _rawNodes.value.toMutableList()
+                val targetId = oldId ?: node.id
+                val idx = list.indexOfFirst { it.id == targetId }
+                if (idx >= 0) {
+                    list[idx] = node
+                } else {
+                    val existingById = list.indexOfFirst { it.id == node.id }
+                    if (existingById >= 0) {
+                        list[existingById] = node
+                    } else {
+                        list.add(0, node)
                     }
                 }
-                if (updatedLinks != currentLinks) {
-                    _rawLinks.value = updatedLinks
-                    docStorage.saveLinks(updatedLinks)
+
+                // Si l'identifiant a été modifié, mettre à jour les liaisons (câbles) associées
+                if (oldId != null && oldId != node.id) {
+                    val currentLinks = _rawLinks.value
+                    val updatedLinks = currentLinks.map { link ->
+                        when {
+                            link.fromNodeId == oldId -> link.copy(fromNodeId = node.id)
+                            link.toNodeId == oldId -> link.copy(toNodeId = node.id)
+                            else -> link
+                        }
+                    }
+                    if (updatedLinks != currentLinks) {
+                        _rawLinks.value = updatedLinks
+                        docStorage.saveLinks(updatedLinks)
+                    }
                 }
-            }
 
-            var createdAutoBoitier: FtthNodeEntity? = null
+                var createdAutoBoitier: FtthNodeEntity? = null
 
-            // Si Boîtier FTTH = Oui et le nœud parent n'est pas déjà un Boîtier :
-            if (node.hasBoitierFtth && node.type != FtthNodeType.BOITIER) {
-                val boitierId = "${node.id}-B"
-                val boitierName = if (node.name.isNotBlank()) "${node.name}-B" else boitierId
-                val support = when (node.type) {
-                    FtthNodeType.POTEAU -> "Poteau"
-                    FtthNodeType.CHAMBRE -> "Chambre"
-                    else -> "Façade"
+                // Si Boîtier FTTH = Oui et le nœud parent n'est pas déjà un Boîtier :
+                if (node.hasBoitierFtth && node.type != FtthNodeType.BOITIER) {
+                    val boitierId = "${node.id}-B"
+                    val boitierName = if (node.name.isNotBlank()) "${node.name}-B" else boitierId
+                    val support = when (node.type) {
+                        FtthNodeType.POTEAU -> "Poteau"
+                        FtthNodeType.CHAMBRE -> "Chambre"
+                        else -> "Façade"
+                    }
+
+                    val existingIdx = list.indexOfFirst { it.id == boitierId }
+                    if (existingIdx >= 0) {
+                        val existing = list[existingIdx]
+                        val updated = existing.copy(
+                            latitude = node.latitude,
+                            longitude = node.longitude,
+                            boitierSupport = support,
+                            address = node.address
+                        )
+                        list[existingIdx] = updated
+                        createdAutoBoitier = updated
+                    } else {
+                        val autoBoitier = FtthNodeEntity(
+                            id = boitierId,
+                            type = FtthNodeType.BOITIER,
+                            name = boitierName,
+                            latitude = node.latitude,
+                            longitude = node.longitude,
+                            status = node.status,
+                            etat = node.etat,
+                            address = node.address,
+                            hasBoitierFtth = false,
+                            boitierSupport = support,
+                            boitierType = if (node.type == FtthNodeType.POTEAU) "PBO" else "BPE",
+                            technicianName = node.technicianName,
+                            notes = "Boîtier créé automatiquement sur le support ${node.id} ($support)",
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        list.add(0, autoBoitier)
+                        createdAutoBoitier = autoBoitier
+                    }
                 }
 
-                val existingIdx = list.indexOfFirst { it.id == boitierId }
-                if (existingIdx >= 0) {
-                    val existing = list[existingIdx]
-                    val updated = existing.copy(
-                        latitude = node.latitude,
-                        longitude = node.longitude,
-                        boitierSupport = support,
-                        address = node.address
+                _rawNodes.value = list
+                docStorage.saveNodes(list)
+
+                if (isCreatingDouble) {
+                    _blockingTaskState.value = BlockingTaskState(
+                        isRunning = true,
+                        title = "Création terminée",
+                        message = "Nœud et boîtier FTTH créés avec succès.",
+                        progress = 1.0f
                     )
-                    list[existingIdx] = updated
-                    createdAutoBoitier = updated
-                } else {
-                    val autoBoitier = FtthNodeEntity(
-                        id = boitierId,
-                        type = FtthNodeType.BOITIER,
-                        name = boitierName,
-                        latitude = node.latitude,
-                        longitude = node.longitude,
-                        status = node.status,
-                        etat = node.etat,
-                        address = node.address,
-                        hasBoitierFtth = false,
-                        boitierSupport = support,
-                        boitierType = if (node.type == FtthNodeType.POTEAU) "PBO" else "BPE",
-                        technicianName = node.technicianName,
-                        notes = "Boîtier créé automatiquement sur le support ${node.id} ($support)",
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    list.add(0, autoBoitier)
-                    createdAutoBoitier = autoBoitier
+                    delay(300L)
                 }
-            }
 
-            _rawNodes.value = list
-            docStorage.saveNodes(list)
-
-            if (createdAutoBoitier != null) {
-                // Ouverture immédiate du boîtier créé en modification pour permettre à l'utilisateur de saisir ses informations
-                _selectedNode.value = createdAutoBoitier
-                _mapFocusTarget.value = Pair(createdAutoBoitier.latitude, createdAutoBoitier.longitude)
-                val supportName = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
-                _bannerMessage.value = "Nœud ${node.id} enregistré. Boîtier ${createdAutoBoitier.id} créé et ouvert en modification ($supportName) : complétez ses spécifications."
-            } else if (closeSheet) {
-                _selectedNode.value = null
-                _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
-            } else {
-                _selectedNode.value = node
-                _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
+                withContext(Dispatchers.Main) {
+                    if (createdAutoBoitier != null) {
+                        _selectedNode.value = createdAutoBoitier
+                        _mapFocusTarget.value = Pair(createdAutoBoitier.latitude, createdAutoBoitier.longitude)
+                        val supportName = if (node.type == FtthNodeType.POTEAU) "Poteau" else if (node.type == FtthNodeType.CHAMBRE) "Chambre" else "Façade"
+                        _bannerMessage.value = "Nœud ${node.id} enregistré. Boîtier ${createdAutoBoitier.id} créé ($supportName)."
+                    } else if (closeSheet) {
+                        _selectedNode.value = null
+                        _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
+                    } else {
+                        _selectedNode.value = node
+                        _bannerMessage.value = "Nœud ${node.id} enregistré dans Documents/Releve-Terrain"
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _blockingTaskState.value = null
             }
         }
     }
@@ -1474,17 +1663,109 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- DÉPLACEMENT MANUEL DE NŒUD SUR LA CARTE ---
+    // --- OPTION D'ACCROCHAGE MAGNÉTIQUE (SNAPPING) & DÉPLACEMENT ---
+
+    data class SnapResult(
+        val latitude: Double,
+        val longitude: Double,
+        val isSnapped: Boolean,
+        val snappedTargetName: String? = null
+    )
+
+    fun toggleSnapping() {
+        val newState = !_isSnappingActive.value
+        _isSnappingActive.value = newState
+        _bannerMessage.value = if (newState) "Accrochage magnétique activé 🧲" else "Accrochage magnétique désactivé"
+    }
+
+    fun setSnappingActive(active: Boolean) {
+        _isSnappingActive.value = active
+    }
+
+    fun findSnapPosition(
+        lat: Double,
+        lon: Double,
+        maxSnapDistanceMeters: Double = 1.0,
+        excludeNodeId: String? = null,
+        excludeTrackId: String? = null,
+        excludeVertexIdx: Int? = null
+    ): SnapResult {
+        var closestDist = Double.MAX_VALUE
+        var bestLat = lat
+        var bestLon = lon
+        var targetName: String? = null
+
+        // Filtre rapide de boîte englobante (~30 mètres) pour éviter les calculs trigonométriques coûteux
+        val degBoxLimit = 0.00035
+
+        // 1. Chercher parmi tous les nœuds visibles
+        for (node in _rawNodes.value) {
+            if (node.id == excludeNodeId) continue
+            if (!node.isVisible) continue
+            if (Math.abs(node.latitude - lat) > degBoxLimit || Math.abs(node.longitude - lon) > degBoxLimit) continue
+            val dist = TrackGeometryHelper.calculateDistanceMeters(lat, lon, node.latitude, node.longitude)
+            if (dist <= maxSnapDistanceMeters && dist < closestDist) {
+                closestDist = dist
+                bestLat = node.latitude
+                bestLon = node.longitude
+                val label = if (node.name.isNotBlank()) node.name else node.id
+                targetName = "$label (${node.type.label})"
+            }
+        }
+
+        // 2. Chercher parmi tous les sommets de tracés visibles
+        for (track in _allTracks.value) {
+            if (!track.isVisible) continue
+            val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+            for ((idx, pt) in pts.withIndex()) {
+                if (track.id == excludeTrackId && idx == excludeVertexIdx) continue
+                if (Math.abs(pt.latitude - lat) > degBoxLimit || Math.abs(pt.longitude - lon) > degBoxLimit) continue
+                val dist = TrackGeometryHelper.calculateDistanceMeters(lat, lon, pt.latitude, pt.longitude)
+                if (dist <= maxSnapDistanceMeters && dist < closestDist) {
+                    closestDist = dist
+                    bestLat = pt.latitude
+                    bestLon = pt.longitude
+                    val tName = if (track.name.isNotBlank()) track.name else track.id
+                    targetName = "sommet #${idx + 1} de $tName"
+                }
+            }
+        }
+
+        return if (targetName != null) {
+            SnapResult(bestLat, bestLon, isSnapped = true, snappedTargetName = targetName)
+        } else {
+            SnapResult(lat, lon, isSnapped = false)
+        }
+    }
 
     fun startMoveNode(node: FtthNodeEntity) {
         _movingNode.value = node
-        _tempMoveNodePosition.value = null
+        _tempMoveNodePosition.value = Pair(node.latitude, node.longitude)
+        _snappedEntityLabel.value = null
         _selectedNode.value = null
-        _bannerMessage.value = "Touchez la carte au nouvel emplacement pour le nœud ${node.id}"
+        _bannerMessage.value = if (_isSnappingActive.value) {
+            "🧲 Accrochage actif : touchez la carte (< 1m) ou une entité pour caler sa position"
+        } else {
+            "🕊️ Déplacement libre : touchez ou glissez le point où vous voulez"
+        }
     }
 
     fun setTempNodeMovePosition(lat: Double, lon: Double) {
-        _tempMoveNodePosition.value = Pair(lat, lon)
+        val moving = _movingNode.value
+        if (_isSnappingActive.value) {
+            val snap = findSnapPosition(lat, lon, maxSnapDistanceMeters = 1.0, excludeNodeId = moving?.id)
+            _tempMoveNodePosition.value = Pair(snap.latitude, snap.longitude)
+            _snappedEntityLabel.value = snap.snappedTargetName
+            if (snap.isSnapped) {
+                showBanner("🧲 Accroché exactement sur ${snap.snappedTargetName} (même position)")
+            } else {
+                showBanner("Nouvel emplacement : ${String.format(Locale.FRANCE, "%.6f, %.6f", lat, lon)}")
+            }
+        } else {
+            _tempMoveNodePosition.value = Pair(lat, lon)
+            _snappedEntityLabel.value = null
+            showBanner("Déplacement libre : ${String.format(Locale.FRANCE, "%.6f, %.6f", lat, lon)}")
+        }
     }
 
     fun confirmMoveNode() {
@@ -1493,6 +1774,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         saveNode(node.copy(latitude = pos.first, longitude = pos.second))
         _movingNode.value = null
         _tempMoveNodePosition.value = null
+        _snappedEntityLabel.value = null
         refreshKmlFolders()
         _bannerMessage.value = "Nœud ${node.id} déplacé avec succès !"
     }
@@ -1500,6 +1782,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelMoveNode() {
         _movingNode.value = null
         _tempMoveNodePosition.value = null
+        _snappedEntityLabel.value = null
     }
 
     // --- TRACÉ MANUEL DE TRAJET SUR LA CARTE ---
@@ -1567,44 +1850,69 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
-            val photos = _manualTrackPhotos.value
-            val track = StoredTrack(
-                id = "TRK-${System.currentTimeMillis()}",
-                name = name,
-                type = "GC",
-                etat = "Conforme",
-                conduitAudit = "Libres",
-                conduitType = "PEHD",
-                conduitCount = 1,
-                conduitDiameters = listOf("Ø 40"),
-                startTime = System.currentTimeMillis(),
-                endTime = System.currentTimeMillis(),
-                totalDistanceMeters = dist,
-                rawPoints = pts,
-                points = pts,
-                photos = photos,
-                isSimplified = false,
-                isActive = false
+            _blockingTaskState.value = BlockingTaskState(
+                isRunning = true,
+                title = "Enregistrement du tracé GC",
+                message = "Calcul de la géométrie et sauvegarde de '$name' (${pts.size} sommets)...",
+                progress = 0.30f
             )
-            val all = _allTracks.value.toMutableList()
-            val existingIndex = all.indexOfFirst { it.id == track.id }
-            if (existingIndex >= 0) {
-                all[existingIndex] = track
-            } else {
-                all.add(0, track)
-            }
-            val deduped = all.distinctBy { it.id }
-            _allTracks.value = deduped
-            docStorage.saveTracks(deduped)
+            try {
+                val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
+                val photos = _manualTrackPhotos.value
+                val track = StoredTrack(
+                    id = "TRK-${System.currentTimeMillis()}",
+                    name = name,
+                    type = "GC",
+                    etat = "Conforme",
+                    conduitAudit = "Libres",
+                    conduitType = "PEHD",
+                    conduitCount = 1,
+                    conduitDiameters = listOf("Ø 40"),
+                    startTime = System.currentTimeMillis(),
+                    endTime = System.currentTimeMillis(),
+                    totalDistanceMeters = dist,
+                    rawPoints = pts,
+                    points = pts,
+                    photos = photos,
+                    isSimplified = false,
+                    isActive = false
+                )
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Enregistrement du tracé GC",
+                    message = "Écriture dans le stockage local et synchronisation...",
+                    progress = 0.75f
+                )
+                val all = _allTracks.value.toMutableList()
+                val existingIndex = all.indexOfFirst { it.id == track.id }
+                if (existingIndex >= 0) {
+                    all[existingIndex] = track
+                } else {
+                    all.add(0, track)
+                }
+                val deduped = all.distinctBy { it.id }
+                _allTracks.value = deduped
+                docStorage.saveTracks(deduped)
 
-            _isManualTrackMode.value = false
-            _manualTrackPoints.value = emptyList()
-            _manualTrackPhotos.value = emptyList()
-            // Le tracé est enregistré et validé sur la carte, la fiche d'information s'ouvre pour saisir les informations du tracé
-            _selectedTrackForDetail.value = track
-            _showFullTrackDetail.value = true
-            _bannerMessage.value = "Tracé '${name}' (${pts.size} sommets) validé et enregistré sur la carte. Fiche d'information ouverte."
+                _blockingTaskState.value = BlockingTaskState(
+                    isRunning = true,
+                    title = "Enregistrement terminé",
+                    message = "Tracé '$name' enregistré avec succès.",
+                    progress = 1.0f
+                )
+                delay(300L)
+
+                _isManualTrackMode.value = false
+                _manualTrackPoints.value = emptyList()
+                _manualTrackPhotos.value = emptyList()
+                _selectedTrackForDetail.value = track
+                _showFullTrackDetail.value = true
+                _bannerMessage.value = "Tracé '${name}' (${pts.size} sommets) validé et enregistré sur la carte."
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _blockingTaskState.value = null
+            }
         }
     }
 
@@ -1883,16 +2191,33 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTrackToMoveVertex.value = track
         _movingVertexIndex.value = null
         _tempVertexPosition.value = null
-        _bannerMessage.value = "Touchez le sommet à déplacer sur la carte"
+        _snappedEntityLabel.value = null
+        _bannerMessage.value = if (_isSnappingActive.value) {
+            "Touchez le sommet à déplacer (Accrochage 🧲 actif)"
+        } else {
+            "Touchez le sommet à déplacer sur la carte"
+        }
     }
 
     fun selectVertexToMove(index: Int) {
         _movingVertexIndex.value = index
-        _bannerMessage.value = "Sommet #$index sélectionné. Touchez le nouvel emplacement sur la carte."
+        _tempVertexPosition.value = null
+        _snappedEntityLabel.value = null
+        _bannerMessage.value = "Sommet #$index sélectionné. Touchez la carte ou une entité pour caler sa position."
     }
 
     fun setTempVertexPosition(lat: Double, lon: Double) {
-        _tempVertexPosition.value = Pair(lat, lon)
+        val track = _selectedTrackToMoveVertex.value
+        val vIdx = _movingVertexIndex.value
+        // Toujours activer l'accrochage avec un seuil automatique de 1.0m lors du déplacement de sommet
+        val snap = findSnapPosition(lat, lon, maxSnapDistanceMeters = 1.0, excludeTrackId = track?.id, excludeVertexIdx = vIdx)
+        _tempVertexPosition.value = Pair(snap.latitude, snap.longitude)
+        _snappedEntityLabel.value = snap.snappedTargetName
+        if (snap.isSnapped) {
+            showBanner("🧲 Sommet accroché sur ${snap.snappedTargetName} (même position)")
+        } else {
+            showBanner("Sommet positionné : ${String.format(Locale.FRANCE, "%.6f, %.6f", lat, lon)}")
+        }
     }
 
     fun confirmMoveVertex() {
@@ -1925,6 +2250,7 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTrackToMoveVertex.value = null
         _movingVertexIndex.value = null
         _tempVertexPosition.value = null
+        _snappedEntityLabel.value = null
     }
 
     // --- RENOMMAGE & PHOTOS DE TRAJET ---
@@ -2045,6 +2371,10 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- DIALOGUES & ACTIONS INTERFACE ---
 
+    fun onNodeClick(node: FtthNodeEntity) {
+        selectNode(node)
+    }
+
     fun selectNode(node: FtthNodeEntity?) {
         if (node == null) {
             _selectedNode.value = null
@@ -2082,10 +2412,47 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 4. Bloquer l'ouverture de la fiche si une autre action cartographique spécifique est en cours
-        if (_movingNode.value != null || _isMoveVertexMode.value || _isStraightenMode.value ||
-            _isPickOnMapMode.value || _pendingStakePosition.value != null
-        ) {
+        // 4. Mode Déplacement de Nœud : accrochage exact sur le nœud cliqué (même position)
+        if (_movingNode.value != null) {
+            setTempNodeMovePosition(node.latitude, node.longitude)
+            val nameDisplay = if (node.name.isNotBlank()) node.name else node.id
+            showBanner("🧲 Nœud calé exactement sur la position de $nameDisplay")
+            return
+        }
+
+        // 4b. Mode Déplacement de Sommet : caler le sommet sur le nœud cliqué
+        if (_isMoveVertexMode.value && _movingVertexIndex.value != null) {
+            setTempVertexPosition(node.latitude, node.longitude)
+            val nameDisplay = if (node.name.isNotBlank()) node.name else node.id
+            showBanner("🧲 Sommet calé exactement sur la position de $nameDisplay")
+            return
+        }
+
+        // 4c. Mode Implantation / Sélection sur la carte : caler sur le nœud cliqué
+        if (_isPickOnMapMode.value || _pendingStakePosition.value != null) {
+            updatePendingStakePosition(node.latitude, node.longitude)
+            val nameDisplay = if (node.name.isNotBlank()) node.name else node.id
+            showBanner("🧲 Position calée sur le nœud $nameDisplay")
+            return
+        }
+
+        // 4d. Mode Modification de Tracé : caler le sommet sélectionné ou ajouter au nœud cliqué
+        if (_isAdjustTrackMode.value) {
+            val selectedVertex = _selectedAdjustVertexIdx.value
+            if (selectedVertex != null) {
+                updateAdjustTrackVertex(selectedVertex, node.latitude, node.longitude, isDragEnd = true)
+                val nameDisplay = if (node.name.isNotBlank()) node.name else node.id
+                showBanner("🧲 Sommet #${selectedVertex + 1} calé et accroché sur $nameDisplay (même position)")
+                return
+            } else if (_isAdjustAddActive.value) {
+                addAdjustTrackVertex(node.latitude, node.longitude)
+                val nameDisplay = if (node.name.isNotBlank()) node.name else node.id
+                showBanner("🧲 Sommet inséré et calé sur $nameDisplay")
+                return
+            }
+        }
+
+        if (_isStraightenMode.value) {
             return
         }
 
@@ -2291,23 +2658,39 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createNewProject(projectName: String, copyCurrent: Boolean = false) {
+        val trimmed = projectName.trim()
+        if (trimmed.isBlank()) {
+            _bannerMessage.value = "Le nom du projet ne peut pas être vide"
+            return
+        }
+        val existing = docStorage.listAllProjects().any { it.name.trim().equals(trimmed, ignoreCase = true) }
+        if (existing) {
+            _bannerMessage.value = "Erreur: Le projet '$trimmed' existe déjà."
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val success = docStorage.createProject(projectName, copyCurrent)
+            val success = docStorage.createProject(trimmed, copyCurrent)
             if (success) {
-                switchProject(projectName)
-                _bannerMessage.value = "Nouveau projet '$projectName' créé avec succès !"
+                switchProject(trimmed)
+                _bannerMessage.value = "Nouveau projet '$trimmed' créé avec succès !"
+            } else {
+                _bannerMessage.value = "Erreur: Impossible de créer le projet '$trimmed'."
             }
         }
     }
 
     fun deleteProject(projectName: String) {
+        _showProjectFolderDialog.value = false
+        _showKmlGoogleEarthSheet.value = false
+        // Retirer immédiatement le projet de la liste affichée dans l'interface
+        _allProjects.value = _allProjects.value.filter { !it.name.equals(projectName, ignoreCase = true) }
+        _blockingTaskState.value = BlockingTaskState(
+            isRunning = true,
+            title = "Suppression du projet",
+            message = "Préparation de la suppression de '$projectName'...",
+            progress = 0.10f
+        )
         viewModelScope.launch(Dispatchers.IO) {
-            _blockingTaskState.value = BlockingTaskState(
-                isRunning = true,
-                title = "Suppression du projet",
-                message = "Préparation de la suppression de '$projectName'...",
-                progress = 0.10f
-            )
             try {
                 docStorage.deleteProjectFast(projectName) { progress, message ->
                     _blockingTaskState.value = BlockingTaskState(
