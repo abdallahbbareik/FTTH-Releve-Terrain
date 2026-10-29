@@ -23,6 +23,7 @@ import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPhoto
 import com.example.data.storage.TrackPoint
 import com.example.data.util.TrackGeometryHelper
+import com.example.data.util.KmzNodeClassifier
 import com.example.ui.components.BlockingTaskState
 import com.example.ui.components.KmlFeatureItem
 import com.example.ui.components.map.MapSelectableEntity
@@ -927,6 +928,25 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _showKmlGoogleEarthSheet = MutableStateFlow(false)
     val showKmlGoogleEarthSheet: StateFlow<Boolean> = _showKmlGoogleEarthSheet.asStateFlow()
+
+    private val _showClassificationDialog = MutableStateFlow(false)
+    val showClassificationDialog: StateFlow<Boolean> = _showClassificationDialog.asStateFlow()
+
+    fun openClassificationDialog() { _showClassificationDialog.value = true }
+    fun dismissClassificationDialog() { _showClassificationDialog.value = false }
+
+    fun removeDuplicateNodesByLocation() {
+        val (cleanedNodes, removedCount) = KmzNodeClassifier.deduplicateByLocation(_rawNodes.value)
+        if (removedCount > 0) {
+            _rawNodes.value = cleanedNodes
+            viewModelScope.launch(Dispatchers.IO) {
+                docStorage.saveNodes(cleanedNodes)
+            }
+            showBanner("🧹 Purge effectuée : $removedCount doublon(s) supprimé(s) (Pos: SRO/Ch/Pot | Pos+Nom: Boîtiers) !")
+        } else {
+            showBanner("Aucun doublon détecté selon les critères de position et nom.")
+        }
+    }
 
     private val _hiddenKmlFolders = MutableStateFlow<Set<String>>(emptySet())
     val hiddenKmlFolders: StateFlow<Set<String>> = _hiddenKmlFolders.asStateFlow()

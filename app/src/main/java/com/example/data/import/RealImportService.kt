@@ -478,12 +478,11 @@ object RealImportService {
             val placemarks = doc.getElementsByTagName("Placemark")
             for (i in 0 until placemarks.length) {
                 val pm = placemarks.item(i) as? Element ?: continue
-                val name = getDirectOrFirstChildValue(pm, "name") ?: "Objet-${i + 1}"
+                val rawKmlName = getDirectOrFirstChildValue(pm, "name") ?: "Objet-${i + 1}"
                 val desc = getDirectOrFirstChildValue(pm, "description") ?: ""
                 val styleUrl = getDirectOrFirstChildValue(pm, "styleUrl") ?: ""
                 val immediateFolder = getImmediateFolderName(pm)
                 val folderHierarchy = getParentFolderHierarchy(pm)
-                val folderContext = if (folderHierarchy.isNotEmpty()) "$folderHierarchy / $name" else name
 
                 // Extraire ExtendedData : <Data name="..."> et <SimpleData name="..."> (GIS / QGIS)
                 val properties = linkedMapOf<String, String>()
@@ -505,6 +504,10 @@ object RealImportService {
                 if (desc.isNotBlank()) {
                     extractHtmlTableProperties(desc, properties)
                 }
+
+                // Résoudre le vrai nom de l'entité si <name> KML est juste une capacité (ex: "288FO")
+                val name = resolveSmartName(rawKmlName, properties)
+                val folderContext = if (folderHierarchy.isNotEmpty()) "$folderHierarchy / $name" else name
 
                 // Résolution de couleur et style
                 val parsedStyle = resolvePlacemarkStyle(pm, styleUrl, stylesMap, styleMaps)
@@ -860,7 +863,8 @@ object RealImportService {
                     propMap[k] = properties.optString(k, "")
                 }
 
-                val name = propMap["name"] ?: propMap["nom"] ?: propMap["ID"] ?: "Objet-${i + 1}"
+                val rawGeoName = propMap["name"] ?: propMap["NOM"] ?: propMap["Nom"] ?: propMap["nom"] ?: propMap["CODE"] ?: propMap["ID"] ?: "Objet-${i + 1}"
+                val name = resolveSmartName(rawGeoName, propMap)
                 val description = propMap["description"] ?: propMap["desc"] ?: ""
 
                 when {
@@ -1315,6 +1319,7 @@ object RealImportService {
             )
             links.add(link)
 
+            val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
             val cableTrackName = if (name.contains("FO", ignoreCase = true)) name else "$name (${lineInfo.capacityFO} FO)"
             tracks.add(
                 StoredTrack(
@@ -1326,12 +1331,14 @@ object RealImportService {
                     totalDistanceMeters = dist,
                     rawPoints = pts,
                     points = pts,
+                    kmlProperties = propsJson,
                     sourceFile = sourceFile
                 )
             )
 
         } else {
             // C'est une INFRASTRUCTURE GÉNIE CIVIL (GC / Conduite / Tranchée)
+            val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
             val trackId = "TRK-GC-${System.currentTimeMillis()}-$index"
             tracks.add(
                 StoredTrack(
@@ -1347,6 +1354,7 @@ object RealImportService {
                     totalDistanceMeters = dist,
                     rawPoints = pts,
                     points = pts,
+                    kmlProperties = propsJson,
                     sourceFile = sourceFile
                 )
             )
@@ -1558,6 +1566,8 @@ object RealImportService {
             else -> NodeStatus.EXISTANT
         }
 
+        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+
         return FtthNodeEntity(
             id = id,
             type = type,
@@ -1570,6 +1580,7 @@ object RealImportService {
             address = address,
             operator = operator,
             notes = notes,
+            kmlProperties = propsJson,
             sourceFile = sourceFile
         )
     }
@@ -1597,6 +1608,40 @@ object RealImportService {
             } else {
                 append("Aucun objet géospatial valide trouvé.")
             }
+        }
+    }
+
+    /**
+     * Résoudre le vrai nom de l'entité en donnant la priorité aux attributs SIG (NOM, CODE, ID)
+     * lorsque le nom KML brut est simplement une capacité (ex: "288FO", "144 FO").
+     */
+    fun resolveSmartName(rawName: String, properties: Map<String, String>): String {
+        val cleanRaw = rawName.trim()
+
+        // 1. Chercher les clés de Nom/Code privilégiées dans les attributs SIG
+        val sigNomKeys = listOf("NOM", "Nom", "nom", "NOM_CABLE", "CODE", "CODE_CABLE", "ID_CABLE", "REF", "REFERENCE", "IDENTIFIANT", "NAME", "Name")
+        var sigNom = ""
+        for (k in sigNomKeys) {
+            val found = properties[k]
+            if (!found.isNullOrBlank()) {
+                sigNom = found.trim()
+                break
+            }
+        }
+
+        if (sigNom.isBlank()) return cleanRaw.ifBlank { "Objet KML" }
+
+        // 2. Vérifier si cleanRaw est une pure capacité en FO (ex: "288FO", "288 FO", "144FO", "72 FO", "24FO", "12FO", "4FO", "360FO")
+        val isRawJustCapacity = Regex("""^\d+\s*(?:FO|F\.O|fibres?|fibers?|brins?)$""", RegexOption.IGNORE_CASE).matches(cleanRaw) ||
+                cleanRaw.matches(Regex("""^\d+$"""))
+
+        // Si cleanRaw est juste une capacité brute ou un nom générique ("Point", "Objet-1"), adopter le Nom SIG
+        return if (isRawJustCapacity || cleanRaw.equals("Point", ignoreCase = true) || cleanRaw.startsWith("Objet-")) {
+            sigNom
+        } else if (cleanRaw.length < sigNom.length && sigNom.contains(cleanRaw, ignoreCase = true)) {
+            sigNom
+        } else {
+            cleanRaw
         }
     }
 }

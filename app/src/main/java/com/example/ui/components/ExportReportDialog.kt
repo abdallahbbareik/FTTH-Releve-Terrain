@@ -75,6 +75,7 @@ fun ExportReportDialog(
     onExportZip: (Context, (File) -> Unit) -> Unit,
     onShareFile: (Context, File, String) -> Unit,
     onImportFile: (Uri) -> Unit = {},
+    onGenerateFtthSynoptic: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -178,6 +179,20 @@ fun ExportReportDialog(
                     Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Importer un fichier KMZ, KML ou GeoJSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Button(
+                    onClick = {
+                        onGenerateFtthSynoptic()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("generate_synoptic_export_button")
+                ) {
+                    Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Générer / Afficher Synoptique FTTH APD ⚡", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
                 Spacer(modifier = Modifier.height(14.dp))
                 HorizontalDivider()

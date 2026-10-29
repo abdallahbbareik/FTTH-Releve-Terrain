@@ -144,87 +144,8 @@ fun KmlFeatureDetailSheet(
         }
     }
 
-    // Initialisation des champs d'édition
-    var editedName by remember(feature) {
-        mutableStateOf(
-            when (feature) {
-                is KmlFeatureItem.PointFeature -> feature.node.name.ifBlank { feature.node.id }
-                is KmlFeatureItem.LineFeature -> feature.track.name.ifBlank { feature.track.id }
-            }
-        )
-    }
-
-    var editedFolder by remember(feature) {
-        mutableStateOf(
-            when (feature) {
-                is KmlFeatureItem.PointFeature -> feature.node.folderName
-                is KmlFeatureItem.LineFeature -> feature.track.folderName
-            }
-        )
-    }
-
-    var editedNotes by remember(feature) {
-        mutableStateOf(
-            when (feature) {
-                is KmlFeatureItem.PointFeature -> feature.node.notes
-                is KmlFeatureItem.LineFeature -> feature.track.notes
-            }
-        )
-    }
-
-    // Extraction des métadonnées de base et du classement géométrique (Point / Polyligne / Polygone)
-    val title: String
-    val folderName: String
-    val colorHex: String?
-    val isPoint: Boolean
-    val isPolygon: Boolean
-    val classificationLabel: String
-    val centerLat: Double
-    val centerLon: Double
-    val totalLengthMeters: Double?
-    val verticesCount: Int?
-
-    when (feature) {
-        is KmlFeatureItem.PointFeature -> {
-            isPoint = true
-            isPolygon = false
-            classificationLabel = "Point"
-            val node = feature.node
-            title = node.name.ifBlank { node.id }
-            folderName = node.folderName
-            colorHex = node.colorHex
-            centerLat = node.latitude
-            centerLon = node.longitude
-            totalLengthMeters = null
-            verticesCount = 1
-        }
-        is KmlFeatureItem.LineFeature -> {
-            isPoint = false
-            val track = feature.track
-            isPolygon = track.type.contains("Polygone", ignoreCase = true)
-            classificationLabel = if (isPolygon) "Polygone" else "Polyligne"
-            title = track.name.ifBlank { track.id }
-            folderName = track.folderName
-            colorHex = track.colorHex
-            val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
-            centerLat = if (pts.isNotEmpty()) pts.first().latitude else 0.0
-            centerLon = if (pts.isNotEmpty()) pts.first().longitude else 0.0
-            totalLengthMeters = track.totalDistanceMeters
-            verticesCount = pts.size
-        }
-    }
-
-    val featureColor = remember(colorHex) {
-        try {
-            if (!colorHex.isNullOrBlank()) Color(android.graphics.Color.parseColor(colorHex))
-            else Color(0xFF0284C7)
-        } catch (_: Exception) {
-            Color(0xFF0284C7)
-        }
-    }
-
-    // Extraction de TOUS les attributs KML (kmlProperties JSON, notes, etc.)
-    val allAttributes = remember(feature) {
+    // Extraction des attributs bruts pour résoudre le smart name (ex: CDI_01-288FO au lieu de 288FO)
+    val rawAttributesMap = remember(feature) {
         val map = linkedMapOf<String, String>()
 
         fun extractFromJson(jsonStr: String) {
@@ -280,6 +201,94 @@ fun KmlFeatureDetailSheet(
                 extractFromNotes(feature.track.notes)
             }
         }
+        map
+    }
+
+    val rawTitle = remember(feature) {
+        when (feature) {
+            is KmlFeatureItem.PointFeature -> feature.node.name.ifBlank { feature.node.id }
+            is KmlFeatureItem.LineFeature -> feature.track.name.ifBlank { feature.track.id }
+        }
+    }
+
+    val title = remember(feature, rawTitle, rawAttributesMap) {
+        com.example.data.import.RealImportService.resolveSmartName(rawTitle, rawAttributesMap)
+    }
+
+    // Initialisation des champs d'édition
+    var editedName by remember(feature, title) {
+        mutableStateOf(title)
+    }
+
+    var editedFolder by remember(feature) {
+        mutableStateOf(
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> feature.node.folderName
+                is KmlFeatureItem.LineFeature -> feature.track.folderName
+            }
+        )
+    }
+
+    var editedNotes by remember(feature) {
+        mutableStateOf(
+            when (feature) {
+                is KmlFeatureItem.PointFeature -> feature.node.notes
+                is KmlFeatureItem.LineFeature -> feature.track.notes
+            }
+        )
+    }
+
+    // Extraction des métadonnées de base et du classement géométrique (Point / Polyligne / Polygone)
+    val folderName: String
+    val colorHex: String?
+    val isPoint: Boolean
+    val isPolygon: Boolean
+    val classificationLabel: String
+    val centerLat: Double
+    val centerLon: Double
+    val totalLengthMeters: Double?
+    val verticesCount: Int?
+
+    when (feature) {
+        is KmlFeatureItem.PointFeature -> {
+            isPoint = true
+            isPolygon = false
+            classificationLabel = "Point"
+            val node = feature.node
+            folderName = node.folderName
+            colorHex = node.colorHex
+            centerLat = node.latitude
+            centerLon = node.longitude
+            totalLengthMeters = null
+            verticesCount = 1
+        }
+        is KmlFeatureItem.LineFeature -> {
+            isPoint = false
+            val track = feature.track
+            isPolygon = track.type.contains("Polygone", ignoreCase = true)
+            classificationLabel = if (isPolygon) "Polygone" else "Polyligne"
+            folderName = track.folderName
+            colorHex = track.colorHex
+            val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+            centerLat = if (pts.isNotEmpty()) pts.first().latitude else 0.0
+            centerLon = if (pts.isNotEmpty()) pts.first().longitude else 0.0
+            totalLengthMeters = track.totalDistanceMeters
+            verticesCount = pts.size
+        }
+    }
+
+    val featureColor = remember(colorHex) {
+        try {
+            if (!colorHex.isNullOrBlank()) Color(android.graphics.Color.parseColor(colorHex))
+            else Color(0xFF0284C7)
+        } catch (_: Exception) {
+            Color(0xFF0284C7)
+        }
+    }
+
+    // Extraction de TOUS les attributs KML (kmlProperties JSON, notes, etc.)
+    val allAttributes = remember(feature, rawAttributesMap, title) {
+        val map = LinkedHashMap(rawAttributesMap)
 
         if (map.isEmpty()) {
             map["Nom"] = title

@@ -122,6 +122,7 @@ fun ProjectFolderDialog(
     kmlFolders: List<com.example.data.import.RealImportService.KmlFolderInfo> = emptyList(),
     onDeleteKmlFile: () -> Unit = {},
     onOpenKmlGoogleEarth: () -> Unit = {},
+    onGenerateFtthSynoptic: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val dialogBg = if (isDarkTheme) Color(0xFF1E293B) else Color(0xFFFAFAF8)
@@ -646,7 +647,22 @@ fun ProjectFolderDialog(
                                             fontSize = 10.sp,
                                             color = if (isDarkTheme) Color(0xFFCBD5E1) else Color(0xFF475569)
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                 Button(
+                                     onClick = {
+                                         onGenerateFtthSynoptic()
+                                         onDismiss()
+                                     },
+                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488)),
+                                     shape = RoundedCornerShape(8.dp),
+                                     modifier = Modifier.fillMaxWidth().testTag("generate_synoptic_button")
+                                 ) {
+                                     Icon(Icons.Default.Cable, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                     Spacer(modifier = Modifier.width(6.dp))
+                                     Text("Générer Synoptique FTTH APD ⚡", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                 }
+
+                                 Spacer(modifier = Modifier.height(8.dp))
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)

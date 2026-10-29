@@ -97,6 +97,7 @@ fun CompactPiquetageTopBar(
     onOpenExport: () -> Unit,
     onOpenWorkflowGuide: () -> Unit,
     onOpenPhotoResolutionConfig: () -> Unit = {},
+    onOpenClassification: () -> Unit = {},
     onExportZip: () -> Unit,
     onExportKmz: () -> Unit,
     onExportGeoJson: () -> Unit,
@@ -225,6 +226,21 @@ fun CompactPiquetageTopBar(
                             onClick = {
                                 menuExpanded = false
                                 onStartManualTrack()
+                            }
+                        )
+
+                        // Classification des Nœuds (KMZ)
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("Classification Nœuds (KMZ)", fontWeight = FontWeight.Bold, color = TelecomCyan)
+                                    Text("Tableau SRO, CHAMBRE, POTEAU, PBO & BPE", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Default.Assessment, contentDescription = null, tint = TelecomCyan) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenClassification()
                             }
                         )
 

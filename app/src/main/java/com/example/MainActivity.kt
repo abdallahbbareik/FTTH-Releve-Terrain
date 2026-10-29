@@ -263,6 +263,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val kmlFiles by viewModel.kmlFiles.collectAsStateWithLifecycle()
     val kmlFolders by viewModel.kmlFolders.collectAsStateWithLifecycle()
     val showKmlGoogleEarthSheet by viewModel.showKmlGoogleEarthSheet.collectAsStateWithLifecycle()
+    val showClassificationDialog by viewModel.showClassificationDialog.collectAsStateWithLifecycle()
 
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -298,9 +299,11 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 showProjectFolderDialog || selectedTrackForDetail != null || selectedLinkForDetail != null ||
                 pendingStakePosition != null || isPickOnMapMode || viewingTrackPhoto != null || showPhotoResolutionDialog ||
                 showGpsDetailsDialog || showLinksListDialog || showFullNodeDetailSheet || showFullTrackDetail ||
-                showKmlGoogleEarthSheet
+                showKmlGoogleEarthSheet || showClassificationDialog
     ) {
-        if (showGpsDetailsDialog) {
+        if (showClassificationDialog) {
+            viewModel.dismissClassificationDialog()
+        } else if (showGpsDetailsDialog) {
             showGpsDetailsDialog = false
         } else if (showKmlGoogleEarthSheet) {
             viewModel.dismissKmlGoogleEarthSheet()
@@ -378,6 +381,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                         onOpenExport = { viewModel.openExportDialog() },
                         onOpenWorkflowGuide = { showWorkflowGuide = true },
                         onOpenPhotoResolutionConfig = { showPhotoResolutionDialog = true },
+                        onOpenClassification = { viewModel.openClassificationDialog() },
                         onExportZip = { viewModel.exportCompleteZipAndShare(context) },
                         onExportKmz = { viewModel.exportKmzAndShare(context) },
                         onExportGeoJson = { viewModel.exportGeoJsonAndShare(context) },
@@ -1177,6 +1181,19 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
             // Dialogue bloquant avec barre de progression pour les tâches lourdes (ex: suppression de projet)
             if (blockingTaskState != null && blockingTaskState!!.isRunning) {
                 BlockingTaskDialog(state = blockingTaskState!!)
+            }
+
+            // Dialogue de Classification Spécifique des Nœuds & Câbles KMZ
+            if (showClassificationDialog) {
+                com.example.ui.components.KmzNodeClassificationDialog(
+                    nodes = rawNodes,
+                    tracks = allTracks,
+                    onDismiss = { viewModel.dismissClassificationDialog() },
+                    onSelectNodeOnMap = { node -> viewModel.zoomAndFocusOnNode(node) },
+                    onSelectTrackOnMap = { track -> viewModel.openTrackDetail(track) },
+                    onImportKmzFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
+                    onRemoveDuplicates = { viewModel.removeDuplicateNodesByLocation() }
+                )
             }
         }
 
