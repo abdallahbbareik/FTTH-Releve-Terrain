@@ -117,9 +117,13 @@ object KmzNodeClassifier {
         val typeFoncUpper = rawTypeFonc.trim().uppercase(Locale.ROOT)
 
         // Extraire REFERENCE
-        val rawReference = extractProperty(node, listOf("REFERENCE", "reference", "REF", "Ref", "REF_MAT", "CODE_REF")).ifBlank {
-            if (node.type == FtthNodeType.BOITIER && node.boitierType.isNotBlank()) node.boitierType
-            else node.name
+        val explicitRef = extractProperty(node, listOf("REFERENCE", "reference", "REF", "Ref", "REF_MAT", "CODE_REF"))
+        var rawReference = if (explicitRef.isNotBlank()) {
+            explicitRef
+        } else if (node.type == FtthNodeType.BOITIER && node.boitierType.isNotBlank()) {
+            node.boitierType
+        } else {
+            "-"
         }
 
         var category: KmzNodeCategory
@@ -160,6 +164,14 @@ object KmzNodeClassifier {
             category = KmzNodeCategory.AUTRE
             subType = node.type.label
             ruleApplied = "Non classifié selon critères spécifiques"
+        }
+
+        // Nettoyage de la référence pour les non-boîtiers (ex: Chambre ayant par erreur REF = PBO)
+        if (category != KmzNodeCategory.BOITIER) {
+            val refUpper = rawReference.trim().uppercase(Locale.ROOT)
+            if (refUpper == "PBO" || refUpper.contains("PBO") || refUpper.contains("POINT DE BRANCHEMENT")) {
+                rawReference = "-"
+            }
         }
 
         return ClassifiedKmzNode(

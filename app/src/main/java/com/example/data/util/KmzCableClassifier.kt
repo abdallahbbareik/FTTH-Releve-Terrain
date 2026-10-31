@@ -1,6 +1,8 @@
 package com.example.data.util
 
 import com.example.data.local.FtthLinkEntity
+import com.example.data.local.FtthNodeEntity
+import com.example.data.local.FtthNodeType
 import com.example.data.storage.StoredTrack
 import com.example.data.storage.TrackPoint
 import org.json.JSONObject
@@ -41,9 +43,13 @@ data class CableClassificationStats(
 object KmzCableClassifier {
 
     /**
-     * Classifier et réagglomérer une liste de tracés/lignes en câbles par Nom et Géométrie (points communs).
+     * Classifier et réagglomérer une liste de tracés/lignes en câbles par Nom et Géométrie (points communs),
+     * puis réorienter le sens logique des câbles en partant du SRO vers les boîtiers enfants.
      */
-    fun classifyAndGroupCables(tracks: List<StoredTrack>): List<ClassifiedCable> {
+    fun classifyAndGroupCables(
+        tracks: List<StoredTrack>,
+        allNodes: List<FtthNodeEntity> = emptyList()
+    ): List<ClassifiedCable> {
         if (tracks.isEmpty()) return emptyList()
 
         // 1. Filtrer les tracés qui sont des câbles ou lignes
@@ -130,7 +136,182 @@ object KmzCableClassifier {
             }
         }
 
-        return resultCables
+        // Réorientation hiérarchique : SRO (Parents) ➔ Boîtiers Dérivés (Enfants)
+        if (allNodes.isNotEmpty()) {
+            return orientCablesFromSroTree(resultCables, allNodes)
+        } else {
+            return resultCables
+        }
+    }
+
+    /**
+     * Réordonner les câbles et leurs tronçons pour respecter la hiérarchie du réseau :
+     * 1. Câbles principaux (parents) : Commencent à partir d'un SRO.
+     * 2. Câbles enfants / dérivés : Commencent à partir d'un boîtier sur un câble parent.
+     * Si un câble est tracé à l'envers dans le fichier KMZ, ses tronçons et points sont inversés.
+     */
+    fun orientCablesFromSroTree(
+        cables: List<ClassifiedCable>,
+        allNodes: List<FtthNodeEntity>
+    ): List<ClassifiedCable> {
+        if (cables.isEmpty()) return emptyList()
+
+        // 1. Détecter tous les emplacements de SRO
+        val sroPoints = mutableListOf<TrackPoint>()
+        for (node in allNodes) {
+            val classified = KmzNodeClassifier.classifyNode(node)
+            if (classified.category == KmzNodeCategory.SRO ||
+                node.type == FtthNodeType.SRO ||
+                node.name.startsWith("SRO", ignoreCase = true) ||
+                node.name.contains("SRO", ignoreCase = true)
+            ) {
+                sroPoints.add(TrackPoint(latitude = node.latitude, longitude = node.longitude))
+            }
+        }
+
+        // Si aucun SRO explicite n'est dans les nœuds, utiliser le départ du premier câble de Transport
+        if (sroPoints.isEmpty()) {
+            for (c in cables) {
+                if (c.cableType.equals("Transport", ignoreCase = true)) {
+                    val pts = getCableAllPoints(c)
+                    if (pts.isNotEmpty()) {
+                        sroPoints.add(pts.first())
+                    }
+                }
+            }
+        }
+
+        val knownOrigins = mutableListOf<TrackPoint>()
+        knownOrigins.addAll(sroPoints)
+
+        val unoriented = cables.toMutableList()
+        val oriented = mutableListOf<ClassifiedCable>()
+
+        // PASSE 1 : Orientations directes depuis les SRO (Câbles parents / Niveau 0)
+        val iterPass1 = unoriented.iterator()
+        while (iterPass1.hasNext()) {
+            val cable = iterPass1.next()
+            val pts = getCableAllPoints(cable)
+            if (pts.size < 2) continue
+
+            val startPt = pts.first()
+            val endPt = pts.last()
+
+            val dStart = minDistanceToPoints(startPt, sroPoints)
+            val dEnd = minDistanceToPoints(endPt, sroPoints)
+
+            // Vérifier si un SRO est connecté à une extrémité (<= 25m) ou intersecte le câble (<= 15m)
+            val minInternalSroDist = pts.minOfOrNull { pt -> minDistanceToPoints(pt, sroPoints) } ?: Double.MAX_VALUE
+            val connectsToSro = minOf(dStart, dEnd) <= 25.0 || minInternalSroDist <= 15.0
+
+            if (connectsToSro) {
+                iterPass1.remove()
+                // Si la fin est plus proche du SRO que le début, inverser le sens logique
+                val orientedCable = if (dEnd < dStart) {
+                    reverseClassifiedCable(cable)
+                } else {
+                    cable
+                }
+                oriented.add(orientedCable)
+
+                val orientedPts = getCableAllPoints(orientedCable)
+                if (orientedPts.isNotEmpty()) {
+                    knownOrigins.addAll(orientedPts)
+                }
+            }
+        }
+
+        // PASSE 2 : Propagation en arbre vers les câbles enfants (Dérivations sur boîtiers)
+        var progressMade = true
+        var safetyLoopCount = 0
+        while (progressMade && unoriented.isNotEmpty() && safetyLoopCount < 50) {
+            progressMade = false
+            safetyLoopCount++
+
+            val iterPass2 = unoriented.iterator()
+            while (iterPass2.hasNext()) {
+                val cable = iterPass2.next()
+                val pts = getCableAllPoints(cable)
+                if (pts.size < 2) continue
+
+                val startPt = pts.first()
+                val endPt = pts.last()
+
+                val dStart = minDistanceToPoints(startPt, knownOrigins)
+                val dEnd = minDistanceToPoints(endPt, knownOrigins)
+
+                // Seuil de proximité avec un boîtier/parent = 15 mètres
+                if (minOf(dStart, dEnd) <= 15.0) {
+                    iterPass2.remove()
+                    val orientedCable = if (dEnd < dStart) {
+                        reverseClassifiedCable(cable)
+                    } else {
+                        cable
+                    }
+                    oriented.add(orientedCable)
+
+                    val orientedPts = getCableAllPoints(orientedCable)
+                    if (orientedPts.isNotEmpty()) {
+                        knownOrigins.addAll(orientedPts)
+                    }
+                    progressMade = true
+                }
+            }
+        }
+
+        // PASSE 3 : Câbles restants non connectés (conserver ou orienter vers l'origine la plus proche)
+        for (cable in unoriented) {
+            val pts = getCableAllPoints(cable)
+            if (pts.size >= 2) {
+                val startPt = pts.first()
+                val endPt = pts.last()
+                val dStart = minDistanceToPoints(startPt, knownOrigins)
+                val dEnd = minDistanceToPoints(endPt, knownOrigins)
+
+                if (dEnd < dStart && dEnd <= 50.0) {
+                    oriented.add(reverseClassifiedCable(cable))
+                } else {
+                    oriented.add(cable)
+                }
+            } else {
+                oriented.add(cable)
+            }
+        }
+
+        return oriented
+    }
+
+    private fun reverseClassifiedCable(cable: ClassifiedCable): ClassifiedCable {
+        val reversedSubTracks = cable.subTracks.map { trk ->
+            val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
+            val revPts = pts.reversed()
+            trk.copy(
+                points = revPts,
+                rawPoints = revPts
+            )
+        }.reversed()
+
+        return cable.copy(
+            startCoordinatesLabel = cable.endCoordinatesLabel,
+            endCoordinatesLabel = cable.startCoordinatesLabel,
+            subTracks = reversedSubTracks
+        )
+    }
+
+    fun getCableAllPoints(cable: ClassifiedCable): List<TrackPoint> {
+        return cable.subTracks.flatMap { if (it.points.isNotEmpty()) it.points else it.rawPoints }
+    }
+
+    private fun minDistanceToPoints(target: TrackPoint, points: List<TrackPoint>): Double {
+        if (points.isEmpty()) return Double.MAX_VALUE
+        var minD = Double.MAX_VALUE
+        for (p in points) {
+            val d = TrackGeometryHelper.calculateDistanceMeters(target.latitude, target.longitude, p.latitude, p.longitude)
+            if (d < minD) {
+                minD = d
+            }
+        }
+        return minD
     }
 
     /**
@@ -171,7 +352,7 @@ object KmzCableClassifier {
                     val d3 = TrackGeometryHelper.calculateDistanceMeters(curEnd.latitude, curEnd.longitude, candStart.latitude, candStart.longitude)
                     val d4 = TrackGeometryHelper.calculateDistanceMeters(curEnd.latitude, curEnd.longitude, candEnd.latitude, candEnd.longitude)
 
-                    val minDistance = minOf(d1, d2, d3, d4)
+                    val minDistance = minOf(d1, minOf(d2, minOf(d3, d4)))
 
                     // Seuil d'accrochage/point commun de 5 mètres
                     if (minDistance <= 5.0) {

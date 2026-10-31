@@ -947,6 +947,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 TrackDetailDialog(
                     track = selectedTrackForDetail!!,
                     userLocation = userLocation,
+                    allNodes = rawNodes,
                     onDismiss = {
                         viewModel.closeTrackDetail()
                     },
@@ -1066,6 +1067,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
             if (selectedKmlFeature != null) {
                 KmlFeatureDetailSheet(
                     feature = selectedKmlFeature!!,
+                    allNodes = rawNodes,
                     onCenterOnMap = { lat, lon ->
                         viewModel.focusOnCoordinates(lat, lon)
                         viewModel.dismissKmlFeatureDetail()

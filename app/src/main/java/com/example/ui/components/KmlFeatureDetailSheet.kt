@@ -106,6 +106,7 @@ sealed class KmlFeatureItem {
 @Composable
 fun KmlFeatureDetailSheet(
     feature: KmlFeatureItem,
+    allNodes: List<FtthNodeEntity> = emptyList(),
     onCenterOnMap: (lat: Double, lon: Double) -> Unit,
     onMoveOnMap: ((KmlFeatureItem) -> Unit)? = null,
     onEditFeature: ((feature: KmlFeatureItem, newName: String, newFolder: String, newNotes: String?) -> Unit)? = null,
@@ -123,6 +124,7 @@ fun KmlFeatureDetailSheet(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var tempPhotoFile by remember { mutableStateOf<File?>(null) }
     var viewingPhotoPath by remember { mutableStateOf<String?>(null) }
+    var showSupportsDialog by remember { mutableStateOf(false) }
 
     // Prise de photo par caméra
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -803,6 +805,75 @@ fun KmlFeatureDetailSheet(
                             Text("Centrer", fontSize = 12.sp)
                         }
                     }
+                }
+            }
+
+            // --- CARTE SUPPORTS TRAVERSÉS (CHAMBRES & POTEAUX DE DÉPART À FIN) ---
+            if (!isPoint && feature is KmlFeatureItem.LineFeature && allNodes.isNotEmpty()) {
+                val supportsAnalysis = remember(feature, allNodes) {
+                    com.example.data.util.CableSupportAnalyzer.analyzeCableSupports(feature.track, allNodes)
+                }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Supports traversés (Chambres & Poteaux)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFD97706)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${supportsAnalysis.supports.size} supports : ${supportsAnalysis.totalChambresCount} Chambres, ${supportsAnalysis.totalPoteauxCount} Poteaux",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Button(
+                            onClick = { showSupportsDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFD97706)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Route,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Voir parcours", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                if (showSupportsDialog) {
+                    com.example.ui.components.CableSupportsDialog(
+                        analysisResult = supportsAnalysis,
+                        onDismiss = { showSupportsDialog = false },
+                        onSelectNodeOnMap = { node ->
+                            onCenterOnMap(node.latitude, node.longitude)
+                            showSupportsDialog = false
+                        }
+                    )
                 }
             }
 

@@ -89,6 +89,7 @@ import java.util.Locale
 fun TrackDetailDialog(
     track: StoredTrack,
     userLocation: GpsLocationData?,
+    allNodes: List<com.example.data.local.FtthNodeEntity> = emptyList(),
     onDismiss: () -> Unit,
     onSaveTrack: (updatedTrack: StoredTrack) -> Unit = {},
     onAutoSave: (updatedTrack: StoredTrack) -> Unit = {},
@@ -158,6 +159,7 @@ fun TrackDetailDialog(
     val distStr = if (lengthMeters < 1000.0) "${lengthMeters.toInt()} m" else String.format(Locale.FRANCE, "%.2f km", distKm)
 
     var notesText by remember(track) { mutableStateOf(track.notes) }
+    var showSupportsDialog by remember { mutableStateOf(false) }
 
     fun buildUpdatedTrack(): StoredTrack {
         val finalConduitType = if (conduitTypeChoice == "Autre") {
@@ -293,6 +295,73 @@ fun TrackDetailDialog(
                     MetricCard("Longueur (Auto)", distStr, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
                     MetricCard("Sommets", "${currentPoints.size} pts", Color(0xFF16A34A), Modifier.weight(1f))
                     MetricCard("Photos", "${track.photos.size}", Color(0xFF0284C7), Modifier.weight(1f))
+                }
+
+                if (allNodes.isNotEmpty()) {
+                    val supportsAnalysis = remember(track, allNodes) {
+                        com.example.data.util.CableSupportAnalyzer.analyzeCableSupports(track, allNodes)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Supports traversés (Chambres & Poteaux)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFD97706)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${supportsAnalysis.supports.size} supports : ${supportsAnalysis.totalChambresCount} Chambres, ${supportsAnalysis.totalPoteauxCount} Poteaux",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Button(
+                                onClick = { showSupportsDialog = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFD97706)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Timeline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Parcours", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    if (showSupportsDialog) {
+                        com.example.ui.components.CableSupportsDialog(
+                            analysisResult = supportsAnalysis,
+                            onDismiss = { showSupportsDialog = false },
+                            onSelectNodeOnMap = { node ->
+                                onDismiss()
+                            }
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
