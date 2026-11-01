@@ -149,15 +149,19 @@ object KmzNodeClassifier {
             subType = "Poteau"
             ruleApplied = "TYPE_FONC = APPUI"
         }
-        // RÈGLE 4 : TYPE_FONC = POINT DE BRANCHEMENT OPTIQU (uniquement sans sous classe)
+        // RÈGLE 4 : POINT DE BRANCHEMENT OPTIQUE / BOÎTIER (Règle étendue par TYPE_FONC, Nom, Réf ou Type)
         else if (typeFoncUpper.contains("POINT DE BRANCHEMENT OPTIQU") ||
             typeFoncUpper.contains("POINT DE BRANCHEMENT OPTIQUE") ||
             typeFoncUpper.contains("POINT_DE_BRANCHEMENT_OPTIQUE") ||
-            typeFoncUpper.contains("BOITIER")
+            typeFoncUpper.contains("BOITIER") ||
+            node.type == FtthNodeType.BOITIER ||
+            nameUpper.contains("BOITIER") || nameUpper.contains("BPE") || nameUpper.contains("PBO") ||
+            nameUpper.contains("PEC") || nameUpper.contains("SPLIT") || nameUpper.contains("JOINT") || nameUpper.contains("BTI") ||
+            rawReference.uppercase(Locale.ROOT).contains("PBO") || rawReference.uppercase(Locale.ROOT).contains("BPE")
         ) {
             category = KmzNodeCategory.BOITIER
             subType = "Boîtier"
-            ruleApplied = "TYPE_FONC = POINT DE BRANCHEMENT OPTIQU"
+            ruleApplied = "TYPE_FONC / Nom = POINT DE BRANCHEMENT / BOÎTIER"
         }
         // RÈGLE 5 : Non classifié
         else {
