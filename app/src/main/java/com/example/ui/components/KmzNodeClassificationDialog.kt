@@ -138,17 +138,17 @@ fun KmzNodeClassificationDialog(
     var selectedCategoryFilter by remember { mutableStateOf<KmzNodeCategory?>(null) }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showCsvExportDialog by remember { mutableStateOf(false) }
-    var pendingCsvPayload by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(fileName, csvContent)
+    var pendingCsvPayload by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(fileName, excelContent)
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/csv")
+        contract = ActivityResultContracts.CreateDocument("application/vnd.ms-excel")
     ) { uri: Uri? ->
         if (uri != null && pendingCsvPayload != null) {
             try {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(pendingCsvPayload!!.second.toByteArray(Charsets.UTF_8))
                 }
-                Toast.makeText(context, "Fichier CSV enregistré avec succès !", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Rapport Excel enregistré avec succès !", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 e.printStackTrace()
                 Toast.makeText(context, "Erreur lors de l'enregistrement : ${e.message}", Toast.LENGTH_SHORT).show()
@@ -211,11 +211,11 @@ fun KmzNodeClassificationDialog(
                         "2. TYPE_FONC = CHAMBRE ➔ CHAMBRE\n" +
                         "3. TYPE_FONC = APPUI ➔ POTEAU\n" +
                         "4. TYPE_FONC = POINT DE BRANCHEMENT OPTIQU ➔ Boîtier (sans sous-classe)\n" +
-                        "5. Déduplication : SRO, Chambre et Poteau par position GPS identique (coordonnées) ; Boîtier par position GPS + Nom identiques.\n" +
-                        "6. Raccordement Boîtiers & SRO : 1 Câble Entrée (fin ou câble en passage) et N Câbles Sortie (départ ou câble en passage). Non calculé pour Chambres et Poteaux."
+                        "5. Déduplication : SRO, Chambre et Poteau par position GPS identique ; Boîtier par position GPS + Nom identiques.\n" +
+                        "6. Raccordement APD aux EXTRÉMITÉS des tronçons : Seuil de conformité ≤ 10m. Si décalé > 10m, noté dans la feuille 'Anomalies APD'."
                     } else {
                         "1. Regroupement par Nom & Géométrie : Les tronçons ayant le même nom de base et connectés bout-à-bout (distance < 5m) sont réagglomérés en un câble unique.\n" +
-                        "2. Détection des Boîtiers : Un boîtier appartient à un câble uniquement s'il se trouve à l'une des extrémités d'un tronçon. Les boîtiers intermédiaires sont ignorés."
+                        "2. Détection des Boîtiers : Un boîtier appartient à un câble uniquement s'il se trouve à l'une des extrémités d'un tronçon."
                     },
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -232,9 +232,9 @@ fun KmzNodeClassificationDialog(
         )
     }
 
-    // Dialogue d'exportation CSV avec options de sauvegarde claire sur le téléphone
+    // Dialogue d'exportation Excel Multi-Feuilles
     if (showCsvExportDialog && pendingCsvPayload != null) {
-        val (fileName, csvContent) = pendingCsvPayload!!
+        val (fileName, excelContent) = pendingCsvPayload!!
 
         AlertDialog(
             onDismissRequest = { showCsvExportDialog = false },
@@ -248,7 +248,7 @@ fun KmzNodeClassificationDialog(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Enregistrer le fichier CSV",
+                        text = "Rapport Excel Multi-Feuilles (.xls)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -257,8 +257,11 @@ fun KmzNodeClassificationDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Comment souhaitez-vous sauvegarder le fichier sur votre téléphone ?",
-                        fontSize = 12.sp,
+                        text = "Le fichier Excel contiendra 7 feuilles dédiées :\n" +
+                                "• SRO, Boîtiers, Chambres, Poteaux, Autres\n" +
+                                "• Câbles FO\n" +
+                                "• Feuille 'Anomalies APD' (Inclus uniquement les écarts d'accrochage >10m)",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
@@ -270,11 +273,11 @@ fun KmzNodeClassificationDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                val success = saveCsvToPublicDownloads(context, fileName, csvContent)
+                                val success = saveExcelToPublicDownloads(context, fileName, excelContent)
                                 if (success) {
                                     Toast.makeText(
                                         context,
-                                        "Fichier enregistré dans Téléchargements :\n$fileName",
+                                        "Rapport Excel enregistré dans Téléchargements :\n$fileName",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 } else {
@@ -330,7 +333,7 @@ fun KmzNodeClassificationDialog(
                             .fillMaxWidth()
                             .clickable {
                                 showCsvExportDialog = false
-                                shareCsvFile(context, fileName, csvContent)
+                                shareCsvFile(context, fileName, excelContent)
                             }
                             .padding(10.dp)
                     ) {
@@ -511,22 +514,23 @@ fun KmzNodeClassificationDialog(
 
                     Button(
                         onClick = {
-                            val payload = if (selectedTabIdx == 0) {
-                                generateClassificationCsvPayload(classifiedNodes, boitierConnectivityMap)
-                            } else {
-                                generateCablesCsvPayload(classifiedCables, nodes)
-                            }
+                            val payload = com.example.data.util.ExcelExporterHelper.generateExcelPayload(
+                                classifiedNodes = classifiedNodes,
+                                connectivityMap = boitierConnectivityMap,
+                                classifiedCables = classifiedCables,
+                                nodes = nodes
+                            )
                             pendingCsvPayload = payload
                             showCsvExportDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1f).height(34.dp)
+                        modifier = Modifier.weight(1.1f).height(34.dp)
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("CSV", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Excel (.xls)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     // Bouton Point d'interrogation pour afficher les règles
@@ -929,6 +933,17 @@ private fun ClassifiedNodeRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (connectivity.anomalieApd.isNotBlank() && connectivity.anomalieApd != "-") {
+                    val isAnomaly = connectivity.anomalieApd.contains("Anomalie", ignoreCase = true)
+                    Text(
+                        text = connectivity.anomalieApd,
+                        fontSize = 8.5.sp,
+                        fontWeight = if (isAnomaly) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isAnomaly) Color(0xFFD97706) else Color(0xFF059669),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 
@@ -1106,7 +1121,7 @@ private fun generateClassificationCsvPayload(
 
     val sb = StringBuilder()
     sb.append("\uFEFF") // UTF-8 BOM pour la gestion des accents dans Excel et Google Sheets
-    sb.append("ID;Nom;Categorie_Calculee;TYPE_FONC;REFERENCE;Cable_Entree;Cables_Sortie;Regle_Appliquee;Latitude;Longitude;Fichier_Source")
+    sb.append("ID;Nom;Categorie_Calculee;TYPE_FONC;REFERENCE;Cable_Entree;Cables_Sortie;Accrochage_APD;Regle_Appliquee;Latitude;Longitude;Fichier_Source")
     for (key in extraKeysList) {
         sb.append(";${key.replace(";", "_")}")
     }
@@ -1116,6 +1131,7 @@ private fun generateClassificationCsvPayload(
         val conn = connectivityMap[item.id]
         val cableEntree = conn?.incomingCableName ?: "-"
         val cablesSortie = conn?.outgoingCablesStr ?: "-"
+        val anomalieApd = conn?.anomalieApd ?: "-"
 
         sb.append("${item.id};")
             .append("${item.name.replace(";", "_").replace("\n", " ")};")
@@ -1124,6 +1140,7 @@ private fun generateClassificationCsvPayload(
             .append("${item.reference.replace(";", "_")};")
             .append("${cableEntree.replace(";", "_")};")
             .append("${cablesSortie.replace(";", "_")};")
+            .append("${anomalieApd.replace(";", "_")};")
             .append("${item.ruleApplied.replace(";", "_")};")
             .append("${item.latitude};")
             .append("${item.longitude};")
@@ -1198,19 +1215,19 @@ private fun generateCablesCsvPayload(
     return Pair(fileName, sb.toString())
 }
 
-private fun saveCsvToPublicDownloads(context: Context, fileName: String, csvContent: String): Boolean {
+private fun saveExcelToPublicDownloads(context: Context, fileName: String, content: String): Boolean {
     return try {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val contentValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/vnd.ms-excel")
                 put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
             }
             val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
             if (uri != null) {
                 resolver.openOutputStream(uri)?.use { stream ->
-                    stream.write(csvContent.toByteArray(Charsets.UTF_8))
+                    stream.write(content.toByteArray(Charsets.UTF_8))
                 }
                 true
             } else {
@@ -1220,7 +1237,7 @@ private fun saveCsvToPublicDownloads(context: Context, fileName: String, csvCont
             val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
             if (!downloadDir.exists()) downloadDir.mkdirs()
             val file = File(downloadDir, fileName)
-            file.writeText(csvContent, Charsets.UTF_8)
+            file.writeText(content, Charsets.UTF_8)
             true
         }
     } catch (e: Exception) {
