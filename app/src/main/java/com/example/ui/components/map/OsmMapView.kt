@@ -158,6 +158,7 @@ fun OsmMapView(
     onTrackPhotoClick: ((TrackPhoto) -> Unit)? = null,
     mapFocusTarget: Pair<Double, Double>? = null,
     onMapFocusTargetConsumed: (() -> Unit)? = null,
+    blinkingEntityId: String? = null,
     isDarkTheme: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -287,12 +288,24 @@ fun OsmMapView(
     val currentIsSnappingActive by rememberUpdatedState(isSnappingActive)
     var isActivelyDraggingVertex by remember { mutableStateOf(false) }
 
+    var isBlinkOn by remember { mutableStateOf(true) }
+    LaunchedEffect(blinkingEntityId) {
+        if (blinkingEntityId != null) {
+            while (true) {
+                isBlinkOn = !isBlinkOn
+                kotlinx.coroutines.delay(250)
+            }
+        } else {
+            isBlinkOn = true
+        }
+    }
+
     LaunchedEffect(
         nodes, links, userLocation, allTracks, activeTrackPoints, selectedNode,
         isManualTrackMode, manualTrackPoints, pendingStakePosition, isStraightenMode, selectedStraightenIndices,
         movingNode, tempMoveNodePosition, isMoveVertexMode, movingVertexIndex, tempVertexPosition, isSnappingActive,
         isPickOnMapMode, isAdjustTrackMode, selectedAdjustTrack?.id, selectedAdjustVertexIdx, isDragAllVerticesMode, isAdjustStraightenActive, adjustStraightenStartIdx,
-        isAdjustDeleteActive, isAdjustAddActive
+        isAdjustDeleteActive, isAdjustAddActive, blinkingEntityId, isBlinkOn
     ) {
         if (isActivelyDraggingVertex) return@LaunchedEffect
         mapView.overlays.clear()
@@ -1025,6 +1038,35 @@ fun OsmMapView(
                 }
             }
             mapView.overlays.add(vertexTouchOverlay)
+        }
+
+        // Surcouche visuelle clignotante pour mise en valeur (nœud ou câble)
+        if (blinkingEntityId != null && isBlinkOn) {
+            val targetNode = nodes.firstOrNull { it.id.equals(blinkingEntityId, true) || it.name.equals(blinkingEntityId, true) }
+            if (targetNode != null) {
+                val haloMarker = Marker(mapView).apply {
+                    position = GeoPoint(targetNode.latitude, targetNode.longitude)
+                    title = "Cible clignotante : ${targetNode.id}"
+                    icon = MapMarkerHelper.createBlinkingTargetDrawable(context, sizeDp = 64)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                }
+                mapView.overlays.add(haloMarker)
+            }
+
+            val targetTrack = allTracks.firstOrNull { it.id.equals(blinkingEntityId, true) || it.name.equals(blinkingEntityId, true) || it.name.contains(blinkingEntityId, true) }
+            val trackPts = targetTrack?.points?.ifEmpty { targetTrack.rawPoints }
+            if (trackPts != null && trackPts.size >= 2) {
+                val blinkPolyline = Polyline(mapView).apply {
+                    for (pt in trackPts) {
+                        addPoint(GeoPoint(pt.latitude, pt.longitude))
+                    }
+                    outlinePaint.strokeWidth = 16f
+                    outlinePaint.isAntiAlias = true
+                    outlinePaint.color = android.graphics.Color.parseColor("#F59E0B") // Jaune/or brillant clignotant
+                    title = "Câble clignotant : ${targetTrack.name}"
+                }
+                mapView.overlays.add(blinkPolyline)
+            }
         }
 
         mapView.invalidate()

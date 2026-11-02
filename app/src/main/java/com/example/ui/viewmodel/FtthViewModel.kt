@@ -2612,10 +2612,72 @@ class FtthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _blinkingEntityId = MutableStateFlow<String?>(null)
+    val blinkingEntityId: StateFlow<String?> = _blinkingEntityId.asStateFlow()
+
+    private var blinkJob: kotlinx.coroutines.Job? = null
+
     fun zoomAndFocusOnNode(node: FtthNodeEntity) {
         _mapFocusTarget.value = Pair(node.latitude, node.longitude)
         _selectedNode.value = node
         _bannerMessage.value = "Zoom sur ${node.id} (${node.name})"
+    }
+
+    fun zoomAndBlinkOnNode(node: FtthNodeEntity) {
+        dismissClassificationDialog()
+        _selectedNode.value = null
+        _selectedTrackForDetail.value = null
+        _showFullTrackDetail.value = false
+        _selectedKmlFeature.value = null
+
+        _mapFocusTarget.value = Pair(node.latitude, node.longitude)
+        triggerBlinkAnimation(node.id)
+        _bannerMessage.value = "Centrage et clignotement sur le nœud « ${node.name.ifBlank { node.id }} »"
+    }
+
+    fun zoomAndBlinkOnTrack(track: StoredTrack) {
+        dismissClassificationDialog()
+        _selectedNode.value = null
+        _selectedTrackForDetail.value = null
+        _showFullTrackDetail.value = false
+        _selectedKmlFeature.value = null
+
+        val pts = if (track.points.isNotEmpty()) track.points else track.rawPoints
+        if (pts.isNotEmpty()) {
+            val mid = pts[pts.size / 2]
+            _mapFocusTarget.value = Pair(mid.latitude, mid.longitude)
+        }
+        triggerBlinkAnimation(track.id)
+        _bannerMessage.value = "Centrage et clignotement sur le câble « ${track.name.ifBlank { track.id }} »"
+    }
+
+    fun zoomAndBlinkOnCable(cable: com.example.data.util.ClassifiedCable) {
+        dismissClassificationDialog()
+        _selectedNode.value = null
+        _selectedTrackForDetail.value = null
+        _showFullTrackDetail.value = false
+        _selectedKmlFeature.value = null
+
+        val subTrack = cable.subTracks.firstOrNull()
+        if (subTrack != null) {
+            zoomAndBlinkOnTrack(subTrack)
+        } else if (cable.originNodeName.isNotBlank()) {
+            val originNode = _rawNodes.value.firstOrNull { it.name.contains(cable.originNodeName, ignoreCase = true) }
+            if (originNode != null) {
+                zoomAndBlinkOnNode(originNode)
+            }
+        }
+    }
+
+    private fun triggerBlinkAnimation(entityId: String) {
+        blinkJob?.cancel()
+        blinkJob = viewModelScope.launch {
+            _blinkingEntityId.value = entityId
+            delay(3500)
+            if (_blinkingEntityId.value == entityId) {
+                _blinkingEntityId.value = null
+            }
+        }
     }
 
     fun focusOnCoordinates(latitude: Double, longitude: Double) {

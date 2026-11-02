@@ -22,7 +22,9 @@ data class BoitierConnectivity(
     val outgoingCables: List<ClassifiedCable>,
     val outgoingCablesStr: String,
     val snapDistanceMeters: Double = 0.0,
-    val anomalieApd: String = "-"
+    val anomalieApd: String = "-",
+    val hostingSupportName: String = "-",
+    val hostingSupportDistance: Double = 0.0
 )
 
 object BoitierCableConnectivityHelper {
@@ -32,17 +34,20 @@ object BoitierCableConnectivityHelper {
     }
 
     /**
-     * Détermine les câbles d'entrée et de sortie pour chaque nœud éligible aux extrémités des tronçons.
+     * Détermine les câbles d'entrée et de sortie pour chaque nœud éligible aux extrémités des tronçons,
+     * ainsi que le support physique d'accueil (Chambre ou Poteau à proximité immédiate <= 1m).
      *
      * RÈGLES MÉTIER FTTH / APD :
-     * 1. Recherche au niveau des EXTRÉMITÉS des câbles/tronçons (startPt / endPt).
-     * 2. Seuil de conformité APD : 10 mètres maximum.
-     * 3. Si d > 10m, le boîtier le plus proche est raccordé mais noté comme ANOMALIE APD.
+     * 1. Recherche au niveau des EXTRÉMITÉS des câbles/tronçons (startPt / endPt) : 1 m.
+     * 2. Conformité APD (Accrochage nominal) : <= 1 m.
+     * 3. Alerte Anomalie APD : > 2 m.
+     * 4. Câble en passage dans un boîtier : <= 1 m.
+     * 5. Support d'accueil (Chambre ou Poteau) : même coordonnées / décalage max <= 1.0 m.
      */
     fun computeConnectivities(
         nodes: List<FtthNodeEntity>,
         cables: List<ClassifiedCable>,
-        maxToleranceMeters: Double = 10.0
+        maxToleranceMeters: Double = 1.0
     ): Map<String, BoitierConnectivity> {
         if (nodes.isEmpty() || cables.isEmpty()) return emptyMap()
 
@@ -89,6 +94,50 @@ object BoitierCableConnectivityHelper {
             return minD
         }
 
+        // Pré-identifier l'ensemble des supports physiques d'infrastructures (Chambres, Poteaux, SRO)
+        data class PhysicalSupportCandidate(
+            val node: FtthNodeEntity,
+            val category: KmzNodeCategory,
+            val typeLabel: String
+        )
+
+        val physicalSupports = mutableListOf<PhysicalSupportCandidate>()
+        for (n in nodes) {
+            val classified = KmzNodeClassifier.classifyNode(n)
+            val isChambre = classified.category == KmzNodeCategory.CHAMBRE ||
+                    n.type == FtthNodeType.CHAMBRE ||
+                    n.name.startsWith("CHAMBRE", ignoreCase = true) ||
+                    n.name.contains("CHAMBRE", ignoreCase = true)
+            val isPoteau = classified.category == KmzNodeCategory.POTEAU ||
+                    n.type == FtthNodeType.POTEAU ||
+                    n.name.startsWith("POTEAU", ignoreCase = true) ||
+                    n.name.contains("POTEAU", ignoreCase = true) ||
+                    n.name.startsWith("POT", ignoreCase = true) ||
+                    n.name.startsWith("APPUI", ignoreCase = true)
+            val isSro = classified.category == KmzNodeCategory.SRO ||
+                    n.type == FtthNodeType.SRO ||
+                    n.name.startsWith("SRO", ignoreCase = true)
+
+            val isNameBoitier = n.name.contains("boitier", ignoreCase = true) ||
+                    n.name.contains("split", ignoreCase = true) ||
+                    n.name.contains("joint", ignoreCase = true) ||
+                    n.name.contains("bpe", ignoreCase = true) ||
+                    n.name.contains("pbo", ignoreCase = true) ||
+                    n.name.contains("pec", ignoreCase = true) ||
+                    n.name.contains("bti", ignoreCase = true)
+            val isBoitierNode = (classified.category == KmzNodeCategory.BOITIER || n.type == FtthNodeType.BOITIER || isNameBoitier) && !isChambre && !isPoteau
+
+            if (!isBoitierNode) {
+                if (isChambre) {
+                    physicalSupports.add(PhysicalSupportCandidate(n, KmzNodeCategory.CHAMBRE, "Chambre"))
+                } else if (isPoteau) {
+                    physicalSupports.add(PhysicalSupportCandidate(n, KmzNodeCategory.POTEAU, "Poteau"))
+                } else if (isSro) {
+                    physicalSupports.add(PhysicalSupportCandidate(n, KmzNodeCategory.SRO, "SRO"))
+                }
+            }
+        }
+
         val resultMap = mutableMapOf<String, BoitierConnectivity>()
 
         for (node in nodes) {
@@ -125,9 +174,42 @@ object BoitierCableConnectivityHelper {
                     outgoingCables = emptyList(),
                     outgoingCablesStr = "-",
                     snapDistanceMeters = 0.0,
-                    anomalieApd = "-"
+                    anomalieApd = "-",
+                    hostingSupportName = "-",
+                    hostingSupportDistance = 0.0
                 )
                 continue
+            }
+
+            // Pour un boîtier, recherche du support d'infrastructure associé (Chambre ou Poteau à <= 1.0 m)
+            var hostingSupportName = "-"
+            var hostingSupportDist = 0.0
+
+            if (isBoitier) {
+                var bestSupport: PhysicalSupportCandidate? = null
+                var minSupportDist = Double.MAX_VALUE
+
+                for (supp in physicalSupports) {
+                    if (supp.node.id == node.id) continue
+                    val d = TrackGeometryHelper.calculateDistanceMeters(
+                        node.latitude, node.longitude,
+                        supp.node.latitude, supp.node.longitude
+                    )
+                    if (d <= 1.0 && d < minSupportDist) {
+                        minSupportDist = d
+                        bestSupport = supp
+                    }
+                }
+
+                if (bestSupport != null) {
+                    hostingSupportDist = minSupportDist
+                    val cleanSuppName = bestSupport.node.name.trim()
+                    hostingSupportName = if (cleanSuppName.startsWith(bestSupport.typeLabel, ignoreCase = true)) {
+                        cleanSuppName
+                    } else {
+                        "${bestSupport.typeLabel} [$cleanSuppName]"
+                    }
+                }
             }
 
             val nodePt = TrackPoint(latitude = node.latitude, longitude = node.longitude)
@@ -156,11 +238,11 @@ object BoitierCableConnectivityHelper {
                 val dUpstream = TrackGeometryHelper.calculateDistanceMeters(node.latitude, node.longitude, upstreamPt.latitude, upstreamPt.longitude)
                 val dDownstream = TrackGeometryHelper.calculateDistanceMeters(node.latitude, node.longitude, downstreamPt.latitude, downstreamPt.longitude)
 
-                // Recherche aux EXTRÉMITÉS des tronçons (Zone restreinte 10m - 40m max)
-                val isDownstreamEnd = dDownstream <= 40.0 && dDownstream <= dUpstream
-                val isUpstreamStart = dUpstream <= 40.0 && dUpstream <= dDownstream
+                // Recherche aux EXTRÉMITÉS des tronçons (Zone nominale 1 m)
+                val isDownstreamEnd = dDownstream <= 1.0 && dDownstream <= dUpstream
+                val isUpstreamStart = dUpstream <= 1.0 && dUpstream <= dDownstream
 
-                // Passage intermédiaire si aucune extrémité directe
+                // Passage intermédiaire si aucune extrémité directe (<= 1 m)
                 val minEndDist = Math.min(dUpstream, dDownstream)
                 var dSegMin = minEndDist
 
@@ -169,9 +251,9 @@ object BoitierCableConnectivityHelper {
                     val dSeg = TrackGeometryHelper.distanceToSegmentMeters(nodePt, pts[i], pts[i + 1])
                     if (dSeg < dSegMin) dSegMin = dSeg
                 }
-                val isPassThrough = !isDownstreamEnd && !isUpstreamStart && (dSegMin <= 10.0)
+                val isPassThrough = !isDownstreamEnd && !isUpstreamStart && (dSegMin <= 1.0)
 
-                if (isDownstreamEnd || isUpstreamStart || isPassThrough || minEndDist <= 50.0) {
+                if (isDownstreamEnd || isUpstreamStart || isPassThrough || minEndDist <= 10.0) {
                     val minDist = minOf(dUpstream, minOf(dDownstream, dSegMin))
                     matches.add(
                         ExtremityMatch(
@@ -191,34 +273,43 @@ object BoitierCableConnectivityHelper {
             var anomalyNote = "-"
 
             if (!isSro) {
-                // Priority 1 : Extrémité réelle d'arrivée (dDownstreamEnd)
+                // Priority 1 : Extrémité réelle d'arrivée (dDownstreamEnd <= 1m)
                 val bestEndMatch = matches.filter { it.isDownstreamEnd }.minByOrNull { it.distToExtremity }
                 if (bestEndMatch != null) {
                     bestIncomingCable = bestEndMatch.cableGeom.cable
                     incomingSnapDist = bestEndMatch.distToExtremity
                 } else {
-                    // Priority 2 : Passage par le boîtier
+                    // Priority 2 : Passage par le boîtier (<= 1m)
                     val bestPassMatch = matches.filter { it.isPassThrough }.minByOrNull { it.distToExtremity }
                     if (bestPassMatch != null) {
                         bestIncomingCable = bestPassMatch.cableGeom.cable
                         incomingSnapDist = bestPassMatch.distToExtremity
                     } else {
-                        // Priority 3 (Fallback APD) : Boîtier le plus proche d'une extrémité de câble (≤ 50m)
+                        // Priority 3 (Fallback APD) : Boîtier le plus proche d'une extrémité de câble
                         val closestMatch = matches.minByOrNull { it.distToExtremity }
-                        if (closestMatch != null && closestMatch.distToExtremity <= 50.0) {
+                        if (closestMatch != null && closestMatch.distToExtremity <= 10.0) {
                             bestIncomingCable = closestMatch.cableGeom.cable
                             incomingSnapDist = closestMatch.distToExtremity
                         }
                     }
                 }
 
-                // ANALYSE DES ANOMALIES APD (Zone de tolérance normale ≤ 10m)
+                // ANALYSE DES ANOMALIES APD :
+                // - Conformité APD : <= 1 m
+                // - Alerte Anomalie APD : > 2 m
                 if (bestIncomingCable != null) {
                     val cleanInName = cleanCableName(bestIncomingCable.name)
-                    if (incomingSnapDist > 10.0) {
+                    if (incomingSnapDist > 2.0) {
                         anomalyNote = String.format(
                             Locale.ROOT,
-                            "Anomalie APD : Écart de %.1fm (Extrémité du câble '%s' non arrêtée à <=10m)",
+                            "Alerte Anomalie APD : Écart de %.1fm (Extrémité du câble '%s' non arrêtée à <=1m)",
+                            incomingSnapDist,
+                            cleanInName
+                        )
+                    } else if (incomingSnapDist > 1.0) {
+                        anomalyNote = String.format(
+                            Locale.ROOT,
+                            "Anomalie APD : Écart de %.1fm (Extrémité câble '%s' > 1m)",
                             incomingSnapDist,
                             cleanInName
                         )
@@ -226,7 +317,7 @@ object BoitierCableConnectivityHelper {
                         anomalyNote = String.format(Locale.ROOT, "Conforme APD (Écart %.1fm)", incomingSnapDist)
                     }
                 } else {
-                    anomalyNote = "Anomalie APD : Boîtier non raccordé (aucune extrémité à <=10m)"
+                    anomalyNote = "Alerte Anomalie APD : Boîtier non raccordé (aucune extrémité à <=1m)"
                 }
             } else {
                 // SRO : Racine du réseau
@@ -245,7 +336,7 @@ object BoitierCableConnectivityHelper {
                 var isOutgoing = false
 
                 if (isSro) {
-                    if (match.isUpstreamStart || match.isPassThrough || match.distToExtremity <= maxToleranceMeters) {
+                    if ((match.isUpstreamStart || match.distToExtremity <= maxToleranceMeters) && (match.cableGeom.cable.isParent || match.cableGeom.cable.hierarchyLevel == 0)) {
                         isOutgoing = true
                     }
                 } else {
@@ -286,7 +377,9 @@ object BoitierCableConnectivityHelper {
                 outgoingCables = outgoingList,
                 outgoingCablesStr = outgoingStr,
                 snapDistanceMeters = incomingSnapDist,
-                anomalieApd = anomalyNote
+                anomalieApd = anomalyNote,
+                hostingSupportName = hostingSupportName,
+                hostingSupportDistance = hostingSupportDist
             )
         }
 

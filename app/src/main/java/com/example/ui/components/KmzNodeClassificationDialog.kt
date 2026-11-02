@@ -136,19 +136,20 @@ fun KmzNodeClassificationDialog(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<KmzNodeCategory?>(null) }
+    var selectedCableRoleFilter by remember { mutableStateOf("TOUS") }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showCsvExportDialog by remember { mutableStateOf(false) }
-    var pendingCsvPayload by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(fileName, excelContent)
+    var pendingXlsxPayload by remember { mutableStateOf<Pair<String, ByteArray>?>(null) } // Pair(fileName, xlsxBytes)
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.ms-excel")
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     ) { uri: Uri? ->
-        if (uri != null && pendingCsvPayload != null) {
+        if (uri != null && pendingXlsxPayload != null) {
             try {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(pendingCsvPayload!!.second.toByteArray(Charsets.UTF_8))
+                    out.write(pendingXlsxPayload!!.second)
                 }
-                Toast.makeText(context, "Rapport Excel enregistré avec succès !", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Rapport Excel (.xlsx) enregistré avec succès !", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 e.printStackTrace()
                 Toast.makeText(context, "Erreur lors de l'enregistrement : ${e.message}", Toast.LENGTH_SHORT).show()
@@ -172,15 +173,26 @@ fun KmzNodeClassificationDialog(
         }
     }
 
-    // Filtrage dynamique pour les Câbles
-    val filteredCablesList = remember(classifiedCables, searchQuery) {
+    // Filtrage dynamique pour les Câbles (avec rôle Parent/Enfant et recherche avancée)
+    val filteredCablesList = remember(classifiedCables, searchQuery, selectedCableRoleFilter) {
         val queryLower = searchQuery.trim().lowercase(Locale.ROOT)
-        if (queryLower.isBlank()) classifiedCables
-        else classifiedCables.filter { c ->
-            c.name.lowercase(Locale.ROOT).contains(queryLower) ||
+        classifiedCables.filter { c ->
+            val matchesRole = when (selectedCableRoleFilter) {
+                "PARENTS" -> c.isParent
+                "ENFANTS" -> c.isChild
+                "ISOLES" -> !c.isParent && !c.isChild
+                else -> true
+            }
+            val matchesQuery = queryLower.isBlank() ||
+                    c.name.lowercase(Locale.ROOT).contains(queryLower) ||
                     c.capacityFO.lowercase(Locale.ROOT).contains(queryLower) ||
                     c.cableType.lowercase(Locale.ROOT).contains(queryLower) ||
-                    c.installationType.lowercase(Locale.ROOT).contains(queryLower)
+                    c.installationType.lowercase(Locale.ROOT).contains(queryLower) ||
+                    (c.parentCableName?.lowercase(Locale.ROOT)?.contains(queryLower) == true) ||
+                    (c.originNodeName?.lowercase(Locale.ROOT)?.contains(queryLower) == true) ||
+                    (c.destinationNodeName?.lowercase(Locale.ROOT)?.contains(queryLower) == true)
+
+            matchesRole && matchesQuery
         }
     }
 
@@ -212,10 +224,12 @@ fun KmzNodeClassificationDialog(
                         "3. TYPE_FONC = APPUI ➔ POTEAU\n" +
                         "4. TYPE_FONC = POINT DE BRANCHEMENT OPTIQU ➔ Boîtier (sans sous-classe)\n" +
                         "5. Déduplication : SRO, Chambre et Poteau par position GPS identique ; Boîtier par position GPS + Nom identiques.\n" +
-                        "6. Raccordement APD aux EXTRÉMITÉS des tronçons : Seuil de conformité ≤ 10m. Si décalé > 10m, noté dans la feuille 'Anomalies APD'."
+                        "6. Raccordement APD aux EXTRÉMITÉS des tronçons : Seuil de conformité ≤ 1m. Si décalé > 2m, noté comme Alerte Anomalie APD."
                     } else {
-                        "1. Regroupement par Nom & Géométrie : Les tronçons ayant le même nom de base et connectés bout-à-bout (distance < 5m) sont réagglomérés en un câble unique.\n" +
-                        "2. Détection des Boîtiers : Un boîtier appartient à un câble uniquement s'il se trouve à l'une des extrémités d'un tronçon."
+                        "1. Regroupement Nom & Géométrie : Les tronçons ayant le même nom de base et connectés bout-à-bout (distance ≤ 1m) sont réagglomérés en un câble unique.\n" +
+                        "2. Câbles Parents / Principaux : Câbles raccordés directement au SRO (Niveau 0).\n" +
+                        "3. Câbles Enfants / Dérivés : Câbles dérivant d'un boîtier (ou piqué sur un câble parent). Classifiés par génération (Enfant N1, N2...) avec traçabilité du câble parent et du boîtier d'origine.\n" +
+                        "4. Détection des Boîtiers : Un boîtier appartient à un câble uniquement s'il se trouve à l'une des extrémités d'un tronçon (≤ 1m)."
                     },
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -233,8 +247,8 @@ fun KmzNodeClassificationDialog(
     }
 
     // Dialogue d'exportation Excel Multi-Feuilles
-    if (showCsvExportDialog && pendingCsvPayload != null) {
-        val (fileName, excelContent) = pendingCsvPayload!!
+    if (showCsvExportDialog && pendingXlsxPayload != null) {
+        val (fileName, xlsxBytes) = pendingXlsxPayload!!
 
         AlertDialog(
             onDismissRequest = { showCsvExportDialog = false },
@@ -248,7 +262,7 @@ fun KmzNodeClassificationDialog(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Rapport Excel Multi-Feuilles (.xls)",
+                        text = "Rapport Excel Multi-Feuilles (.xlsx)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -257,10 +271,11 @@ fun KmzNodeClassificationDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Le fichier Excel contiendra 7 feuilles dédiées :\n" +
+                        text = "Le fichier Excel (.xlsx standard) contiendra 8 feuilles dédiées :\n" +
                                 "• SRO, Boîtiers, Chambres, Poteaux, Autres\n" +
                                 "• Câbles FO\n" +
-                                "• Feuille 'Anomalies APD' (Inclus uniquement les écarts d'accrochage >10m)",
+                                "• Câbles Dérivés (Enfants)\n" +
+                                "• Feuille 'Anomalies APD' (Inclus uniquement les anomalies d'accrochage > 1m ou alertes > 2m)",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -273,11 +288,11 @@ fun KmzNodeClassificationDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                val success = saveExcelToPublicDownloads(context, fileName, excelContent)
+                                val success = saveXlsxToPublicDownloads(context, fileName, xlsxBytes)
                                 if (success) {
                                     Toast.makeText(
                                         context,
-                                        "Rapport Excel enregistré dans Téléchargements :\n$fileName",
+                                        "Rapport Excel (.xlsx) enregistré dans Téléchargements :\n$fileName",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 } else {
@@ -333,7 +348,7 @@ fun KmzNodeClassificationDialog(
                             .fillMaxWidth()
                             .clickable {
                                 showCsvExportDialog = false
-                                shareCsvFile(context, fileName, excelContent)
+                                shareXlsxFile(context, fileName, xlsxBytes)
                             }
                             .padding(10.dp)
                     ) {
@@ -341,8 +356,8 @@ fun KmzNodeClassificationDialog(
                             Icon(Icons.Default.Route, contentDescription = null, tint = TelecomNavy, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("Partager le fichier", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text("WhatsApp, Email, Google Drive, Bluetooth...", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Partager le fichier (.xlsx)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("WhatsApp, Email, Google Drive, Excel mobile...", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -520,7 +535,7 @@ fun KmzNodeClassificationDialog(
                                 classifiedCables = classifiedCables,
                                 nodes = nodes
                             )
-                            pendingCsvPayload = payload
+                            pendingXlsxPayload = payload
                             showCsvExportDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
@@ -530,7 +545,7 @@ fun KmzNodeClassificationDialog(
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Excel (.xls)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Excel (.xlsx)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     // Bouton Point d'interrogation pour afficher les règles
@@ -671,16 +686,53 @@ fun KmzNodeClassificationDialog(
 
                 // ONGLET 1 : CLASSIFICATION DES CÂBLES (NOM & GÉOMÉTRIE / POINTS COMMUNS)
                 if (selectedTabIdx == 1) {
-                    // KPI Grid Câbles Compact (Câbles Uniques, Tronçons, Métrage)
+                    // KPI Grid Câbles Compact (Câbles Total, Parents, Enfants, Tronçons, Métrage)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        KpiStatCard("Câbles Uniques", cableStats.totalCables, 100f, Color(0xFF0284C7))
-                        KpiStatCard("Tronçons Total", cableStats.totalSegments, 100f, Color(0xFF7C3AED))
-                        KpiStatCard("Métrage (m)", cableStats.totalLengthMeters.toInt(), 100f, Color(0xFF059669))
+                        KpiStatCard(
+                            label = "Câbles Total",
+                            count = cableStats.totalCables,
+                            percentage = 100f,
+                            color = Color(0xFF0284C7),
+                            isSelected = selectedCableRoleFilter == "TOUS",
+                            onClick = { selectedCableRoleFilter = "TOUS" }
+                        )
+                        KpiStatCard(
+                            label = "Parents (SRO)",
+                            count = cableStats.parentCablesCount,
+                            percentage = cableStats.getPercentage(cableStats.parentCablesCount),
+                            color = Color(0xFF10B981),
+                            isSelected = selectedCableRoleFilter == "PARENTS",
+                            onClick = {
+                                selectedCableRoleFilter = if (selectedCableRoleFilter == "PARENTS") "TOUS" else "PARENTS"
+                            }
+                        )
+                        KpiStatCard(
+                            label = "Enfants (Dérivés)",
+                            count = cableStats.childCablesCount,
+                            percentage = cableStats.getPercentage(cableStats.childCablesCount),
+                            color = Color(0xFF3B82F6),
+                            isSelected = selectedCableRoleFilter == "ENFANTS",
+                            onClick = {
+                                selectedCableRoleFilter = if (selectedCableRoleFilter == "ENFANTS") "TOUS" else "ENFANTS"
+                            }
+                        )
+                        KpiStatCard(
+                            label = "Tronçons Total",
+                            count = cableStats.totalSegments,
+                            percentage = 100f,
+                            color = Color(0xFF7C3AED)
+                        )
+                        KpiStatCard(
+                            label = "Métrage (m)",
+                            count = cableStats.totalLengthMeters.toInt(),
+                            percentage = 100f,
+                            color = Color(0xFF059669)
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -715,7 +767,7 @@ fun KmzNodeClassificationDialog(
                                 decorationBox = { innerTextField ->
                                     if (searchQuery.isEmpty()) {
                                         Text(
-                                            text = "Rechercher un câble (Nom, FO, Type...)",
+                                            text = "Rechercher (Nom, Câble Parent, Boîtier, FO...)",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -739,7 +791,25 @@ fun KmzNodeClassificationDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Filtres par Rôle Hiérarchique (Chips interactifs)
+                    val isolatedCablesCount = classifiedCables.count { !it.isParent && !it.isChild }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        CableRoleChip("Tous (${classifiedCables.size})", "TOUS", selectedCableRoleFilter, Color(0xFF0284C7)) { selectedCableRoleFilter = it }
+                        CableRoleChip("Parents SRO (${cableStats.parentCablesCount})", "PARENTS", selectedCableRoleFilter, Color(0xFF10B981)) { selectedCableRoleFilter = it }
+                        CableRoleChip("Enfants Dérivés (${cableStats.childCablesCount})", "ENFANTS", selectedCableRoleFilter, Color(0xFF3B82F6)) { selectedCableRoleFilter = it }
+                        if (isolatedCablesCount > 0) {
+                            CableRoleChip("Non Raccordés ($isolatedCablesCount)", "ISOLES", selectedCableRoleFilter, Color(0xFF6B7280)) { selectedCableRoleFilter = it }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     // Tableau Câbles FO
                     Surface(
@@ -751,7 +821,7 @@ fun KmzNodeClassificationDialog(
                         if (filteredCablesList.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "Aucun câble détecté dans les tracés/lignes KMZ.",
+                                    text = "Aucun câble ne correspond aux critères.",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -763,11 +833,11 @@ fun KmzNodeClassificationDialog(
                                     modifier = Modifier.fillMaxWidth().background(TelecomNavy).padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Nom du Câble", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.3f))
-                                    Text("Capacité FO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.8f))
-                                    Text("Tronçons & Supports", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.3f))
-                                    Text("Longueur", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.8f))
-                                    Text("Action", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(44.dp), textAlign = TextAlign.Center)
+                                    Text("Nom & Rôle Câble", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.5f))
+                                    Text("Capacité", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.7f))
+                                    Text("Tronçons & Supports", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+                                    Text("Longueur", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.7f))
+                                    Text("Action", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
                                 }
                                 HorizontalDivider()
                                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -827,13 +897,17 @@ private fun KpiStatCard(
     label: String,
     count: Int,
     percentage: Float,
-    color: Color
+    color: Color,
+    isSelected: Boolean = false,
+    onClick: (() -> Unit)? = null
 ) {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f)),
-        modifier = Modifier.width(92.dp)
+        color = if (isSelected) color.copy(alpha = 0.25f) else color.copy(alpha = 0.12f),
+        border = androidx.compose.foundation.BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) color else color.copy(alpha = 0.4f)),
+        modifier = Modifier
+            .width(96.dp)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
@@ -879,6 +953,33 @@ private fun KpiStatCard(
 }
 
 @Composable
+private fun CableRoleChip(
+    label: String,
+    roleKey: String,
+    selectedRole: String,
+    color: Color,
+    onSelectRole: (String) -> Unit
+) {
+    val active = selectedRole == roleKey
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (active) color else color.copy(alpha = 0.12f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color),
+        modifier = Modifier
+            .clickable { onSelectRole(roleKey) }
+            .padding(vertical = 1.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+            color = if (active) Color.White else color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+    }
+}
+
+@Composable
 private fun ClassifiedNodeRow(
     item: ClassifiedKmzNode,
     connectivity: BoitierConnectivity? = null,
@@ -911,6 +1012,18 @@ private fun ClassifiedNodeRow(
                     text = subDetails,
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Support d'accueil (Chambre ou Poteau) pour les boîtiers
+            if (connectivity != null && connectivity.hostingSupportName.isNotBlank() && connectivity.hostingSupportName != "-") {
+                Text(
+                    text = "Support: ${connectivity.hostingSupportName}",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1D4ED8),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1001,22 +1114,68 @@ private fun ClassifiedCableRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelectTrackOnMap() }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Nom du Câble
-        Column(modifier = Modifier.weight(1.3f)) {
-            Text(
-                text = cleanCableName,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        // 1. Nom du Câble & Hiérarchie Parent / Enfant
+        Column(modifier = Modifier.weight(1.5f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = cleanCableName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                // Badge Hiérarchique
+                val (roleLabel, roleColor) = when {
+                    cable.isParent -> "Parent" to Color(0xFF10B981)
+                    cable.isChild -> "Enfant N${cable.hierarchyLevel}" to Color(0xFF3B82F6)
+                    else -> "Isolé" to Color(0xFF6B7280)
+                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = roleColor.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, roleColor)
+                ) {
+                    Text(
+                        text = roleLabel,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = roleColor,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+
+            // Lignée de dérivation (Parent / Origine)
+            if (cable.isChild && !cable.parentCableName.isNullOrBlank()) {
+                val orig = cable.originNodeName?.takeIf { it.isNotBlank() && it != "-" } ?: "Boîtier"
+                Text(
+                    text = "↳ Dérive de: ${cable.parentCableName} [$orig]",
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF2563EB),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else if (cable.isParent) {
+                val orig = cable.originNodeName?.takeIf { it.isNotBlank() && it != "-" } ?: "SRO"
+                Text(
+                    text = "Origine: [$orig]",
+                    fontSize = 8.5.sp,
+                    color = Color(0xFF059669),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
             Text(
                 text = "${cable.cableType} • ${cable.installationType}",
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1028,16 +1187,19 @@ private fun ClassifiedCableRow(
             shape = RoundedCornerShape(6.dp),
             color = Color(0xFF0284C7).copy(alpha = 0.15f),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7)),
-            modifier = Modifier.weight(0.8f)
+            modifier = Modifier.weight(0.7f)
         ) {
             Text(
                 text = cable.capacityFO,
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF0284C7),
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                textAlign = TextAlign.Center
             )
         }
+
+        Spacer(modifier = Modifier.width(4.dp))
 
         // 3. Tronçons & Supports Traversés
         Surface(
@@ -1045,12 +1207,12 @@ private fun ClassifiedCableRow(
             color = Color(0xFFD97706).copy(alpha = 0.15f),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706)),
             modifier = Modifier
-                .weight(1.3f)
+                .weight(1.2f)
                 .clickable { onViewSupports(supportAnalysis) }
         ) {
             Text(
                 text = "${supportAnalysis.supports.size} supp. (${supportAnalysis.totalChambresCount} Ch/${supportAnalysis.totalPoteauxCount} Pot)",
-                fontSize = 9.sp,
+                fontSize = 8.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFFD97706),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
@@ -1059,19 +1221,22 @@ private fun ClassifiedCableRow(
             )
         }
 
+        Spacer(modifier = Modifier.width(4.dp))
+
         // 4. Longueur
         Text(
             text = String.format(Locale.ROOT, "%.0f m", cable.totalLengthMeters),
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF059669),
-            modifier = Modifier.weight(0.8f),
-            maxLines = 1
+            modifier = Modifier.weight(0.7f),
+            maxLines = 1,
+            textAlign = TextAlign.End
         )
 
         // 5. Action Carte
         Box(
-            modifier = Modifier.width(44.dp),
+            modifier = Modifier.width(40.dp),
             contentAlignment = Alignment.Center
         ) {
             IconButton(
@@ -1215,19 +1380,19 @@ private fun generateCablesCsvPayload(
     return Pair(fileName, sb.toString())
 }
 
-private fun saveExcelToPublicDownloads(context: Context, fileName: String, content: String): Boolean {
+private fun saveXlsxToPublicDownloads(context: Context, fileName: String, bytes: ByteArray): Boolean {
     return try {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val contentValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/vnd.ms-excel")
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
             }
             val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
             if (uri != null) {
                 resolver.openOutputStream(uri)?.use { stream ->
-                    stream.write(content.toByteArray(Charsets.UTF_8))
+                    stream.write(bytes)
                 }
                 true
             } else {
@@ -1237,7 +1402,7 @@ private fun saveExcelToPublicDownloads(context: Context, fileName: String, conte
             val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
             if (!downloadDir.exists()) downloadDir.mkdirs()
             val file = File(downloadDir, fileName)
-            file.writeText(content, Charsets.UTF_8)
+            file.writeBytes(bytes)
             true
         }
     } catch (e: Exception) {
@@ -1246,29 +1411,28 @@ private fun saveExcelToPublicDownloads(context: Context, fileName: String, conte
     }
 }
 
-private fun shareCsvFile(context: Context, fileName: String, csvContent: String) {
+private fun shareXlsxFile(context: Context, fileName: String, bytes: ByteArray) {
     try {
-        val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        if (!downloadDir.exists()) downloadDir.mkdirs()
-        val file = File(downloadDir, fileName)
-        file.writeText(csvContent, Charsets.UTF_8)
+        val cacheFile = File(context.cacheDir, fileName)
+        cacheFile.writeBytes(bytes)
 
         val uri = androidx.core.content.FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
-            file
+            cacheFile
         )
 
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_SUBJECT, "Rapport CSV - $fileName")
+            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            putExtra(Intent.EXTRA_SUBJECT, "Rapport Excel FTTH - $fileName")
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        context.startActivity(Intent.createChooser(intent, "Partager le fichier CSV"))
+        context.startActivity(Intent.createChooser(intent, "Partager le rapport Excel (.xlsx)"))
     } catch (e: Exception) {
         e.printStackTrace()
         Toast.makeText(context, "Erreur lors du partage : ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
+

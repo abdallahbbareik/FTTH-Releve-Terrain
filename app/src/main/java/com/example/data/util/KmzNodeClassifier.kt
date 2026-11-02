@@ -74,13 +74,15 @@ object KmzNodeClassifier {
             } catch (_: Exception) {}
         }
 
-        // 2. Chercher dans les notes (format "• KEY : VAL" ou "KEY = VAL")
+        // 2. Chercher dans les notes / description
         if (node.notes.isNotBlank()) {
-            for (line in node.notes.lines()) {
+            val fullNotes = node.notes
+            // Si la description contient des paires séparées par virgules ou retours à la ligne (ex: "REFERENCE = BPE 12 FO, ...")
+            for (line in fullNotes.split("\n", ",")) {
                 val cleanLine = line.removePrefix("•").trim()
                 for (key in keyNames) {
                     if (cleanLine.contains(key, ignoreCase = true)) {
-                        val parts = if (cleanLine.contains(":")) cleanLine.split(":") else cleanLine.split("=")
+                        val parts = if (cleanLine.contains(":")) cleanLine.split(":") else if (cleanLine.contains("=")) cleanLine.split("=") else listOf(cleanLine, "")
                         if (parts.size >= 2) {
                             val v = parts[1].trim()
                             if (v.isNotBlank()) return v

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,7 +42,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
+import com.example.data.local.FtthNodeType
+import com.example.data.util.KmzNodeClassifier
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -97,10 +101,15 @@ fun FtthSynopticCanvasView(
     var offsetY by remember { mutableFloatStateOf(0f) }
 
     var selectedNodeId by remember { mutableStateOf<String?>(null) }
+    var selectedLinkId by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
     val selectedNode = remember(selectedNodeId, graph) {
         graph.nodes.find { it.id == selectedNodeId }
+    }
+
+    val selectedLink = remember(selectedLinkId, graph) {
+        graph.links.find { it.id == selectedLinkId }
     }
 
     val selectedConn = remember(selectedNodeId, connectivities) {
@@ -147,23 +156,33 @@ fun FtthSynopticCanvasView(
                     val fromNode = nodePosMap[link.fromNodeId] ?: continue
                     val toNode = nodePosMap[link.toNodeId] ?: continue
 
-                    val isHighlighted = selectedNodeId != null &&
-                            (selectedNodeId == link.fromNodeId || selectedNodeId == link.toNodeId)
-                    val isDimmed = selectedNodeId != null && !isHighlighted
+                    val isHighlighted = (selectedNodeId != null && (selectedNodeId == link.fromNodeId || selectedNodeId == link.toNodeId)) ||
+                            (selectedLinkId == link.id)
+                    val isDimmed = (selectedNodeId != null || selectedLinkId != null) && !isHighlighted
 
-                    val startX = fromNode.x + 140f
-                    val startY = fromNode.y + 30f
+                    val startX = fromNode.x + 170f
+                    val startY = fromNode.y + 45f
                     val endX = toNode.x
-                    val endY = toNode.y + 30f
+                    val endY = toNode.y + 45f
 
-                    val controlX1 = startX + (endX - startX) * 0.5f
-                    val controlY1 = startY
-                    val controlX2 = startX + (endX - startX) * 0.5f
-                    val controlY2 = endY
+                    val isSameRow = Math.abs(startY - endY) < 5f
 
                     val path = Path().apply {
                         moveTo(startX, startY)
-                        cubicTo(controlX1, controlY1, controlX2, controlY2, endX, endY)
+                        if (isSameRow) {
+                            // Ligne horizontale continue pour les nœuds d'un même câble
+                            lineTo(endX, endY)
+                        } else {
+                            // Ligne en forme de L pour les embranchements :
+                            // 1. Ligne verticale pour l'espacement (du boîtier parent jusqu'au niveau Y de la ligne enfant)
+                            // 2. Ligne horizontale du bas de la ligne verticale jusqu'au nœud enfant
+                            val cornerRadius = 18f
+                            val direction = if (endY > startY) 1f else -1f
+
+                            lineTo(startX, endY - direction * cornerRadius)
+                            quadraticTo(startX, endY, startX + cornerRadius, endY)
+                            lineTo(endX, endY)
+                        }
                     }
 
                     val lineColor = when {
@@ -173,7 +192,7 @@ fun FtthSynopticCanvasView(
                         else -> Color(0xFF0D9488)
                     }
 
-                    val strokeWidth = if (isHighlighted) 4.dp.toPx() else 2.5.dp.toPx()
+                    val strokeWidth = if (isHighlighted) 4.5.dp.toPx() else 2.5.dp.toPx()
                     val alpha = if (isDimmed) 0.25f else 1.0f
 
                     drawPath(
@@ -188,95 +207,334 @@ fun FtthSynopticCanvasView(
                 }
             }
 
-            // Dessin des cartes de Nœuds (SRO et Boîtiers)
+            // Dessin des Étiquettes « Cable » et « Support_Traversés » sur les Liaisons (selon hiérarchie utilisateur)
+            val nodePosMap = graph.nodes.associateBy { it.id }
+            for (link in graph.links) {
+                val fromNode = nodePosMap[link.fromNodeId] ?: continue
+                val toNode = nodePosMap[link.toNodeId] ?: continue
+
+                val startX = fromNode.x + 170f
+                val startY = fromNode.y + 45f
+                val endX = toNode.x
+                val endY = toNode.y + 45f
+
+                val isSameRow = Math.abs(startY - endY) < 5f
+                val isLinkSelected = selectedLinkId == link.id
+
+                val cableTagX: Float
+                val cableTagY: Float
+                val suppTagX: Float
+                val suppTagY: Float
+
+                if (isSameRow) {
+                    cableTagX = startX + 25f
+                    cableTagY = startY - 24f
+
+                    suppTagX = startX + 260f
+                    suppTagY = endY + 8f
+                } else {
+                    // Sur le tronçon horizontal de la ligne en L (à Y = endY, après le virage vertical)
+                    cableTagX = startX + 30f
+                    cableTagY = endY - 24f
+
+                    suppTagX = startX + 260f
+                    suppTagY = endY + 8f
+                }
+
+                // Badge « Cable - Type - Longueur » (au-dessus du connecteur)
+                val connectorLabel = if (link.segmentLengthMeters > 0) {
+                    "${link.cableName} - ${link.installationType} - ${String.format(Locale.ROOT, "%.1fm", link.segmentLengthMeters)}"
+                } else {
+                    "${link.cableName} - ${link.installationType}"
+                }
+
+                val connColor = if (link.installationType.contains("Aérien", ignoreCase = true) || link.installationType.contains("Aerien", ignoreCase = true)) {
+                    Color(0xFF15803D) // Vert foncé pour Aérien
+                } else {
+                    Color(0xFFC2410C) // Orangé foncé pour Conduite
+                }
+
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(cableTagX.roundToInt(), cableTagY.roundToInt()) }
+                        .clickable {
+                            selectedLinkId = if (isLinkSelected) null else link.id
+                            selectedNodeId = null
+                        }
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isLinkSelected) Color(0xFFDC2626) else connColor,
+                        contentColor = Color.White,
+                        shadowElevation = 3.dp
+                    ) {
+                        Text(
+                            text = connectorLabel,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                // Badge « Supports Traversés » (en-dessous du connecteur)
+                if (link.supportsTraversesStr.isNotBlank() && link.supportsTraversesStr != "-") {
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(suppTagX.roundToInt(), suppTagY.roundToInt()) }
+                            .clickable {
+                                selectedLinkId = if (isLinkSelected) null else link.id
+                                selectedNodeId = null
+                            }
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isLinkSelected) Color(0xFFDC2626) else Color(0xFF475569),
+                            contentColor = Color.White,
+                            shadowElevation = 3.dp
+                        ) {
+                            Text(
+                                text = "Supports: ${link.supportsTraversesStr}",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Dessin des cartes de Nœuds (SRO, BPE et PBO) selon le style Excel Synoptique
             for (node in graph.nodes) {
                 val isSelected = selectedNodeId == node.id
                 val isMatchingSearch = matchingNodeIds.contains(node.id)
-                val isDimmed = selectedNodeId != null && !isSelected &&
+                val isDimmed = (selectedNodeId != null || selectedLinkId != null) && !isSelected &&
                         graph.links.none { (it.fromNodeId == node.id && it.toNodeId == selectedNodeId) || (it.toNodeId == node.id && it.fromNodeId == selectedNodeId) }
 
                 val alpha = if (isDimmed) 0.35f else 1.0f
+                val badgeColor = when (node.nodeTypeBadge) {
+                    "SRO" -> SroPurple
+                    "PBO" -> Color(0xFFD97706)
+                    else -> BoitierTeal
+                }
+
                 val cardBorderColor = when {
                     isSelected -> Color(0xFFDC2626)
                     isMatchingSearch -> Color(0xFFF59E0B)
-                    node.isSro -> SroPurple
-                    else -> BoitierTeal
+                    else -> badgeColor
+                }
+
+                val isAerien = node.hostingSupportName.contains("Poteau", ignoreCase = true) ||
+                        node.hostingSupportName.contains("POT", ignoreCase = true) ||
+                        node.hostingSupportName.contains("Aérien", ignoreCase = true) ||
+                        node.rawNode.type == FtthNodeType.POTEAU
+
+                val suppDisplayName = when {
+                    node.hostingSupportName.isNotBlank() && node.hostingSupportName != "-" -> {
+                        val cleaned = node.hostingSupportName.substringAfter("[").substringBefore("]").trim()
+                        if (cleaned.isNotBlank()) cleaned else node.hostingSupportName
+                    }
+                    else -> node.name
+                }
+
+                val classifiedNode = KmzNodeClassifier.classifyNode(node.rawNode)
+                val refText = when {
+                    classifiedNode.reference.isNotBlank() && classifiedNode.reference != "-" -> classifiedNode.reference
+                    node.nodeTypeBadge.isNotBlank() && node.nodeTypeBadge != "-" -> node.nodeTypeBadge
+                    else -> "BPE"
+                }
+                val modeDePose = if (isAerien) "Aérien" else "GC"
+                val refAndModeText = "$refText - $modeDePose"
+
+                val headerBgColor = if (isAerien) Color(0xFFDCFCE7) else Color(0xFFFED7AA) // Vert clair pour Aérien, Orangé clair pour GC
+                val headerTextColor = if (isAerien) Color(0xFF15803D) else Color(0xFF9A3412) // Vert foncé / Orangé foncé
+
+                val inList = if (node.incomingCableName.isNotBlank() && node.incomingCableName != "-") {
+                    node.incomingCableName.split(",", ";").map { it.trim() }.filter { it.isNotEmpty() }
+                } else emptyList()
+
+                val outList = if (node.outgoingCablesStr.isNotBlank() && node.outgoingCablesStr != "-") {
+                    node.outgoingCablesStr.split(",", ";").map { it.trim() }.filter { it.isNotEmpty() }
+                } else emptyList()
+
+                val maxRows = maxOf(inList.size, outList.size, 1)
+                val tablePairs = (0 until maxRows).map { i ->
+                    val inName = inList.getOrNull(i) ?: inList.lastOrNull() ?: "-"
+                    val outName = outList.getOrNull(i) ?: "-"
+                    Pair(inName, outName)
                 }
 
                 Box(
                     modifier = Modifier
                         .offset { IntOffset(node.x.roundToInt(), node.y.roundToInt()) }
-                        .width(150.dp)
+                        .width(185.dp)
                         .graphicsLayer(alpha = alpha)
-                        .clickable { selectedNodeId = if (isSelected) null else node.id }
+                        .clickable {
+                            selectedNodeId = if (isSelected) null else node.id
+                            selectedLinkId = null
+                        }
                 ) {
                     Card(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(6.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isSelected) Color(0xFFFEF2F2) else Color.White
                         ),
                         elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 8.dp else 3.dp),
                         border = androidx.compose.foundation.BorderStroke(
-                            width = if (isSelected || isMatchingSearch) 2.5.dp else 1.dp,
+                            width = if (isSelected || isMatchingSearch) 2.5.dp else 1.2.dp,
                             color = cardBorderColor
                         )
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            // 1. En-tête Excel : Support (Gauche) & Longueur cumulée (Droite)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(headerBgColor)
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = if (node.isSro) SroPurple.copy(alpha = 0.15f) else BoitierTeal.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = if (node.isSro) "SRO" else "Boîtier",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (node.isSro) SroPurple else BoitierTeal,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                    )
-                                }
-
-                                Icon(
-                                    imageVector = if (node.isSro) Icons.Default.SettingsInputComponent else Icons.Default.Cable,
-                                    contentDescription = null,
-                                    tint = if (node.isSro) SroPurple else BoitierTeal,
-                                    modifier = Modifier.size(14.dp)
+                                Text(
+                                    text = suppDisplayName,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = headerTextColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = String.format(Locale.ROOT, "%.2f m", node.cumulativeDistanceMeters),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = headerTextColor,
+                                    maxLines = 1
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                            HorizontalDivider(color = headerTextColor.copy(alpha = 0.3f), thickness = 1.dp)
 
+                            // 2. Nom du boîtier sur une ligne dédiée (ex: JOINT-SPLIT 1/8)
                             Text(
                                 text = node.name,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = TelecomNavy,
+                                color = Color(0xFF1E3A8A), // Bleu foncé
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
 
-                            if (node.incomingCableName.isNotBlank() && node.incomingCableName != "-") {
+                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                            // 3. Référence - Mode de pose (ex: ODC48 - GC / PBO - Aérien)
+                            Text(
+                                text = refAndModeText,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF334155),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+
+                            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+
+                            // 4. Coordonnées GPS (Longitude, Latitude, 0)
+                            Text(
+                                text = "${node.rawNode.longitude},${node.rawNode.latitude},0",
+                                fontSize = 8.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = Color(0xFF475569),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+
+                            HorizontalDivider(color = Color(0xFFCBD5E1), thickness = 1.dp)
+
+                            // 4. Tableau Excel In / Out : Cable entré | Cables Sorties
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFE0F2FE))
+                            ) {
                                 Text(
-                                    text = "In: ${node.incomingCableName}",
-                                    fontSize = 9.sp,
+                                    text = "Cable entré",
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color(0xFF0369A1),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                                VerticalDivider(
+                                    modifier = Modifier.height(18.dp),
+                                    color = Color(0xFFBAE6FD),
+                                    thickness = 1.dp
+                                )
+                                Text(
+                                    text = "Cables Sorties",
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0369A1),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
                                 )
                             }
 
-                            if (node.outgoingCablesStr.isNotBlank() && node.outgoingCablesStr != "-") {
-                                Text(
-                                    text = "Out: ${node.outgoingCablesStr}",
-                                    fontSize = 9.sp,
-                                    color = Color(0xFF0D9488),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            HorizontalDivider(color = Color(0xFFBAE6FD), thickness = 1.dp)
+
+                            // 5. Lignes du Tableau In / Out
+                            tablePairs.forEachIndexed { idx, pair ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(if (idx % 2 == 0) Color.White else Color(0xFFF8FAFC))
+                                ) {
+                                    Text(
+                                        text = pair.first,
+                                        fontSize = 8.sp,
+                                        color = Color(0xFF1E293B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                    VerticalDivider(
+                                        modifier = Modifier.height(16.dp),
+                                        color = Color(0xFFE2E8F0),
+                                        thickness = 1.dp
+                                    )
+                                    Text(
+                                        text = pair.second,
+                                        fontSize = 8.sp,
+                                        color = Color(0xFF1E293B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                                if (idx < tablePairs.size - 1) {
+                                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                                }
                             }
                         }
                     }
@@ -519,6 +777,132 @@ fun FtthSynopticCanvasView(
                         }
                     }
                 }
+            }
+        }
+
+        // 4. Panneau de détails dépliable lors du clic sur un lien (Câble + Supports Traversés)
+        AnimatedVisibility(
+            visible = selectedLink != null,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            if (selectedLink != null) {
+                val fromNode = graph.nodes.find { it.id == selectedLink.fromNodeId }
+                val toNode = graph.nodes.find { it.id == selectedLink.toNodeId }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFD97706),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Cable, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Câble : ${selectedLink.cableName}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = TelecomNavy
+                                    )
+                                    Text(
+                                        text = "Liaison : ${fromNode?.name ?: "?"} ➔ ${toNode?.name ?: "?"} (${selectedLink.capacityFO})",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { selectedLinkId = null },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Fermer")
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "SUPPORTS TRAVERSÉS (CHAMBRES / POTEAUX)",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB45309)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = selectedLink.supportsTraversesStr,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TelecomNavy
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Légende hiérarchique en bas à gauche
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White.copy(alpha = 0.92f),
+            shadowElevation = 3.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(SroPurple, CircleShape))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("SRO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SroPurple)
+                }
+                Text("•", fontSize = 9.sp, color = Color.Gray)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(BoitierTeal, CircleShape))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("BPE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = BoitierTeal)
+                }
+                Text("•", fontSize = 9.sp, color = Color.Gray)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(Color(0xFFD97706), CircleShape))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("PBO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                }
+                Text("•", fontSize = 9.sp, color = Color.Gray)
+                Text("Cable ➔ Support_Traversés", fontSize = 8.5.sp, fontWeight = FontWeight.Medium, color = TelecomNavy)
             }
         }
     }

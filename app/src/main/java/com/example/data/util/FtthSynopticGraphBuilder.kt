@@ -2,20 +2,24 @@ package com.example.data.util
 
 import com.example.data.local.FtthNodeEntity
 import com.example.data.local.FtthNodeType
+import java.util.Locale
 
 data class SynopticNode(
     val id: String,
     val name: String,
     val category: KmzNodeCategory,
-    val level: Int,                // 0 = SRO (racine), 1 = Niveau 1 (boîtier transport), 2 = Niveau 2 (boîtier distribution/PBO), etc.
-    val row: Int,                  // Indice vertical dans le niveau
-    val x: Float,                  // Position calculée X
-    val y: Float,                  // Position calculée Y
+    val level: Int,                // Indice horizontal (colonne le long de la ligne câble)
+    val row: Int,                  // Indice vertical (ligne du câble dans le synoptique)
+    val x: Float,                  // Position X calculée
+    val y: Float,                  // Position Y calculée
     val incomingCableName: String,
     val outgoingCablesStr: String,
     val rawNode: FtthNodeEntity,
     val isSro: Boolean,
-    val isBoitier: Boolean
+    val isBoitier: Boolean,
+    val hostingSupportName: String = "-",
+    val nodeTypeBadge: String = "BPE", // "SRO", "BPE", "PBO"
+    val cumulativeDistanceMeters: Double = 0.0
 )
 
 data class SynopticLink(
@@ -24,7 +28,11 @@ data class SynopticLink(
     val toNodeId: String,
     val cableName: String,
     val capacityFO: String,
-    val cable: ClassifiedCable?
+    val cable: ClassifiedCable?,
+    val supportsTraversesStr: String = "-",
+    val supportsCount: Int = 0,
+    val installationType: String = "Conduite",
+    val segmentLengthMeters: Double = 0.0
 )
 
 data class SynopticGraph(
@@ -38,7 +46,11 @@ data class SynopticGraph(
 object FtthSynopticGraphBuilder {
 
     /**
-     * Tisse et calcule le schéma synoptique du réseau FTTH à partir des nœuds et des câbles.
+     * Algorithme Synoptique Excel par Parcours en Profondeur (DFS) :
+     * - Lignes : Chaque câble reçoit sa propre ligne attribuée par parcours en profondeur (DFS).
+     *   Un parent est toujours au-dessus de ses descendants (aucune collision/chevauchement).
+     * - Colonnes : Calculées dynamiquement. Un câble se dessine en chaîne horizontale, un joint après l'autre.
+     * - Enfants : Partent du joint d'origine où ils sont rattachés. Le joint de départ n'est pas redessiné.
      */
     fun buildGraph(
         nodes: List<FtthNodeEntity>,
@@ -50,9 +62,8 @@ object FtthSynopticGraphBuilder {
         }
 
         val classifiedNodes = nodes.map { KmzNodeClassifier.classifyNode(it) }
-        val nodeById = classifiedNodes.associateBy { it.id }
 
-        // Conserver uniquement les SRO et les Boîtiers (pas de chambres/poteaux seuls dans le synoptique)
+        // Nœuds éligibles (SRO et Boîtiers)
         val eligibleNodes = classifiedNodes.filter { cn ->
             val conn = connectivities[cn.id]
             val isSro = cn.category == KmzNodeCategory.SRO || (conn?.isSro == true)
@@ -64,70 +75,199 @@ object FtthSynopticGraphBuilder {
             return SynopticGraph(emptyList(), emptyList(), 0, 800f, 600f)
         }
 
-        // Map des niveaux calculés pour chaque ID de nœud
-        val nodeLevels = mutableMapOf<String, Int>()
-        val parentMap = mutableMapOf<String, String>() // targetNodeId -> parentNodeId
+        val eligibleNodeMap = eligibleNodes.associateBy { it.id }
+
+        // Grille de placement (col, row) pour chaque ID de nœud
+        val nodeGridPos = mutableMapOf<String, Pair<Int, Int>>()
+        val nodeCumulDist = mutableMapOf<String, Double>()
         val linkMap = mutableListOf<SynopticLink>()
 
-        // 1. Identifier les SRO (Racines, Level 0)
-        val sroNodes = eligibleNodes.filter { cn ->
-            val conn = connectivities[cn.id]
-            cn.category == KmzNodeCategory.SRO || (conn?.isSro == true)
+        // Map des nœuds vers les câbles enfants rattachés
+        val cableNodeSequenceMap = mutableMapOf<String, List<Pair<ClassifiedKmzNode, Double>>>()
+
+        fun getNodesAndDistancesAlongCable(cable: ClassifiedCable): List<Pair<ClassifiedKmzNode, Double>> {
+            if (cableNodeSequenceMap.containsKey(cable.id)) {
+                return cableNodeSequenceMap[cable.id]!!
+            }
+            val analysis = CableSupportAnalyzer.analyzeClassifiedCableSupports(cable, nodes)
+            val result = mutableListOf<Pair<ClassifiedKmzNode, Double>>()
+
+            for (supp in analysis.supports) {
+                val dist = supp.cumulativeDistanceMeters
+                if (supp.isSro || supp.node.type == FtthNodeType.SRO) {
+                    val cn = eligibleNodeMap[supp.node.id]
+                    if (cn != null && result.none { it.first.id == cn.id }) {
+                        result.add(Pair(cn, dist))
+                    }
+                }
+                for (b in supp.hostedBoitiers) {
+                    val cn = eligibleNodeMap[b.id]
+                    if (cn != null && result.none { it.first.id == cn.id }) {
+                        result.add(Pair(cn, dist))
+                    }
+                }
+                if (supp.isBoitier || supp.node.type == FtthNodeType.BOITIER) {
+                    val cn = eligibleNodeMap[supp.node.id]
+                    if (cn != null && result.none { it.first.id == cn.id }) {
+                        result.add(Pair(cn, dist))
+                    }
+                }
+            }
+            cableNodeSequenceMap[cable.id] = result
+            return result
         }
 
-        val rootNodeIds = if (sroNodes.isNotEmpty()) {
-            sroNodes.map { it.id }
-        } else {
-            // Si pas de SRO explicite, prendre le premier boîtier comme racine
-            listOf(eligibleNodes.first().id)
+        // Construire la hiérarchie d'arbre de câbles : parentCable -> childCables
+        val childCablesMap = mutableMapOf<String, MutableList<ClassifiedCable>>()
+
+        // Câble racine principal (Level 0 / Parent starting at SRO)
+        val rootCable = cables.firstOrNull { it.isParent || it.hierarchyLevel == 0 }
+            ?: cables.maxByOrNull { c -> c.capacityFO.filter { it.isDigit() }.toIntOrNull() ?: 0 }
+            ?: cables.first()
+
+        for (c in cables) {
+            if (c.id == rootCable.id) continue
+            val parentName = c.parentCableName
+            val parent = cables.firstOrNull { it.name.contains(parentName, ignoreCase = true) || parentName.contains(it.name, ignoreCase = true) }
+                ?: rootCable
+
+            childCablesMap.getOrPut(parent.id) { mutableListOf() }.add(c)
         }
 
-        rootNodeIds.forEach { id -> nodeLevels[id] = 0 }
+        // Trier les câbles par capacité FO
+        val sortedCables = cables.sortedWith(
+            compareBy<ClassifiedCable> { if (it.isParent) 0 else it.hierarchyLevel }
+                .thenByDescending { c -> c.capacityFO.filter { it.isDigit() }.toIntOrNull() ?: 0 }
+        )
 
-        // 2. Traverser le réseau via les liaisons câbles pour assigner les niveaux hiérarchiques (Breadth-First Search)
-        val queue = ArrayDeque<String>()
-        queue.addAll(rootNodeIds)
-        val visited = mutableSetOf<String>()
-        visited.addAll(rootNodeIds)
+        var nextRowTracker = 0
+        val visitedCables = mutableSetOf<String>()
 
-        while (queue.isNotEmpty()) {
-            val currId = queue.removeFirst()
-            val currLevel = nodeLevels[currId] ?: 0
-            val conn = connectivities[currId] ?: continue
+        // Algorithme DFS de placement des câbles et nœuds par parcours inverse des boîtiers
+        fun traverseCableDfs(
+            cable: ClassifiedCable,
+            parentCol: Int,
+            isRoot: Boolean,
+            baseCumulDist: Double
+        ) {
+            if (visitedCables.contains(cable.id)) return
+            visitedCables.add(cable.id)
 
-            // Parcourir tous les câbles de sortie de ce nœud
-            for (outCable in conn.outgoingCables) {
-                // Trouver quel boîtier de destination ce câble alimente à son autre extrémité
-                val cleanOutName = BoitierCableConnectivityHelper.cleanCableName(outCable.name)
+            val myRow = if (isRoot) 0 else ++nextRowTracker
+            val seq = getNodesAndDistancesAlongCable(cable)
+            if (seq.isEmpty()) return
 
-                // Chercher le nœud éligible dont le câble d'entrée correspond à outCable
-                for (otherNode in eligibleNodes) {
-                    if (otherNode.id == currId) continue
-                    val otherConn = connectivities[otherNode.id] ?: continue
-                    val cleanInName = BoitierCableConnectivityHelper.cleanCableName(otherConn.incomingCableName)
+            val cleanCableName = BoitierCableConnectivityHelper.cleanCableName(cable.name)
 
-                    val matchesIncoming = (outCable.id == otherConn.incomingCable?.id) ||
-                            (cleanInName.isNotBlank() && cleanInName != "-" && (cleanInName == cleanOutName || cleanOutName.contains(cleanInName, ignoreCase = true) || cleanInName.contains(cleanOutName, ignoreCase = true)))
+            var colPointer = if (isRoot) parentCol else (parentCol + 1)
+            var prevNode: ClassifiedKmzNode? = null
+            var prevDist = 0.0
 
-                    if (matchesIncoming) {
-                        if (!visited.contains(otherNode.id)) {
-                            nodeLevels[otherNode.id] = currLevel + 1
-                            parentMap[otherNode.id] = currId
-                            visited.add(otherNode.id)
-                            queue.addLast(otherNode.id)
+            // 1. Placer d'abord tous les nœuds de ce câble sur sa ligne horizontale dédiée
+            val nodeColsForThisCable = mutableMapOf<String, Int>()
+
+            for ((idx, pair) in seq.withIndex()) {
+                val (cn, cableRelDist) = pair
+                val absCumulDist = baseCumulDist + cableRelDist
+
+                val nodeCol: Int
+                if (!nodeGridPos.containsKey(cn.id)) {
+                    nodeCol = colPointer
+                    nodeGridPos[cn.id] = Pair(nodeCol, myRow)
+                    nodeCumulDist[cn.id] = absCumulDist
+                    colPointer++
+                } else {
+                    nodeCol = nodeGridPos[cn.id]!!.first
+                    if (nodeCumulDist[cn.id] == null) {
+                        nodeCumulDist[cn.id] = absCumulDist
+                    }
+                }
+                nodeColsForThisCable[cn.id] = nodeCol
+
+                // Lien horizontal entre nœuds successifs du même câble
+                if (prevNode != null && prevNode.id != cn.id) {
+                    val linkId = "${prevNode.id}_to_${cn.id}_${cable.id}"
+                    if (linkMap.none { it.id == linkId }) {
+                        val segLen = Math.abs(cableRelDist - prevDist)
+                        val supportAnalysis = CableSupportAnalyzer.analyzeClassifiedCableSupports(cable, nodes)
+                        val allSupps = supportAnalysis.supports
+                        // Exclure le premier et le dernier support (qui sont les nœuds de départ et d'arrivée du tronçon)
+                        val intermediateSupps = if (allSupps.size > 2) {
+                            allSupps.subList(1, allSupps.size - 1)
+                        } else {
+                            emptyList()
                         }
+                        val suppStr = if (intermediateSupps.isNotEmpty()) {
+                            intermediateSupps.joinToString(" -> ") { supp ->
+                                val label = supp.supportTypeLabel
+                                val name = supp.node.name.trim()
+                                if (name.startsWith(label, ignoreCase = true)) name else "$label [$name]"
+                            }
+                        } else "-"
 
-                        // Ajouter le lien
-                        val linkId = "${currId}_to_${otherNode.id}_${outCable.id}"
-                        if (linkMap.none { it.id == linkId }) {
+                        linkMap.add(
+                            SynopticLink(
+                                id = linkId,
+                                fromNodeId = prevNode.id,
+                                toNodeId = cn.id,
+                                cableName = cleanCableName,
+                                capacityFO = cable.capacityFO,
+                                cable = cable,
+                                supportsTraversesStr = suppStr,
+                                supportsCount = intermediateSupps.size,
+                                installationType = cable.installationType.ifBlank { "Conduite" },
+                                segmentLengthMeters = if (segLen > 0) segLen else cable.totalLengthMeters
+                            )
+                        )
+                    }
+                }
+
+                prevNode = cn
+                prevDist = cableRelDist
+            }
+
+            // 2. PARCOURS INVERSE DES BOÎTIERS : Le dernier boîtier traité en premier !
+            val childrenOfThisCable = childCablesMap[cable.id] ?: emptyList()
+
+            for (pair in seq.reversed()) {
+                val (cn, _) = pair
+                val nodeCol = nodeColsForThisCable[cn.id] ?: parentCol
+
+                val childrenAtNode = childrenOfThisCable.filter { child ->
+                    val childSeq = getNodesAndDistancesAlongCable(child)
+                    val originBoitierName = child.originNodeName
+                    val firstChildNode = childSeq.firstOrNull()?.first
+                    (firstChildNode != null && firstChildNode.id == cn.id) ||
+                            (originBoitierName.isNotBlank() && originBoitierName != "-" && cn.name.contains(originBoitierName, ignoreCase = true))
+                }
+
+                for (child in childrenAtNode) {
+                    val childSeq = getNodesAndDistancesAlongCable(child)
+                    val firstNewChildNode = childSeq.firstOrNull { !nodeGridPos.containsKey(it.first.id) }?.first
+
+                    traverseCableDfs(
+                        cable = child,
+                        parentCol = nodeCol,
+                        isRoot = false,
+                        baseCumulDist = nodeCumulDist[cn.id] ?: baseCumulDist
+                    )
+
+                    // Lien vertical de dérivation depuis le joint parent vers le premier nouveau nœud de l'enfant
+                    if (firstNewChildNode != null) {
+                        val vertLinkId = "${cn.id}_to_${firstNewChildNode.id}_deriv_${child.id}"
+                        if (linkMap.none { it.id == vertLinkId }) {
                             linkMap.add(
                                 SynopticLink(
-                                    id = linkId,
-                                    fromNodeId = currId,
-                                    toNodeId = otherNode.id,
-                                    cableName = cleanOutName,
-                                    capacityFO = outCable.capacityFO,
-                                    cable = outCable
+                                    id = vertLinkId,
+                                    fromNodeId = cn.id,
+                                    toNodeId = firstNewChildNode.id,
+                                    cableName = BoitierCableConnectivityHelper.cleanCableName(child.name),
+                                    capacityFO = child.capacityFO,
+                                    cable = child,
+                                    supportsTraversesStr = "Dérivation boîtier",
+                                    supportsCount = 0,
+                                    installationType = child.installationType.ifBlank { "Conduite" },
+                                    segmentLengthMeters = 0.0
                                 )
                             )
                         }
@@ -136,74 +276,84 @@ object FtthSynopticGraphBuilder {
             }
         }
 
-        // Attribuer un niveau 1 aux nœuds non visités
-        for (cn in eligibleNodes) {
-            if (!nodeLevels.containsKey(cn.id)) {
-                nodeLevels[cn.id] = 1
+        // Lancer le parcours DFS à partir du câble racine SRO
+        traverseCableDfs(rootCable, parentCol = 0, isRoot = true, baseCumulDist = 0.0)
+
+        // Traiter les câbles non encore visités
+        for (c in sortedCables) {
+            if (!visitedCables.contains(c.id)) {
+                traverseCableDfs(c, parentCol = 1, isRoot = false, baseCumulDist = 0.0)
             }
         }
 
-        val maxLevel = nodeLevels.values.maxOrNull() ?: 0
-
-        // 3. Regrouper les nœuds par niveau et calculer les coordonnées (X, Y)
-        val nodesByLevel = mutableMapOf<Int, MutableList<ClassifiedKmzNode>>()
-        for (lvl in 0..maxLevel) {
-            nodesByLevel[lvl] = mutableListOf()
-        }
+        // Compléter les positions des nœuds éligibles restant
         for (cn in eligibleNodes) {
-            val lvl = nodeLevels[cn.id] ?: 0
-            nodesByLevel.getOrPut(lvl) { mutableListOf() }.add(cn)
+            if (!nodeGridPos.containsKey(cn.id)) {
+                nextRowTracker++
+                nodeGridPos[cn.id] = Pair(1, nextRowTracker)
+                nodeCumulDist[cn.id] = 0.0
+            }
         }
 
-        val columnSpacing = 280f   // Écartement horizontal entre niveaux
-        val rowSpacing = 110f      // Écartement vertical entre boîtiers d'un même niveau
+        val maxCol = nodeGridPos.values.maxOfOrNull { it.first } ?: 0
+        val maxRow = nodeGridPos.values.maxOfOrNull { it.second } ?: 0
+
+        val columnSpacing = 720f   // Écartement horizontal très généreux entre boîtiers (lisibilité parfaite des connecteurs et supports)
+        val rowSpacing = 380f      // Écartement vertical très généreux entre lignes de câble (dégagement optimal du L)
         val startX = 100f
         val startY = 80f
 
-        var maxNodesInLevel = 1
-        nodesByLevel.values.forEach { list ->
-            if (list.size > maxNodesInLevel) maxNodesInLevel = list.size
-        }
-
-        val totalHeight = Math.max(600f, startY * 2 + maxNodesInLevel * rowSpacing)
-        val totalWidth = Math.max(800f, startX * 2 + (maxLevel + 1) * columnSpacing)
+        val totalHeight = Math.max(600f, startY * 2 + (maxRow + 1) * rowSpacing)
+        val totalWidth = Math.max(900f, startX * 2 + (maxCol + 1) * columnSpacing)
 
         val finalNodes = mutableListOf<SynopticNode>()
 
-        for ((lvl, levelNodes) in nodesByLevel) {
-            val xPos = startX + lvl * columnSpacing
-            val levelHeight = levelNodes.size * rowSpacing
-            val levelStartY = (totalHeight - levelHeight) / 2f + (rowSpacing / 2f)
+        for (cn in eligibleNodes) {
+            val (col, row) = nodeGridPos[cn.id] ?: Pair(0, 0)
+            val xPos = startX + col * columnSpacing
+            val yPos = startY + row * rowSpacing
 
-            for ((idx, cn) in levelNodes.withIndex()) {
-                val yPos = levelStartY + idx * rowSpacing
-                val conn = connectivities[cn.id]
-                val isSro = cn.category == KmzNodeCategory.SRO || (conn?.isSro == true)
-                val isBoitier = cn.category == KmzNodeCategory.BOITIER || (conn?.isBoitier == true)
+            val conn = connectivities[cn.id]
+            val isSro = cn.category == KmzNodeCategory.SRO || (conn?.isSro == true)
+            val isBoitier = cn.category == KmzNodeCategory.BOITIER || (conn?.isBoitier == true)
 
-                finalNodes.add(
-                    SynopticNode(
-                        id = cn.id,
-                        name = cn.name,
-                        category = cn.category,
-                        level = lvl,
-                        row = idx,
-                        x = xPos,
-                        y = yPos,
-                        incomingCableName = conn?.incomingCableName ?: "-",
-                        outgoingCablesStr = conn?.outgoingCablesStr ?: "-",
-                        rawNode = cn.rawNode,
-                        isSro = isSro,
-                        isBoitier = isBoitier
-                    )
-                )
+            val nameUpper = cn.name.uppercase(Locale.ROOT)
+            val refUpper = cn.reference.uppercase(Locale.ROOT)
+            val isBpeExplicit = nameUpper.contains("BPE") || nameUpper.contains("JOINT") || nameUpper.contains("SPLIT") || refUpper.contains("BPE") || refUpper.contains("JOINT")
+            val isPbo = (nameUpper.contains("PBO") || (refUpper.contains("PBO") && !isBpeExplicit)) && !isBpeExplicit
+            val badgeType = when {
+                isSro -> "SRO"
+                isPbo -> "PBO"
+                else -> "BPE"
             }
+
+            val cumulDist = nodeCumulDist[cn.id] ?: 0.0
+
+            finalNodes.add(
+                SynopticNode(
+                    id = cn.id,
+                    name = cn.name,
+                    category = cn.category,
+                    level = col,
+                    row = row,
+                    x = xPos,
+                    y = yPos,
+                    incomingCableName = conn?.incomingCableName ?: "-",
+                    outgoingCablesStr = conn?.outgoingCablesStr ?: "-",
+                    rawNode = cn.rawNode,
+                    isSro = isSro,
+                    isBoitier = isBoitier,
+                    hostingSupportName = conn?.hostingSupportName ?: "-",
+                    nodeTypeBadge = badgeType,
+                    cumulativeDistanceMeters = cumulDist
+                )
+            )
         }
 
         return SynopticGraph(
             nodes = finalNodes,
             links = linkMap,
-            maxLevel = maxLevel,
+            maxLevel = maxCol,
             totalWidth = totalWidth,
             totalHeight = totalHeight
         )

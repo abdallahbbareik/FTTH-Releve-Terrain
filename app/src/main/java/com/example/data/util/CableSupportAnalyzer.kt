@@ -217,16 +217,16 @@ object CableSupportAnalyzer {
         val primaryCandidates = candidateList.filter { !it.isBoitierOnly }.toMutableList()
         val rawBoitierCandidates = candidateList.filter { it.isBoitierOnly }
 
-        // FILTRAGE DES BOÎTIERS : Un boîtier appartient au câble UNIQUEMENT s'il intersecte avec l'une des extrémités d'un tronçon
+        // FILTRAGE DES BOÎTIERS : Un boîtier appartient au câble UNIQUEMENT s'il intersecte avec l'une des extrémités d'un tronçon (<= 1m)
         val validBoitierCandidates = rawBoitierCandidates.filter { b ->
             val isNearGPS = tronconExtremityPoints.any { extPt ->
                 TrackGeometryHelper.calculateDistanceMeters(
                     b.node.latitude, b.node.longitude,
                     extPt.latitude, extPt.longitude
-                ) <= 10.0 // Proximité GPS <= 10m de l'extrémité d'un tronçon
+                ) <= 1.0 // Proximité GPS <= 1m de l'extrémité d'un tronçon
             }
             val isNearCumul = tronconExtremityCumulDistances.any { extCumul ->
-                Math.abs(b.cumulDist - extCumul) <= 5.0 // Proximité le long du tracé <= 5m de l'extrémité d'un tronçon
+                Math.abs(b.cumulDist - extCumul) <= 1.0 // Proximité le long du tracé <= 1m de l'extrémité d'un tronçon
             }
             isNearGPS || isNearCumul
         }
@@ -236,7 +236,7 @@ object CableSupportAnalyzer {
 
         for (b in validBoitierCandidates) {
             // Chercher le support d'infrastructure le plus proche de ce boîtier
-            // (Proximité spatiale le long du câble <= 5m OU proximité GPS <= 10m)
+            // (Proximité spatiale le long du câble <= 1m OU proximité GPS <= 1m)
             var bestPrimary: CandidateNode? = null
             var minDeltaDist = Double.MAX_VALUE
 
@@ -247,7 +247,7 @@ object CableSupportAnalyzer {
                     p.node.latitude, p.node.longitude
                 )
 
-                if (deltaCumul <= 5.0 || gpsDist <= 10.0) {
+                if (deltaCumul <= 1.0 || gpsDist <= 1.0) {
                     if (deltaCumul < minDeltaDist) {
                         minDeltaDist = deltaCumul
                         bestPrimary = p
@@ -285,6 +285,28 @@ object CableSupportAnalyzer {
                 .thenBy { it.cumulDist }
         )
 
+        // Dédupliquer les supports primaires à la même position géographique ou avec le même nom (distance <= 1m)
+        val deduplicatedPrimary = mutableListOf<CandidateNode>()
+        for (cand in sortedPrimary) {
+            val duplicate = deduplicatedPrimary.firstOrNull { existing ->
+                existing.node.id == cand.node.id ||
+                (existing.node.name == cand.node.name && Math.abs(existing.cumulDist - cand.cumulDist) <= 2.0) ||
+                (TrackGeometryHelper.calculateDistanceMeters(existing.node.latitude, existing.node.longitude, cand.node.latitude, cand.node.longitude) <= 1.0 && existing.isChambre == cand.isChambre && existing.isPoteau == cand.isPoteau)
+            }
+            if (duplicate == null) {
+                deduplicatedPrimary.add(cand)
+            } else {
+                // Si le doublon possède des boîtiers hébergés, les fusionner dans le premier support
+                val hosted = hostedBoitiersMap[cand.node.id]
+                if (!hosted.isNullOrEmpty()) {
+                    val targetList = hostedBoitiersMap.getOrPut(duplicate.node.id) { mutableListOf() }
+                    for (h in hosted) {
+                        if (targetList.none { it.id == h.id }) targetList.add(h)
+                    }
+                }
+            }
+        }
+
         val intersectedSupports = mutableListOf<IntersectedSupport>()
         var prevDist = 0.0
         var chambresCount = 0
@@ -293,7 +315,7 @@ object CableSupportAnalyzer {
         var boitiersCount = 0
         var othersCount = 0
 
-        for ((idx, candidate) in sortedPrimary.withIndex()) {
+        for ((idx, candidate) in deduplicatedPrimary.withIndex()) {
             val (node, cumulDist, perpDist, isSro, isChambre, isPoteau, isBoitierOnly) = candidate
 
             val supportLabel = when {
@@ -354,12 +376,13 @@ object CableSupportAnalyzer {
         allNodes: List<FtthNodeEntity>,
         maxToleranceMeters: Double = 1.0
     ): CableSupportAnalysisResult {
+        val continuousPoints = KmzCableClassifier.getCableAllPoints(cable)
         val syntheticTrack = StoredTrack(
             id = cable.id,
             name = cable.name,
             totalDistanceMeters = cable.totalLengthMeters,
-            rawPoints = cable.subTracks.flatMap { if (it.points.isNotEmpty()) it.points else it.rawPoints },
-            points = cable.subTracks.flatMap { if (it.points.isNotEmpty()) it.points else it.rawPoints }
+            rawPoints = continuousPoints,
+            points = continuousPoints
         )
         return analyzeCableSupports(syntheticTrack, allNodes, maxToleranceMeters, subTracks = cable.subTracks)
     }

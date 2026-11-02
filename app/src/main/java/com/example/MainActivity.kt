@@ -266,6 +266,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
     val showClassificationDialog by viewModel.showClassificationDialog.collectAsStateWithLifecycle()
 
     val bannerMessage by viewModel.bannerMessage.collectAsStateWithLifecycle()
+    val blinkingEntityId by viewModel.blinkingEntityId.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val blockingTaskState by viewModel.blockingTaskState.collectAsStateWithLifecycle()
     var showWorkflowGuide by remember { mutableStateOf(false) }
@@ -631,6 +632,7 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                 onTrackPhotoClick = { photo -> viewingTrackPhoto = photo },
                 mapFocusTarget = mapFocusTarget,
                 onMapFocusTargetConsumed = { viewModel.clearMapFocusTarget() },
+                blinkingEntityId = blinkingEntityId,
                 isDarkTheme = isDarkTheme,
                 modifier = Modifier.fillMaxSize()
             )
@@ -1191,8 +1193,8 @@ fun FtthMainScreen(viewModel: FtthViewModel, isDarkTheme: Boolean = false) {
                     nodes = rawNodes,
                     tracks = allTracks,
                     onDismiss = { viewModel.dismissClassificationDialog() },
-                    onSelectNodeOnMap = { node -> viewModel.zoomAndFocusOnNode(node) },
-                    onSelectTrackOnMap = { track -> viewModel.openTrackDetail(track) },
+                    onSelectNodeOnMap = { node -> viewModel.zoomAndBlinkOnNode(node) },
+                    onSelectTrackOnMap = { track -> viewModel.zoomAndBlinkOnTrack(track) },
                     onImportKmzFile = { uri -> viewModel.importGeoJsonOrKmz(context, uri) },
                     onRemoveDuplicates = { viewModel.removeDuplicateNodesByLocation() }
                 )

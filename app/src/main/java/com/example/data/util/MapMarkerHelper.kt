@@ -283,4 +283,41 @@ object MapMarkerHelper {
 
         return BitmapDrawable(context.resources, bitmap)
     }
+
+    /**
+     * Cible lumineuse clignotante pour la mise en valeur visuelle de l'entité sélectionnée.
+     */
+    fun createBlinkingTargetDrawable(context: Context, sizeDp: Int = 60): Drawable {
+        val density = context.resources.displayMetrics.density
+        val px = (sizeDp * density).toInt()
+
+        val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val center = px / 2f
+
+        // Anneau extérieur jaune/or éclatant
+        val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#F59E0B")
+            style = Paint.Style.STROKE
+            strokeWidth = 5f * density
+        }
+        canvas.drawCircle(center, center, center - (4f * density), outerPaint)
+
+        // Halo intérieur rouge vif
+        val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#DC2626")
+            style = Paint.Style.STROKE
+            strokeWidth = 4f * density
+        }
+        canvas.drawCircle(center, center, center - (12f * density), innerPaint)
+
+        // Point d'impact central blanc
+        val centerDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(center, center, 5f * density, centerDotPaint)
+
+        return BitmapDrawable(context.resources, bitmap)
+    }
 }

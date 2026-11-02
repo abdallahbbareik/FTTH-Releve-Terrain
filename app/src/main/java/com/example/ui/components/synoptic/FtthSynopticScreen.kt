@@ -530,17 +530,26 @@ private fun DrawScope.drawCableSegment(
         style = Stroke(width = strokeW)
     )
 
-    // Libellé du câble au-dessus de la ligne
-    val midX = (startX + endX) / 2f
-    val midY = (startY + endY) / 2f - 14f * scale
-    val label = "$cableNom (${lengthMeters.toInt()}m)"
+    // Libellé du câble
+    val startLabelX = startX + 10f * scale
+    val endLabelX = endX - 110f * scale
+    val labelY = (startY + endY) / 2f - 14f * scale
+    val cableLabel = "Cable: $cableNom (${lengthMeters.toInt()}m)"
+    val suppLabel = "Support_Traversés"
 
-    val labelLayout = textMeasurer.measure(
-        text = label,
-        style = TextStyle(color = lineColor, fontSize = (10f * scale).coerceAtLeast(8f).sp, fontWeight = FontWeight.Bold),
+    val cableLabelLayout = textMeasurer.measure(
+        text = cableLabel,
+        style = TextStyle(color = lineColor, fontSize = (9.5f * scale).coerceAtLeast(8f).sp, fontWeight = FontWeight.Bold),
         constraints = androidx.compose.ui.unit.Constraints(maxWidth = maxOf(40, (kotlin.math.abs(endX - startX)).toInt()))
     )
-    drawText(textLayoutResult = labelLayout, topLeft = Offset(midX - 30f * scale, midY))
+    drawText(textLayoutResult = cableLabelLayout, topLeft = Offset(startLabelX, labelY))
+
+    val suppLabelLayout = textMeasurer.measure(
+        text = suppLabel,
+        style = TextStyle(color = Color(0xFFB45309), fontSize = (8.5f * scale).coerceAtLeast(7.5f).sp, fontWeight = FontWeight.SemiBold),
+        constraints = androidx.compose.ui.unit.Constraints(maxWidth = maxOf(40, (kotlin.math.abs(endX - startX)).toInt()))
+    )
+    drawText(textLayoutResult = suppLabelLayout, topLeft = Offset(endLabelX, labelY))
 }
 
 /**
