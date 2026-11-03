@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -75,8 +76,11 @@ import com.example.data.local.FtthNodeEntity
 import com.example.data.storage.StoredTrack
 import com.example.data.util.BoitierCableConnectivityHelper
 import com.example.data.util.BoitierConnectivity
+import com.example.data.util.CableSupportAnalyzer
 import com.example.data.util.ClassifiedCable
 import com.example.data.util.ClassifiedKmzNode
+import com.example.data.util.FtthSynopticExporter
+import com.example.data.util.KmzAnalysisPersistenceManager
 import com.example.data.util.KmzCableClassifier
 import com.example.data.util.KmzNodeCategory
 import com.example.data.util.KmzNodeClassifier
@@ -86,6 +90,15 @@ import com.example.ui.theme.TelecomNavy
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+
+data class ClassificationExportPayload(
+    val fileName: String,
+    val bytes: ByteArray,
+    val mimeType: String,
+    val title: String,
+    val description: String,
+    val iconColor: Color
+)
 
 @Composable
 fun KmzNodeClassificationDialog(
@@ -108,30 +121,83 @@ fun KmzNodeClassificationDialog(
         }
     }
 
-    // 1. Classification des Nœuds
-    val classifiedNodes = remember(nodes) {
+    val initialNodes = remember(nodes) {
         nodes.map { KmzNodeClassifier.classifyNode(it) }
     }
-    val nodeStats = remember(classifiedNodes) {
-        KmzNodeClassifier.computeStats(classifiedNodes)
+    val initialNodeStats = remember(initialNodes) {
+        KmzNodeClassifier.computeStats(initialNodes)
     }
 
-    // 2. Classification et Regroupement des Câbles (par Nom et Géométrie/Point commun)
-    val classifiedCables = remember(tracks, nodes) {
-        KmzCableClassifier.classifyAndGroupCables(tracks, nodes)
-    }
-    val cableStats = remember(classifiedCables) {
-        KmzCableClassifier.computeStats(classifiedCables)
-    }
+    var isLoading by remember { mutableStateOf(false) }
+    var isMemorizedDataLoaded by remember { mutableStateOf(false) }
+    var refreshTrigger by remember { mutableStateOf(0) }
 
-    // 3. Connectivité Câbles Entrée / Sorties pour chaque Boîtier
-    val boitierConnectivityMap = remember(nodes, classifiedCables) {
-        BoitierCableConnectivityHelper.computeConnectivities(nodes, classifiedCables)
-    }
+    var classifiedNodes by remember(nodes) { mutableStateOf(initialNodes) }
+    var nodeStats by remember(nodes) { mutableStateOf(initialNodeStats) }
+    var classifiedCables by remember(tracks, nodes) { mutableStateOf<List<ClassifiedCable>>(emptyList()) }
+    var cableStats by remember(tracks, nodes) { mutableStateOf(KmzCableClassifier.computeStats(emptyList())) }
+    var boitierConnectivityMap by remember { mutableStateOf<Map<String, BoitierConnectivity>>(emptyMap()) }
+    var synopticGraph by remember { mutableStateOf(com.example.data.util.SynopticGraph(emptyList(), emptyList(), 0, 800f, 600f)) }
 
-    // 4. Graph Synoptique de l'architecture FTTH
-    val synopticGraph = remember(nodes, classifiedCables, boitierConnectivityMap) {
-        com.example.data.util.FtthSynopticGraphBuilder.buildGraph(nodes, classifiedCables, boitierConnectivityMap)
+    androidx.compose.runtime.LaunchedEffect(nodes, tracks, refreshTrigger) {
+        isLoading = true
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try {
+                // 1. Tenter d'abord de charger les données mémorisées (gain de temps instantané sans refaire les calculs)
+                if (refreshTrigger == 0) {
+                    val cached = KmzAnalysisPersistenceManager.getAnalysis(context, nodes, tracks)
+                    if (cached != null) {
+                        val cStats = KmzCableClassifier.computeStats(cached.cables)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            classifiedCables = cached.cables
+                            cableStats = cStats
+                            boitierConnectivityMap = cached.connectivities
+                            synopticGraph = cached.synopticGraph
+                            isMemorizedDataLoaded = true
+                            isLoading = false
+                        }
+                        return@withContext
+                    }
+                }
+
+                // 2. Si pas de données mémorisées ou réactualisation demandée : calcul complet
+                isMemorizedDataLoaded = false
+                KmzCableClassifier.clearPointsCache()
+                CableSupportAnalyzer.clearCache()
+
+                // Câbles (regroupement et classification)
+                val cCables = KmzCableClassifier.classifyAndGroupCables(tracks, nodes)
+                val cStats = KmzCableClassifier.computeStats(cCables)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    classifiedCables = cCables
+                    cableStats = cStats
+                }
+
+                // Connectivités boîtiers et anomalies APD
+                val connMap = BoitierCableConnectivityHelper.computeConnectivities(nodes, cCables)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    boitierConnectivityMap = connMap
+                }
+
+                // Graph Synoptique FTTH
+                val sGraph = com.example.data.util.FtthSynopticGraphBuilder.buildGraph(nodes, cCables, connMap)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    synopticGraph = sGraph
+                    isLoading = false
+                    isMemorizedDataLoaded = true
+                }
+
+                // 3. Mémoriser les données traitées sur disque pour tous les prochains lancements !
+                val sig = KmzAnalysisPersistenceManager.computeSignature(nodes, tracks)
+                KmzAnalysisPersistenceManager.saveAnalysis(context, sig, cCables, connMap, sGraph)
+
+            } catch (e: Exception) {
+                android.util.Log.e("KmzClassification", "Erreur lors du traitement KMZ en arrière-plan", e)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isLoading = false
+                }
+            }
+        }
     }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -139,17 +205,33 @@ fun KmzNodeClassificationDialog(
     var selectedCableRoleFilter by remember { mutableStateOf("TOUS") }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showCsvExportDialog by remember { mutableStateOf(false) }
-    var pendingXlsxPayload by remember { mutableStateOf<Pair<String, ByteArray>?>(null) } // Pair(fileName, xlsxBytes)
+    var pendingExportPayload by remember { mutableStateOf<ClassificationExportPayload?>(null) }
 
-    val createDocumentLauncher = rememberLauncherForActivityResult(
+    val createXlsxLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     ) { uri: Uri? ->
-        if (uri != null && pendingXlsxPayload != null) {
+        if (uri != null && pendingExportPayload != null) {
             try {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(pendingXlsxPayload!!.second)
+                    out.write(pendingExportPayload!!.bytes)
                 }
-                Toast.makeText(context, "Rapport Excel (.xlsx) enregistré avec succès !", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "${pendingExportPayload!!.title} enregistré avec succès !", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(context, "Erreur lors de l'enregistrement : ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val createPdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri: Uri? ->
+        if (uri != null && pendingExportPayload != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(pendingExportPayload!!.bytes)
+                }
+                Toast.makeText(context, "${pendingExportPayload!!.title} enregistré avec succès !", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 e.printStackTrace()
                 Toast.makeText(context, "Erreur lors de l'enregistrement : ${e.message}", Toast.LENGTH_SHORT).show()
@@ -246,9 +328,9 @@ fun KmzNodeClassificationDialog(
         )
     }
 
-    // Dialogue d'exportation Excel Multi-Feuilles
-    if (showCsvExportDialog && pendingXlsxPayload != null) {
-        val (fileName, xlsxBytes) = pendingXlsxPayload!!
+    // Dialogue d'exportation (Excel Multi-Feuilles ou PDF Synoptique)
+    if (showCsvExportDialog && pendingExportPayload != null) {
+        val payload = pendingExportPayload!!
 
         AlertDialog(
             onDismissRequest = { showCsvExportDialog = false },
@@ -257,12 +339,12 @@ fun KmzNodeClassificationDialog(
                     Icon(
                         imageVector = Icons.Default.Download,
                         contentDescription = null,
-                        tint = Color(0xFF059669),
+                        tint = payload.iconColor,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Rapport Excel Multi-Feuilles (.xlsx)",
+                        text = payload.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -271,11 +353,7 @@ fun KmzNodeClassificationDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Le fichier Excel (.xlsx standard) contiendra 8 feuilles dédiées :\n" +
-                                "• SRO, Boîtiers, Chambres, Poteaux, Autres\n" +
-                                "• Câbles FO\n" +
-                                "• Câbles Dérivés (Enfants)\n" +
-                                "• Feuille 'Anomalies APD' (Inclus uniquement les anomalies d'accrochage > 1m ou alertes > 2m)",
+                        text = payload.description,
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -288,11 +366,11 @@ fun KmzNodeClassificationDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                val success = saveXlsxToPublicDownloads(context, fileName, xlsxBytes)
+                                val success = saveExportFileToPublicDownloads(context, payload.fileName, payload.bytes, payload.mimeType)
                                 if (success) {
                                     Toast.makeText(
                                         context,
-                                        "Rapport Excel (.xlsx) enregistré dans Téléchargements :\n$fileName",
+                                        "${payload.title} enregistré dans Téléchargements :\n${payload.fileName}",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 } else {
@@ -322,7 +400,11 @@ fun KmzNodeClassificationDialog(
                             .clickable {
                                 showCsvExportDialog = false
                                 try {
-                                    createDocumentLauncher.launch(fileName)
+                                    if (payload.mimeType == "application/pdf") {
+                                        createPdfLauncher.launch(payload.fileName)
+                                    } else {
+                                        createXlsxLauncher.launch(payload.fileName)
+                                    }
                                 } catch (e: Exception) {
                                     e.printStackTrace()
                                 }
@@ -348,7 +430,7 @@ fun KmzNodeClassificationDialog(
                             .fillMaxWidth()
                             .clickable {
                                 showCsvExportDialog = false
-                                shareXlsxFile(context, fileName, xlsxBytes)
+                                shareExportFile(context, payload.fileName, payload.bytes, payload.mimeType, payload.title)
                             }
                             .padding(10.dp)
                     ) {
@@ -356,8 +438,8 @@ fun KmzNodeClassificationDialog(
                             Icon(Icons.Default.Route, contentDescription = null, tint = TelecomNavy, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("Partager le fichier (.xlsx)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text("WhatsApp, Email, Google Drive, Excel mobile...", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Partager le fichier", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("WhatsApp, Email, Google Drive, Visualiseur PDF / Excel...", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -423,16 +505,50 @@ fun KmzNodeClassificationDialog(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground
                             )
-                            Text(
-                                text = "${nodeStats.totalNodes} nœuds | ${cableStats.totalCables} câbles (${cableStats.totalSegments} tronçons, ${String.format(Locale.ROOT, "%.0f m", cableStats.totalLengthMeters)})",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "${nodeStats.totalNodes} nœuds | ${cableStats.totalCables} câbles (${cableStats.totalSegments} tronçons, ${String.format(Locale.ROOT, "%.0f m", cableStats.totalLengthMeters)})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (isMemorizedDataLoaded && !isLoading && cableStats.totalCables > 0) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFE8F5E9)
+                                    ) {
+                                        Text(
+                                            text = "⚡ Mémorisé",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF2E7D32),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Fermer")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                KmzAnalysisPersistenceManager.clearCache(context)
+                                refreshTrigger++
+                                Toast.makeText(context, "Réanalyse complète du KMZ en cours...", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = !isLoading
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Réanalyser le KMZ",
+                                tint = TelecomNavy
+                            )
+                        }
+
+                        IconButton(onClick = onDismiss) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Fermer")
+                        }
                     }
                 }
 
@@ -527,25 +643,91 @@ fun KmzNodeClassificationDialog(
                         }
                     }
 
-                    Button(
-                        onClick = {
-                            val payload = com.example.data.util.ExcelExporterHelper.generateExcelPayload(
-                                classifiedNodes = classifiedNodes,
-                                connectivityMap = boitierConnectivityMap,
-                                classifiedCables = classifiedCables,
-                                nodes = nodes
-                            )
-                            pendingXlsxPayload = payload
-                            showCsvExportDialog = true
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1.1f).height(34.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Excel (.xlsx)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    if (selectedTabIdx == 2) {
+                        // Export PDF Synoptique
+                        Button(
+                            onClick = {
+                                val payload = com.example.data.util.FtthSynopticExporter.generateSynopticPdfPayload(
+                                    graph = synopticGraph,
+                                    connectivities = boitierConnectivityMap,
+                                    cables = classifiedCables
+                                )
+                                pendingExportPayload = ClassificationExportPayload(
+                                    fileName = payload.first,
+                                    bytes = payload.second,
+                                    mimeType = "application/pdf",
+                                    title = "Plan Synoptique FTTH (.pdf)",
+                                    description = "Document PDF haute résolution avec plan synoptique vectoriel grand format (A3 Paysage) et bordereau des tronçons de câbles.",
+                                    iconColor = Color(0xFFDC2626)
+                                )
+                                showCsvExportDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.weight(1.1f).height(34.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("PDF Synoptique", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        // Export Excel Synoptique
+                        Button(
+                            onClick = {
+                                val payload = com.example.data.util.FtthSynopticExporter.generateSynopticExcelPayload(
+                                    graph = synopticGraph,
+                                    connectivities = boitierConnectivityMap,
+                                    cables = classifiedCables,
+                                    nodes = nodes
+                                )
+                                pendingExportPayload = ClassificationExportPayload(
+                                    fileName = payload.first,
+                                    bytes = payload.second,
+                                    mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    title = "Synoptique Excel (.xlsx)",
+                                    description = "Classeur Excel avec arborescence hiérarchique, cheminement des tronçons, capacités FO et supports traversés.",
+                                    iconColor = Color(0xFF059669)
+                                )
+                                showCsvExportDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.weight(1.1f).height(34.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Excel Synoptique", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                val payload = com.example.data.util.ExcelExporterHelper.generateExcelPayload(
+                                    classifiedNodes = classifiedNodes,
+                                    connectivityMap = boitierConnectivityMap,
+                                    classifiedCables = classifiedCables,
+                                    nodes = nodes
+                                )
+                                pendingExportPayload = ClassificationExportPayload(
+                                    fileName = payload.first,
+                                    bytes = payload.second,
+                                    mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    title = "Rapport Excel Qualification FTTH",
+                                    description = "Le fichier Excel (.xlsx standard) contiendra 8 feuilles dédiées (SRO, Boîtiers, Chambres, Poteaux, Câbles, Anomalies APD...).",
+                                    iconColor = Color(0xFF059669)
+                                )
+                                showCsvExportDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.weight(1.1f).height(34.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Excel (.xlsx)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
 
                     // Bouton Point d'interrogation pour afficher les règles
@@ -820,10 +1002,25 @@ fun KmzNodeClassificationDialog(
                     ) {
                         if (filteredCablesList.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Aucun câble ne correspond aux critères.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                if (isLoading) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            color = TelecomNavy,
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "Analyse et regroupement des câbles...",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Aucun câble ne correspond aux critères.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         } else {
                             var selectedCableForSupports by remember { mutableStateOf<com.example.data.util.CableSupportAnalysisResult?>(null) }
@@ -876,16 +1073,69 @@ fun KmzNodeClassificationDialog(
 
                 // ONGLET 2 : SYNOPTIQUE GRAPHIQUE FTTH (ARBORESCENCE SRO & BOÎTIERS)
                 if (selectedTabIdx == 2) {
-                    FtthSynopticCanvasView(
-                        graph = synopticGraph,
-                        connectivities = boitierConnectivityMap,
-                        classifiedCables = classifiedCables,
-                        onSelectNodeOnMap = { node ->
-                            onSelectNodeOnMap(node)
-                            onDismiss()
-                        },
-                        modifier = Modifier.fillMaxSize().weight(1f)
-                    )
+                    if (synopticGraph.nodes.isEmpty() && isLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    color = TelecomNavy,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "Calcul et tracé du synoptique FTTH en cours...",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        FtthSynopticCanvasView(
+                            graph = synopticGraph,
+                            connectivities = boitierConnectivityMap,
+                            classifiedCables = classifiedCables,
+                            onSelectNodeOnMap = { node ->
+                                onSelectNodeOnMap(node)
+                                onDismiss()
+                            },
+                            onExportPdf = {
+                                val payload = com.example.data.util.FtthSynopticExporter.generateSynopticPdfPayload(
+                                    graph = synopticGraph,
+                                    connectivities = boitierConnectivityMap,
+                                    cables = classifiedCables
+                                )
+                                pendingExportPayload = ClassificationExportPayload(
+                                    fileName = payload.first,
+                                    bytes = payload.second,
+                                    mimeType = "application/pdf",
+                                    title = "Plan Synoptique FTTH (.pdf)",
+                                    description = "Document PDF haute résolution avec plan synoptique vectoriel grand format (A3 Paysage) et bordereau des tronçons de câbles.",
+                                    iconColor = Color(0xFFDC2626)
+                                )
+                                showCsvExportDialog = true
+                            },
+                            onExportExcel = {
+                                val payload = com.example.data.util.FtthSynopticExporter.generateSynopticExcelPayload(
+                                    graph = synopticGraph,
+                                    connectivities = boitierConnectivityMap,
+                                    cables = classifiedCables,
+                                    nodes = nodes
+                                )
+                                pendingExportPayload = ClassificationExportPayload(
+                                    fileName = payload.first,
+                                    bytes = payload.second,
+                                    mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    title = "Synoptique Excel (.xlsx)",
+                                    description = "Classeur Excel avec arborescence hiérarchique, cheminement des tronçons, capacités FO et supports traversés.",
+                                    iconColor = Color(0xFF059669)
+                                )
+                                showCsvExportDialog = true
+                            },
+                            modifier = Modifier.fillMaxSize().weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -1380,13 +1630,13 @@ private fun generateCablesCsvPayload(
     return Pair(fileName, sb.toString())
 }
 
-private fun saveXlsxToPublicDownloads(context: Context, fileName: String, bytes: ByteArray): Boolean {
+private fun saveExportFileToPublicDownloads(context: Context, fileName: String, bytes: ByteArray, mimeType: String): Boolean {
     return try {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val contentValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
             }
             val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
@@ -1411,7 +1661,7 @@ private fun saveXlsxToPublicDownloads(context: Context, fileName: String, bytes:
     }
 }
 
-private fun shareXlsxFile(context: Context, fileName: String, bytes: ByteArray) {
+private fun shareExportFile(context: Context, fileName: String, bytes: ByteArray, mimeType: String, subject: String) {
     try {
         val cacheFile = File(context.cacheDir, fileName)
         cacheFile.writeBytes(bytes)
@@ -1423,13 +1673,13 @@ private fun shareXlsxFile(context: Context, fileName: String, bytes: ByteArray) 
         )
 
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            putExtra(Intent.EXTRA_SUBJECT, "Rapport Excel FTTH - $fileName")
+            type = mimeType
+            putExtra(Intent.EXTRA_SUBJECT, subject)
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        context.startActivity(Intent.createChooser(intent, "Partager le rapport Excel (.xlsx)"))
+        context.startActivity(Intent.createChooser(intent, "Partager $fileName"))
     } catch (e: Exception) {
         e.printStackTrace()
         Toast.makeText(context, "Erreur lors du partage : ${e.message}", Toast.LENGTH_SHORT).show()

@@ -57,7 +57,7 @@ object FtthSynopticGraphBuilder {
         cables: List<ClassifiedCable>,
         connectivities: Map<String, BoitierConnectivity>
     ): SynopticGraph {
-        if (nodes.isEmpty()) {
+        if (nodes.isEmpty() || cables.isEmpty()) {
             return SynopticGraph(emptyList(), emptyList(), 0, 800f, 600f)
         }
 
@@ -159,6 +159,22 @@ object FtthSynopticGraphBuilder {
 
             val cleanCableName = BoitierCableConnectivityHelper.cleanCableName(cable.name)
 
+            // Pré-calculer l'analyse des supports de ce câble UNE SEULE FOIS pour tous ses tronçons
+            val supportAnalysis = CableSupportAnalyzer.analyzeClassifiedCableSupports(cable, nodes)
+            val allSupps = supportAnalysis.supports
+            val intermediateSupps = if (allSupps.size > 2) {
+                allSupps.subList(1, allSupps.size - 1)
+            } else {
+                emptyList()
+            }
+            val suppStr = if (intermediateSupps.isNotEmpty()) {
+                intermediateSupps.joinToString(" -> ") { supp ->
+                    val label = supp.supportTypeLabel
+                    val name = supp.node.name.trim()
+                    if (name.startsWith(label, ignoreCase = true)) name else "$label [$name]"
+                }
+            } else "-"
+
             var colPointer = if (isRoot) parentCol else (parentCol + 1)
             var prevNode: ClassifiedKmzNode? = null
             var prevDist = 0.0
@@ -189,22 +205,6 @@ object FtthSynopticGraphBuilder {
                     val linkId = "${prevNode.id}_to_${cn.id}_${cable.id}"
                     if (linkMap.none { it.id == linkId }) {
                         val segLen = Math.abs(cableRelDist - prevDist)
-                        val supportAnalysis = CableSupportAnalyzer.analyzeClassifiedCableSupports(cable, nodes)
-                        val allSupps = supportAnalysis.supports
-                        // Exclure le premier et le dernier support (qui sont les nœuds de départ et d'arrivée du tronçon)
-                        val intermediateSupps = if (allSupps.size > 2) {
-                            allSupps.subList(1, allSupps.size - 1)
-                        } else {
-                            emptyList()
-                        }
-                        val suppStr = if (intermediateSupps.isNotEmpty()) {
-                            intermediateSupps.joinToString(" -> ") { supp ->
-                                val label = supp.supportTypeLabel
-                                val name = supp.node.name.trim()
-                                if (name.startsWith(label, ignoreCase = true)) name else "$label [$name]"
-                            }
-                        } else "-"
-
                         linkMap.add(
                             SynopticLink(
                                 id = linkId,
@@ -229,17 +229,27 @@ object FtthSynopticGraphBuilder {
             // 2. PARCOURS INVERSE DES BOÎTIERS : Le dernier boîtier traité en premier !
             val childrenOfThisCable = childCablesMap[cable.id] ?: emptyList()
 
+            // Pré-associer chaque enfant au bon boîtier de la séquence pour éviter les filtrages répétitifs O(N*M)
+            val childrenByNodeId = mutableMapOf<String, MutableList<ClassifiedCable>>()
+            for (child in childrenOfThisCable) {
+                val childSeq = getNodesAndDistancesAlongCable(child)
+                val firstChildNode = childSeq.firstOrNull()?.first
+                val originBoitierName = child.originNodeName
+
+                val matchedNode = seq.firstOrNull { (cn, _) ->
+                    (firstChildNode != null && firstChildNode.id == cn.id) ||
+                    (originBoitierName.isNotBlank() && originBoitierName != "-" && cn.name.contains(originBoitierName, ignoreCase = true))
+                }?.first ?: seq.lastOrNull()?.first
+
+                if (matchedNode != null) {
+                    childrenByNodeId.getOrPut(matchedNode.id) { mutableListOf() }.add(child)
+                }
+            }
+
             for (pair in seq.reversed()) {
                 val (cn, _) = pair
                 val nodeCol = nodeColsForThisCable[cn.id] ?: parentCol
-
-                val childrenAtNode = childrenOfThisCable.filter { child ->
-                    val childSeq = getNodesAndDistancesAlongCable(child)
-                    val originBoitierName = child.originNodeName
-                    val firstChildNode = childSeq.firstOrNull()?.first
-                    (firstChildNode != null && firstChildNode.id == cn.id) ||
-                            (originBoitierName.isNotBlank() && originBoitierName != "-" && cn.name.contains(originBoitierName, ignoreCase = true))
-                }
+                val childrenAtNode = childrenByNodeId[cn.id] ?: emptyList()
 
                 for (child in childrenAtNode) {
                     val childSeq = getNodesAndDistancesAlongCable(child)
@@ -264,9 +274,9 @@ object FtthSynopticGraphBuilder {
                                     cableName = BoitierCableConnectivityHelper.cleanCableName(child.name),
                                     capacityFO = child.capacityFO,
                                     cable = child,
-                                    supportsTraversesStr = "Dérivation boîtier",
+                                    supportsTraversesStr = "-",
                                     supportsCount = 0,
-                                    installationType = child.installationType.ifBlank { "Conduite" },
+                                    installationType = child.installationType.ifBlank { "Aérien" },
                                     segmentLengthMeters = 0.0
                                 )
                             )

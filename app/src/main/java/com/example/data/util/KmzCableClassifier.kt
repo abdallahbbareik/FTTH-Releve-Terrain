@@ -373,7 +373,9 @@ object KmzCableClassifier {
         // PASSE 3 : Raccordement des branches et sous-réseaux locaux restants
         // Si des câbles se connectent entre eux sans être reliés à la racine principale,
         // on ne doit PAS les marquer isolés ! On promeut le plus important en parent de branche locale.
-        while (unoriented.isNotEmpty()) {
+        var branchIter = 0
+        while (unoriented.isNotEmpty() && branchIter < 20) {
+            branchIter++
             var foundConnection = false
             var bestPair: Pair<ClassifiedCable, ClassifiedCable>? = null
             var minPairDist = Double.MAX_VALUE
@@ -447,6 +449,42 @@ object KmzCableClassifier {
      * Vérifie la connexion physique et topologique entre un câble candidat et un câble parent.
      * Prend en compte la distance segmentaire directe et la proximité via un boîtier commun.
      */
+    data class CableBoundingBox(
+        val minLat: Double,
+        val maxLat: Double,
+        val minLon: Double,
+        val maxLon: Double
+    )
+
+    private val cablePointsCache = java.util.concurrent.ConcurrentHashMap<String, List<TrackPoint>>()
+    private val cableBoundsCache = java.util.concurrent.ConcurrentHashMap<String, CableBoundingBox>()
+
+    fun clearPointsCache() {
+        cablePointsCache.clear()
+        cableBoundsCache.clear()
+    }
+
+    fun getCableBoundingBox(cable: ClassifiedCable): CableBoundingBox {
+        return cableBoundsCache.getOrPut(cable.id) {
+            val pts = getCableAllPoints(cable)
+            if (pts.isEmpty()) {
+                CableBoundingBox(0.0, 0.0, 0.0, 0.0)
+            } else {
+                var minLat = pts[0].latitude
+                var maxLat = pts[0].latitude
+                var minLon = pts[0].longitude
+                var maxLon = pts[0].longitude
+                for (p in pts) {
+                    if (p.latitude < minLat) minLat = p.latitude
+                    if (p.latitude > maxLat) maxLat = p.latitude
+                    if (p.longitude < minLon) minLon = p.longitude
+                    if (p.longitude > maxLon) maxLon = p.longitude
+                }
+                CableBoundingBox(minLat, maxLat, minLon, maxLon)
+            }
+        }
+    }
+
     fun checkCableConnection(
         candidate: ClassifiedCable,
         parent: ClassifiedCable,
@@ -455,24 +493,40 @@ object KmzCableClassifier {
         val candPts = getCableAllPoints(candidate)
         if (candPts.size < 2) return Pair(Double.MAX_VALUE, false)
 
+        val parentPts = getCableAllPoints(parent)
+        if (parentPts.size < 2) return Pair(Double.MAX_VALUE, false)
+
+        // Filtrage rapide par Bounding Box des deux câbles précalculée (~50m de marge)
+        val cBounds = getCableBoundingBox(candidate)
+        val pBounds = getCableBoundingBox(parent)
+        val margin = 0.00045 // ~50m
+        if (cBounds.maxLat < pBounds.minLat - margin || cBounds.minLat > pBounds.maxLat + margin ||
+            cBounds.maxLon < pBounds.minLon - margin || cBounds.minLon > pBounds.maxLon + margin) {
+            return Pair(Double.MAX_VALUE, false)
+        }
+
         val candStart = candPts.first()
         val candEnd = candPts.last()
+        val parentStart = parentPts.first()
+        val parentEnd = parentPts.last()
 
         val dStartToParent = minDistanceToCable(candStart, parent)
         val dEndToParent = minDistanceToCable(candEnd, parent)
 
-        val parentPts = getCableAllPoints(parent)
-        val parentStart = parentPts.firstOrNull()
-        val parentEnd = parentPts.lastOrNull()
-        val dParentStartToCand = if (parentStart != null) minDistanceToCable(parentStart, candidate) else Double.MAX_VALUE
-        val dParentEndToCand = if (parentEnd != null) minDistanceToCable(parentEnd, candidate) else Double.MAX_VALUE
+        val dParentStartToCand = minDistanceToCable(parentStart, candidate)
+        val dParentEndToCand = minDistanceToCable(parentEnd, candidate)
 
         val minDirectDist = minOf(minOf(dStartToParent, dEndToParent), minOf(dParentStartToCand, dParentEndToCand))
 
         // Vérifier si candidate et parent partagent un même boîtier
         var sharedBoitierDist = Double.MAX_VALUE
         var sharedBoitierNeedReverse = false
+
+        // Ne tester QUE les boîtiers proches (<= 30m) des extrémités du candidat
         for (b in boitierNodes) {
+            if (Math.abs(candStart.latitude - b.latitude) > 0.00035 && Math.abs(candEnd.latitude - b.latitude) > 0.00035) continue
+            if (Math.abs(candStart.longitude - b.longitude) > 0.00035 && Math.abs(candEnd.longitude - b.longitude) > 0.00035) continue
+
             val dCandStart = TrackGeometryHelper.calculateDistanceMeters(candStart.latitude, candStart.longitude, b.latitude, b.longitude)
             val dCandEnd = TrackGeometryHelper.calculateDistanceMeters(candEnd.latitude, candEnd.longitude, b.latitude, b.longitude)
             val minCandB = minOf(dCandStart, dCandEnd)
@@ -502,9 +556,30 @@ object KmzCableClassifier {
         val pts = getCableAllPoints(cable)
         if (pts.isEmpty()) return Double.MAX_VALUE
         if (pts.size == 1) return TrackGeometryHelper.calculateDistanceMeters(p.latitude, p.longitude, pts[0].latitude, pts[0].longitude)
+
+        // Bounding box du câble précalculée
+        val bounds = getCableBoundingBox(cable)
+        val margin = 0.00045 // ~50m
+        if (p.latitude < bounds.minLat - margin || p.latitude > bounds.maxLat + margin ||
+            p.longitude < bounds.minLon - margin || p.longitude > bounds.maxLon + margin) {
+            return Double.MAX_VALUE
+        }
+
         var minD = Double.MAX_VALUE
+        val pLat = p.latitude
+        val pLon = p.longitude
         for (i in 0 until pts.size - 1) {
-            val d = TrackGeometryHelper.distanceToSegmentMeters(p, pts[i], pts[i + 1])
+            val p1 = pts[i]
+            val p2 = pts[i + 1]
+            val sMinLat = if (p1.latitude < p2.latitude) p1.latitude else p2.latitude
+            val sMaxLat = if (p1.latitude > p2.latitude) p1.latitude else p2.latitude
+            val sMinLon = if (p1.longitude < p2.longitude) p1.longitude else p2.longitude
+            val sMaxLon = if (p1.longitude > p2.longitude) p1.longitude else p2.longitude
+            if (pLat < sMinLat - 0.0003 || pLat > sMaxLat + 0.0003 ||
+                pLon < sMinLon - 0.0003 || pLon > sMaxLon + 0.0003) {
+                continue
+            }
+            val d = TrackGeometryHelper.distanceToSegmentMeters(p, p1, p2)
             if (d < minD) minD = d
         }
         return minD
@@ -528,6 +603,9 @@ object KmzCableClassifier {
     }
 
     fun getCableAllPoints(cable: ClassifiedCable): List<TrackPoint> {
+        val cacheKey = "${cable.id}_${cable.segmentCount}_${cable.startCoordinatesLabel}"
+        cablePointsCache[cacheKey]?.let { return it }
+
         val allPoints = mutableListOf<TrackPoint>()
         for (trk in cable.subTracks) {
             val pts = if (trk.points.isNotEmpty()) trk.points else trk.rawPoints
@@ -546,6 +624,7 @@ object KmzCableClassifier {
                 }
             }
         }
+        cablePointsCache[cacheKey] = allPoints
         return allPoints
     }
 

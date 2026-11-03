@@ -55,18 +55,38 @@ object BoitierCableConnectivityHelper {
             val cable: ClassifiedCable,
             val startPt: TrackPoint,
             val endPt: TrackPoint,
-            val totalLength: Double
+            val totalLength: Double,
+            val allPoints: List<TrackPoint>,
+            val minLat: Double,
+            val maxLat: Double,
+            val minLon: Double,
+            val maxLon: Double
         )
 
         val cableGeometries = cables.mapNotNull { c ->
             val pts = KmzCableClassifier.getCableAllPoints(c)
             if (pts.size >= 2) {
                 val len = if (c.totalLengthMeters > 0) c.totalLengthMeters else TrackGeometryHelper.computeTotalDistanceMeters(pts)
+                var minLat = Double.MAX_VALUE
+                var maxLat = -Double.MAX_VALUE
+                var minLon = Double.MAX_VALUE
+                var maxLon = -Double.MAX_VALUE
+                for (p in pts) {
+                    if (p.latitude < minLat) minLat = p.latitude
+                    if (p.latitude > maxLat) maxLat = p.latitude
+                    if (p.longitude < minLon) minLon = p.longitude
+                    if (p.longitude > maxLon) maxLon = p.longitude
+                }
                 CableExtremity(
                     cable = c,
                     startPt = pts.first(),
                     endPt = pts.last(),
-                    totalLength = len
+                    totalLength = len,
+                    allPoints = pts,
+                    minLat = minLat,
+                    maxLat = maxLat,
+                    minLon = minLon,
+                    maxLon = maxLon
                 )
             } else null
         }
@@ -246,10 +266,29 @@ object BoitierCableConnectivityHelper {
                 val minEndDist = Math.min(dUpstream, dDownstream)
                 var dSegMin = minEndDist
 
-                val pts = KmzCableClassifier.getCableAllPoints(cg.cable)
-                for (i in 0 until pts.size - 1) {
-                    val dSeg = TrackGeometryHelper.distanceToSegmentMeters(nodePt, pts[i], pts[i + 1])
-                    if (dSeg < dSegMin) dSegMin = dSeg
+                val pts = cg.allPoints
+                if (!isDownstreamEnd && !isUpstreamStart &&
+                    node.latitude >= cg.minLat - 0.0003 && node.latitude <= cg.maxLat + 0.0003 &&
+                    node.longitude >= cg.minLon - 0.0003 && node.longitude <= cg.maxLon + 0.0003
+                ) {
+                    val nLat = node.latitude
+                    val nLon = node.longitude
+                    for (i in 0 until pts.size - 1) {
+                        val p1 = pts[i]
+                        val p2 = pts[i + 1]
+                        val pMinLat = if (p1.latitude < p2.latitude) p1.latitude else p2.latitude
+                        val pMaxLat = if (p1.latitude > p2.latitude) p1.latitude else p2.latitude
+                        val pMinLon = if (p1.longitude < p2.longitude) p1.longitude else p2.longitude
+                        val pMaxLon = if (p1.longitude > p2.longitude) p1.longitude else p2.longitude
+
+                        if (nLat < pMinLat - 0.00015 || nLat > pMaxLat + 0.00015 ||
+                            nLon < pMinLon - 0.00015 || nLon > pMaxLon + 0.00015) {
+                            continue
+                        }
+
+                        val dSeg = TrackGeometryHelper.distanceToSegmentMeters(nodePt, p1, p2)
+                        if (dSeg < dSegMin) dSegMin = dSeg
+                    }
                 }
                 val isPassThrough = !isDownstreamEnd && !isUpstreamStart && (dSegMin <= 1.0)
 

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cable
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
@@ -94,6 +95,8 @@ fun FtthSynopticCanvasView(
     connectivities: Map<String, BoitierConnectivity>,
     classifiedCables: List<ClassifiedCable>,
     onSelectNodeOnMap: (FtthNodeEntity) -> Unit,
+    onExportPdf: (() -> Unit)? = null,
+    onExportExcel: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableFloatStateOf(1.0f) }
@@ -593,6 +596,61 @@ fun FtthSynopticCanvasView(
                             modifier = Modifier.size(20.dp)
                         ) {
                             Icon(Icons.Default.Close, contentDescription = "Effacer", modifier = Modifier.size(14.dp))
+                        }
+                    }
+
+                    if (onExportPdf != null || onExportExcel != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        VerticalDivider(modifier = Modifier.height(18.dp), color = Color(0xFFCBD5E1))
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
+                    if (onExportPdf != null) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFDC2626).copy(alpha = 0.12f),
+                            modifier = Modifier
+                                .clickable { onExportPdf() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Export PDF",
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("PDF", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+
+                    if (onExportExcel != null) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF059669).copy(alpha = 0.12f),
+                            modifier = Modifier
+                                .clickable { onExportExcel() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Export Excel",
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Excel", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                            }
                         }
                     }
                 }

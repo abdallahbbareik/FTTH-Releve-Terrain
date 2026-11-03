@@ -210,33 +210,31 @@ object TrackGeometryHelper {
      * Calcule la distance entre un point P et un segment AB (en mètres)
      */
     fun distanceToSegmentMeters(p: TrackPoint, a: TrackPoint, b: TrackPoint): Double {
-        val dAB = calculateDistanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
-        if (dAB < 0.001) {
-            return calculateDistanceMeters(p.latitude, p.longitude, a.latitude, a.longitude)
+        val meanLatRad = Math.toRadians((a.latitude + b.latitude) * 0.5)
+        val cosMean = cos(meanLatRad)
+        val mPerDegLat = 111132.954
+        val mPerDegLon = 111132.954 * cosMean
+
+        val dx = (b.longitude - a.longitude) * mPerDegLon
+        val dy = (b.latitude - a.latitude) * mPerDegLat
+        val denom = dx * dx + dy * dy
+        if (denom < 0.0001) {
+            val dpx = (p.longitude - a.longitude) * mPerDegLon
+            val dpy = (p.latitude - a.latitude) * mPerDegLat
+            return sqrt(dpx * dpx + dpy * dpy)
         }
 
-        // Projection vectorielle locale plane
-        val meanLatRad = Math.toRadians((a.latitude + b.latitude) / 2.0)
-        val xA = 0.0
-        val yA = 0.0
-        val xB = Math.toRadians(b.longitude - a.longitude) * 6371000.0 * cos(meanLatRad)
-        val yB = Math.toRadians(b.latitude - a.latitude) * 6371000.0
-        val xP = Math.toRadians(p.longitude - a.longitude) * 6371000.0 * cos(meanLatRad)
-        val yP = Math.toRadians(p.latitude - a.latitude) * 6371000.0
+        val px = (p.longitude - a.longitude) * mPerDegLon
+        val py = (p.latitude - a.latitude) * mPerDegLat
 
-        val dx = xB - xA
-        val dy = yB - yA
-        val denom = dx * dx + dy * dy
-        if (denom < 0.0001) return calculateDistanceMeters(p.latitude, p.longitude, a.latitude, a.longitude)
-
-        val t = ((xP - xA) * dx + (yP - yA) * dy) / denom
+        val t = (px * dx + py * dy) / denom
         val clampedT = t.coerceIn(0.0, 1.0)
 
-        val projX = xA + clampedT * dx
-        val projY = yA + clampedT * dy
+        val projX = clampedT * dx
+        val projY = clampedT * dy
 
-        val distX = xP - projX
-        val distY = yP - projY
+        val distX = px - projX
+        val distY = py - projY
         return sqrt(distX * distX + distY * distY)
     }
 }

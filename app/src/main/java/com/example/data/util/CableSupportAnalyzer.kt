@@ -41,6 +41,12 @@ data class CableSupportAnalysisResult(
 
 object CableSupportAnalyzer {
 
+    private val analysisCache = java.util.concurrent.ConcurrentHashMap<String, CableSupportAnalysisResult>()
+
+    fun clearCache() {
+        analysisCache.clear()
+    }
+
     /**
      * Identifier et ordonner tous les supports (SRO, Chambres, Poteaux, etc.) traversés par un câble,
      * de son point de départ jusqu'à sa fin, en rattachant les boîtiers à leurs supports d'accueil.
@@ -60,6 +66,9 @@ object CableSupportAnalyzer {
         maxToleranceMeters: Double = 1.0,
         subTracks: List<StoredTrack> = emptyList()
     ): CableSupportAnalysisResult {
+        val cacheKey = "${track.id}_${track.name}_${allNodes.size}_${maxToleranceMeters}"
+        analysisCache[cacheKey]?.let { return it }
+
         val points = if (track.points.isNotEmpty()) track.points else track.rawPoints
         if (points.size < 2 || allNodes.isEmpty()) {
             return CableSupportAnalysisResult(
@@ -76,6 +85,20 @@ object CableSupportAnalyzer {
         }
 
         val totalLength = if (track.totalDistanceMeters > 0) track.totalDistanceMeters else TrackGeometryHelper.computeTotalDistanceMeters(points)
+
+        // Bounding box globale du câble pour exclure immédiatement 90%+ des nœuds distants
+        var minCableLat = Double.MAX_VALUE
+        var maxCableLat = -Double.MAX_VALUE
+        var minCableLon = Double.MAX_VALUE
+        var maxCableLon = -Double.MAX_VALUE
+        for (p in points) {
+            if (p.latitude < minCableLat) minCableLat = p.latitude
+            if (p.latitude > maxCableLat) maxCableLat = p.latitude
+            if (p.longitude < minCableLon) minCableLon = p.longitude
+            if (p.longitude > maxCableLon) maxCableLon = p.longitude
+        }
+        val latMargin = 0.0006 // ~60m de marge
+        val lonMargin = 0.0006
 
         // 1. Déterminer la liste des tronçons et leurs points d'extrémités (début/fin de chaque tronçon)
         val activeSubTracks = if (subTracks.isNotEmpty()) subTracks else listOf(track)
@@ -143,14 +166,34 @@ object CableSupportAnalyzer {
         val candidateList = mutableListOf<CandidateNode>()
 
         for (node in allNodes) {
+            // Filtrage rapide par Bounding Box
+            if (node.latitude < minCableLat - latMargin || node.latitude > maxCableLat + latMargin ||
+                node.longitude < minCableLon - lonMargin || node.longitude > maxCableLon + lonMargin) {
+                continue
+            }
+
             val nodePt = TrackPoint(latitude = node.latitude, longitude = node.longitude)
             var minPerpDist = Double.MAX_VALUE
             var bestCumulDist = 0.0
+
+            val nodeLat = node.latitude
+            val nodeLon = node.longitude
 
             // Tester la proximité orthogonale avec chaque segment [i, i+1] du câble
             for (i in 0 until points.size - 1) {
                 val p1 = points[i]
                 val p2 = points[i + 1]
+
+                val pMinLat = if (p1.latitude < p2.latitude) p1.latitude else p2.latitude
+                val pMaxLat = if (p1.latitude > p2.latitude) p1.latitude else p2.latitude
+                val pMinLon = if (p1.longitude < p2.longitude) p1.longitude else p2.longitude
+                val pMaxLon = if (p1.longitude > p2.longitude) p1.longitude else p2.longitude
+
+                if (nodeLat < pMinLat - 0.0002 || nodeLat > pMaxLat + 0.0002 ||
+                    nodeLon < pMinLon - 0.0002 || nodeLon > pMaxLon + 0.0002) {
+                    continue
+                }
+
                 val perpDist = TrackGeometryHelper.distanceToSegmentMeters(nodePt, p1, p2)
 
                 if (perpDist < minPerpDist) {
@@ -355,7 +398,7 @@ object CableSupportAnalyzer {
             )
         }
 
-        return CableSupportAnalysisResult(
+        val result = CableSupportAnalysisResult(
             cableId = track.id,
             cableName = track.name,
             totalLengthMeters = totalLength,
@@ -366,6 +409,8 @@ object CableSupportAnalyzer {
             totalBoitiersCount = boitiersCount,
             totalOtherSupportsCount = othersCount
         )
+        analysisCache[cacheKey] = result
+        return result
     }
 
     /**
