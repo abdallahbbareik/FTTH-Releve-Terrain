@@ -1088,7 +1088,7 @@ object RealImportService {
         val dist = TrackGeometryHelper.computeTotalDistanceMeters(pts)
         val trackId = "TRK-NAT-${System.currentTimeMillis() % 100000}-$index"
         val notes = buildNativeNotes(description, folderContext, properties)
-        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+        val propsJson = mapToJsonString(properties)
 
         tracks.add(
             StoredTrack(
@@ -1128,7 +1128,7 @@ object RealImportService {
         val notes = buildNativeNotes(description, folderContext, properties)
         val address = properties["address"] ?: properties["adresse"] ?: ""
         val operator = properties["operator"] ?: properties["operateur"] ?: properties["layer"] ?: ""
-        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+        val propsJson = mapToJsonString(properties)
 
         return FtthNodeEntity(
             id = id,
@@ -1173,7 +1173,7 @@ object RealImportService {
         }
         val dist = TrackGeometryHelper.computeTotalDistanceMeters(closedPts)
         val notes = buildNativeNotes(description, folderContext, properties)
-        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+        val propsJson = mapToJsonString(properties)
 
         tracks.add(
             StoredTrack(
@@ -1319,7 +1319,7 @@ object RealImportService {
             )
             links.add(link)
 
-            val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+            val propsJson = mapToJsonString(properties)
             val cableTrackName = if (name.contains("FO", ignoreCase = true)) name else "$name (${lineInfo.capacityFO} FO)"
             tracks.add(
                 StoredTrack(
@@ -1338,7 +1338,7 @@ object RealImportService {
 
         } else {
             // C'est une INFRASTRUCTURE GÉNIE CIVIL (GC / Conduite / Tranchée)
-            val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+            val propsJson = mapToJsonString(properties)
             val trackId = "TRK-GC-${System.currentTimeMillis()}-$index"
             tracks.add(
                 StoredTrack(
@@ -1566,7 +1566,7 @@ object RealImportService {
             else -> NodeStatus.EXISTANT
         }
 
-        val propsJson = try { org.json.JSONObject(properties as Map<*, *>).toString() } catch (_: Exception) { "" }
+        val propsJson = mapToJsonString(properties)
 
         return FtthNodeEntity(
             id = id,
@@ -1643,5 +1643,24 @@ object RealImportService {
         } else {
             cleanRaw
         }
+    }
+
+    private fun mapToJsonString(map: Map<String, String>): String {
+        if (map.isEmpty()) return "{}"
+        return try {
+            map.entries.joinToString(prefix = "{", postfix = "}", separator = ",") { (k, v) ->
+                "\"${escapeJsonString(k)}\":\"${escapeJsonString(v)}\""
+            }
+        } catch (_: Throwable) {
+            "{}"
+        }
+    }
+
+    private fun escapeJsonString(s: String): String {
+        return s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
     }
 }

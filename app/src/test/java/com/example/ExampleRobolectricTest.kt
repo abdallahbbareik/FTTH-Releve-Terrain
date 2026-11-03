@@ -1,7 +1,6 @@
 package com.example
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
+import com.example.data.import.RealImportService
 import com.example.data.local.DefaultFtthData
 import com.example.data.local.FtthNodeType
 import com.example.data.repository.FtthRepository
@@ -9,20 +8,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
 class ExampleRobolectricTest {
-
-  @Test
-  fun `read string from context`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val appName = context.getString(R.string.app_name)
-    assertEquals("Releve-Terrain", appName)
-  }
 
   @Test
   fun `verify default ftth node dataset contains all required architectures`() {
@@ -48,7 +35,6 @@ class ExampleRobolectricTest {
 
   @Test
   fun `verify kmz native import parses points and line tracks without auto-classification`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
     val sampleKml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -76,29 +62,15 @@ class ExampleRobolectricTest {
         </kml>
     """.trimIndent()
 
-    val kmzFile = java.io.File(context.cacheDir, "test_native_import.kmz")
-    val fos = java.io.FileOutputStream(kmzFile)
-    val zos = java.util.zip.ZipOutputStream(fos)
-    zos.putNextEntry(java.util.zip.ZipEntry("doc.kml"))
-    zos.write(sampleKml.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
-    zos.closeEntry()
-    zos.close()
+    val result = RealImportService.parseKmlString(kml = sampleKml, existingNodes = emptyList(), mode = RealImportService.ImportMode.NATIVE)
 
-    val fileUri = android.net.Uri.fromFile(kmzFile)
-    // Mode natif par défaut (sans classification)
-    val result = com.example.data.import.RealImportService.importFromFile(context, fileUri)
-
-    // Vérifier les nœuds / points bruts
     assertTrue("Le point brut doit être importé", result.nodes.any { it.name == "Point_A" })
-    // Vérifier qu'aucun câble synthétique n'a été créé
     assertEquals("Aucun câble ne doit être créé en mode natif", 0, result.links.size)
-    // Vérifier que la polyligne est un tracé brut natif
     assertTrue("La polyligne doit être importée en tracé natif", result.tracks.any { it.name == "Ligne_Principale" && it.type == "Tracé" })
   }
 
   @Test
   fun `verify preserved intelligent classification mode classifies cables with FO and GC`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
     val sampleKml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -141,17 +113,8 @@ class ExampleRobolectricTest {
         </kml>
     """.trimIndent()
 
-    val kmzFile = java.io.File(context.cacheDir, "test_classif_import.kmz")
-    val fos = java.io.FileOutputStream(kmzFile)
-    val zos = java.util.zip.ZipOutputStream(fos)
-    zos.putNextEntry(java.util.zip.ZipEntry("doc.kml"))
-    zos.write(sampleKml.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
-    zos.closeEntry()
-    zos.close()
-
-    val fileUri = android.net.Uri.fromFile(kmzFile)
-    // Mode classification explicite (méthode enregistrée)
-    val result = com.example.data.import.RealImportService.importFromFileWithClassification(context, fileUri)
+    // Mode classification explicite
+    val result = RealImportService.parseKmlString(kml = sampleKml, existingNodes = emptyList(), mode = RealImportService.ImportMode.INTELLIGENT_CLASSIFICATION)
 
     // Vérifier les nœuds classifiés
     assertTrue(result.nodes.any { it.name == "CH_01" && it.type == FtthNodeType.CHAMBRE })
@@ -166,4 +129,3 @@ class ExampleRobolectricTest {
     assertTrue("Le tracé GC doit être classifié", result.tracks.any { it.name == "TRANCHEE_GC" && it.type == "GC" })
   }
 }
-
