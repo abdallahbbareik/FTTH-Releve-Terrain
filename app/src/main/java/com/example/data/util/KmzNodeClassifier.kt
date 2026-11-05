@@ -96,6 +96,16 @@ object KmzNodeClassifier {
     }
 
     /**
+     * Classifie un nœud en utilisant un ensemble dynamique de règles configurées ou apprises.
+     */
+    fun classifyNodeWithRules(
+        node: FtthNodeEntity,
+        rules: List<QualificationRule>
+    ): ClassifiedKmzNode {
+        return SmartNodeQualificationEngine.classifyNodeIntelligently(node, rules).classifiedNode
+    }
+
+    /**
      * Classifie un nœud selon les règles strictes mises à jour :
      * 1. Nom commençant par "SRO" → SRO
      * 2. TYPE_FONC = CHAMBRE → CHAMBRE

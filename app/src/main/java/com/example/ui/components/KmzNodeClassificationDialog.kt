@@ -25,15 +25,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
@@ -42,17 +49,28 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import com.example.data.util.IntelligentQualificationResult
+import com.example.data.util.KmzRulePersistenceManager
+import com.example.data.util.LearnedRuleSuggestion
+import com.example.data.util.QualificationRule
+import com.example.data.util.RuleOperator
+import com.example.data.util.RuleProperty
+import com.example.data.util.SmartNodeQualificationEngine
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -121,23 +139,54 @@ fun KmzNodeClassificationDialog(
         }
     }
 
-    val initialNodes = remember(nodes) {
-        nodes.map { KmzNodeClassifier.classifyNode(it) }
+    var qualificationRules by remember { mutableStateOf(KmzRulePersistenceManager.loadRules(context)) }
+
+    val initialNodes = remember(nodes, qualificationRules) {
+        nodes.map { node ->
+            SmartNodeQualificationEngine.classifyNodeIntelligently(node, qualificationRules).classifiedNode
+        }
     }
     val initialNodeStats = remember(initialNodes) {
         KmzNodeClassifier.computeStats(initialNodes)
     }
 
+    var intelligentResultsMap by remember(nodes, qualificationRules) {
+        mutableStateOf(nodes.associate { node -> node.id to SmartNodeQualificationEngine.classifyNodeIntelligently(node, qualificationRules) })
+    }
+
+    var ruleSuggestions by remember(nodes, qualificationRules) {
+        mutableStateOf(SmartNodeQualificationEngine.analyzeDatasetAndSuggestRules(nodes, qualificationRules))
+    }
+
+    var showAddRuleModal by remember { mutableStateOf(false) }
+    var editingRule by remember { mutableStateOf<QualificationRule?>(null) }
+    var nodeToCorrect by remember { mutableStateOf<ClassifiedKmzNode?>(null) }
+
     var isLoading by remember { mutableStateOf(false) }
     var isMemorizedDataLoaded by remember { mutableStateOf(false) }
     var refreshTrigger by remember { mutableStateOf(0) }
 
-    var classifiedNodes by remember(nodes) { mutableStateOf(initialNodes) }
-    var nodeStats by remember(nodes) { mutableStateOf(initialNodeStats) }
+    var classifiedNodes by remember(nodes, initialNodes) { mutableStateOf(initialNodes) }
+    var nodeStats by remember(nodes, initialNodeStats) { mutableStateOf(initialNodeStats) }
     var classifiedCables by remember(tracks, nodes) { mutableStateOf<List<ClassifiedCable>>(emptyList()) }
     var cableStats by remember(tracks, nodes) { mutableStateOf(KmzCableClassifier.computeStats(emptyList())) }
     var boitierConnectivityMap by remember { mutableStateOf<Map<String, BoitierConnectivity>>(emptyMap()) }
     var synopticGraph by remember { mutableStateOf(com.example.data.util.SynopticGraph(emptyList(), emptyList(), 0, 800f, 600f)) }
+
+    fun reclassifyDatasetWithRules(newRules: List<QualificationRule>) {
+        qualificationRules = newRules
+        KmzRulePersistenceManager.saveRules(context, newRules)
+
+        val newIntelligentMap = nodes.associate { node ->
+            node.id to SmartNodeQualificationEngine.classifyNodeIntelligently(node, newRules)
+        }
+        intelligentResultsMap = newIntelligentMap
+        classifiedNodes = nodes.map { node ->
+            newIntelligentMap[node.id]?.classifiedNode ?: KmzNodeClassifier.classifyNode(node)
+        }
+        nodeStats = KmzNodeClassifier.computeStats(classifiedNodes)
+        ruleSuggestions = SmartNodeQualificationEngine.analyzeDatasetAndSuggestRules(nodes, newRules)
+    }
 
     androidx.compose.runtime.LaunchedEffect(nodes, tracks, refreshTrigger) {
         isLoading = true
@@ -601,6 +650,35 @@ fun KmzNodeClassificationDialog(
                             )
                         }
                     )
+                    Tab(
+                        selected = selectedTabIdx == 3,
+                        onClick = { selectedTabIdx = 3; searchQuery = "" },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "🧠 Règles (${qualificationRules.size})",
+                                    fontWeight = if (selectedTabIdx == 3) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 11.5.sp,
+                                    color = if (selectedTabIdx == 3) TelecomNavy else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (ruleSuggestions.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFFD97706)
+                                    ) {
+                                        Text(
+                                            text = "${ruleSuggestions.size}",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -852,10 +930,14 @@ fun KmzNodeClassificationDialog(
                                     items(filteredNodesList) { item ->
                                         ClassifiedNodeRow(
                                             item = item,
+                                            intelligentResult = intelligentResultsMap[item.id],
                                             connectivity = boitierConnectivityMap[item.id],
                                             onSelectOnMap = {
                                                 onSelectNodeOnMap(item.rawNode)
                                                 onDismiss()
+                                            },
+                                            onCorrectAndLearn = {
+                                                nodeToCorrect = item
                                             }
                                         )
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -1137,8 +1219,89 @@ fun KmzNodeClassificationDialog(
                         )
                     }
                 }
+
+                // ONGLET 3 : RÈGLES & APPRENTISSAGE INTELLIGENT
+                if (selectedTabIdx == 3) {
+                    RulesAndLearningTabContent(
+                        rules = qualificationRules,
+                        suggestions = ruleSuggestions,
+                        onToggleRule = { rule, isChecked ->
+                            val updated = qualificationRules.map { if (it.id == rule.id) it.copy(isEnabled = isChecked) else it }
+                            reclassifyDatasetWithRules(updated)
+                        },
+                        onDeleteRule = { rule ->
+                            val updated = qualificationRules.filter { it.id != rule.id }
+                            reclassifyDatasetWithRules(updated)
+                        },
+                        onAddRuleClick = { showAddRuleModal = true },
+                        onApplySuggestion = { suggestion ->
+                            val updated = qualificationRules + suggestion.rule
+                            reclassifyDatasetWithRules(updated)
+                            Toast.makeText(context, "Règle '${suggestion.rule.name}' activée !", Toast.LENGTH_SHORT).show()
+                        },
+                        onResetRules = {
+                            val defaultRules = KmzRulePersistenceManager.resetToDefaults(context)
+                            reclassifyDatasetWithRules(defaultRules)
+                            Toast.makeText(context, "Règles réinitialisées aux valeurs d'usine", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             }
         }
+    }
+
+    if (showAddRuleModal || editingRule != null) {
+        AddCustomRuleDialog(
+            initialRule = editingRule,
+            onDismiss = {
+                showAddRuleModal = false
+                editingRule = null
+            },
+            onSaveRule = { newRule ->
+                val exists = qualificationRules.any { it.id == newRule.id }
+                val updated = if (exists) {
+                    qualificationRules.map { if (it.id == newRule.id) newRule else it }
+                } else {
+                    qualificationRules + newRule
+                }
+                reclassifyDatasetWithRules(updated)
+                showAddRuleModal = false
+                editingRule = null
+                Toast.makeText(context, "Règle '${newRule.name}' enregistrée !", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (nodeToCorrect != null) {
+        val targetNode = nodeToCorrect!!
+        NodeCorrectionAndLearningDialog(
+            nodeItem = targetNode,
+            onDismiss = { nodeToCorrect = null },
+            onConfirmCorrection = { newCategory, learnRule ->
+                if (learnRule) {
+                    val learnedRule = SmartNodeQualificationEngine.createLearnedRuleFromCorrection(targetNode.rawNode, newCategory)
+                    val updatedRules = qualificationRules + learnedRule
+                    reclassifyDatasetWithRules(updatedRules)
+                    Toast.makeText(context, "Correction appliquée et nouvelle règle '${learnedRule.name}' apprise !", Toast.LENGTH_LONG).show()
+                } else {
+                    val manualRule = QualificationRule(
+                        id = "OVERRIDE_${targetNode.id}",
+                        name = "Correction manuelle : ${targetNode.name}",
+                        category = newCategory,
+                        targetProperty = RuleProperty.NAME,
+                        operator = RuleOperator.EQUALS,
+                        pattern = targetNode.name,
+                        weight = 100,
+                        isEnabled = true,
+                        isCustomLearned = true,
+                        description = "Correction spécifique du nœud"
+                    )
+                    reclassifyDatasetWithRules(qualificationRules + manualRule)
+                    Toast.makeText(context, "Qualification du nœud mise à jour", Toast.LENGTH_SHORT).show()
+                }
+                nodeToCorrect = null
+            }
+        )
     }
 }
 
@@ -1232,10 +1395,13 @@ private fun CableRoleChip(
 @Composable
 private fun ClassifiedNodeRow(
     item: ClassifiedKmzNode,
+    intelligentResult: IntelligentQualificationResult? = null,
     connectivity: BoitierConnectivity? = null,
-    onSelectOnMap: () -> Unit
+    onSelectOnMap: () -> Unit,
+    onCorrectAndLearn: () -> Unit = {}
 ) {
     val badgeColor = parseHexColor(item.category.badgeColorHex)
+    val confidenceScore = intelligentResult?.confidenceScore ?: 90
 
     Row(
         modifier = Modifier
@@ -1246,14 +1412,40 @@ private fun ClassifiedNodeRow(
     ) {
         // 1. Nom nœud (+ sub details + raccordement câbles)
         Column(modifier = Modifier.weight(2.0f)) {
-            Text(
-                text = item.name,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = item.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Confidence Badge
+                val confColor = when {
+                    confidenceScore >= 90 -> Color(0xFF059669) // Vert
+                    confidenceScore >= 70 -> Color(0xFF0284C7) // Bleu
+                    else -> Color(0xFFD97706)                 // Ambre
+                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = confColor.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, confColor.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        text = "$confidenceScore%",
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = confColor,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+
             val subDetails = listOf(item.typeFonc, item.reference)
                 .filter { it.isNotBlank() && it != "-" }
                 .joinToString(" • ")
@@ -1310,7 +1502,7 @@ private fun ClassifiedNodeRow(
             }
         }
 
-        // 2. Catégorie
+        // 2. Catégorie & Règle
         Column(modifier = Modifier.weight(1.2f)) {
             Surface(
                 shape = RoundedCornerShape(6.dp),
@@ -1325,22 +1517,44 @@ private fun ClassifiedNodeRow(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
+            if (item.ruleApplied.isNotBlank()) {
+                Text(
+                    text = item.ruleApplied,
+                    fontSize = 8.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
-        // 3. Action
-        Box(
-            modifier = Modifier.width(44.dp),
-            contentAlignment = Alignment.Center
+        // 3. Actions (Corriger/Apprendre + Voir sur carte)
+        Row(
+            modifier = Modifier.width(54.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
+                onClick = onCorrectAndLearn,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Corriger & Apprendre",
+                    tint = TelecomNavy,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+
+            IconButton(
                 onClick = onSelectOnMap,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(24.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.MyLocation,
                     contentDescription = "Voir sur carte",
                     tint = TelecomCyan,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -1685,4 +1899,531 @@ private fun shareExportFile(context: Context, fileName: String, bytes: ByteArray
         Toast.makeText(context, "Erreur lors du partage : ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
+
+@Composable
+private fun RulesAndLearningTabContent(
+    rules: List<QualificationRule>,
+    suggestions: List<LearnedRuleSuggestion>,
+    onToggleRule: (QualificationRule, Boolean) -> Unit,
+    onDeleteRule: (QualificationRule) -> Unit,
+    onAddRuleClick: () -> Unit,
+    onApplySuggestion: (LearnedRuleSuggestion) -> Unit,
+    onResetRules: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // 1. En-tête avec Actions
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = TelecomNavy.copy(alpha = 0.08f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, TelecomNavy.copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = null,
+                                tint = TelecomNavy,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Apprentissage & Règles de Qualification",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = TelecomNavy
+                            )
+                        }
+
+                        Row {
+                            Button(
+                                onClick = onAddRuleClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text("+ Règle", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.clickable { onResetRules() }
+                            ) {
+                                Text(
+                                    text = "Défaut",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Ajustez les règles de qualification des nœuds FTTH. Le système apprend automatiquement les règles récurrentes depuis vos données KMZ et vos corrections.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // 2. Suggestions de règles (Mining IA)
+        if (suggestions.isNotEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Suggestions d'apprentissage IA / Topologique (${suggestions.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = Color(0xFFB45309)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        suggestions.forEach { sugg ->
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color.White,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCD34D)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = parseHexColor(sugg.rule.category.badgeColorHex).copy(alpha = 0.15f)
+                                            ) {
+                                                Text(
+                                                    text = sugg.rule.category.label,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = parseHexColor(sugg.rule.category.badgeColorHex),
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = sugg.rule.name,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                        Text(
+                                            text = "${sugg.explanation} Exemples: ${sugg.sampleNodeNames.joinToString(", ")}",
+                                            fontSize = 9.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Button(
+                                        onClick = { onApplySuggestion(sugg) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Activer (${sugg.matchingNodeCount})", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Liste des Règles Actives
+        item {
+            Text(
+                text = "Bases des Règles de Qualification (${rules.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+
+        items(rules) { rule ->
+            val catColor = parseHexColor(rule.category.badgeColorHex)
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (rule.isEnabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (rule.isEnabled) catColor.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = catColor.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = rule.category.label,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = catColor,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+
+                            if (rule.isCustomLearned) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFEDE9FE)
+                                ) {
+                                    Text(
+                                        text = "🧠 Appris",
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF7C3AED),
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            Text(
+                                text = rule.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = if (rule.isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = "Propriété: ${rule.targetProperty.label} • Condition: ${rule.operator.label} '${rule.pattern}' • Poids: ${rule.weight}",
+                            fontSize = 9.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = rule.isEnabled,
+                            onCheckedChange = { isChecked -> onToggleRule(rule, isChecked) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = catColor, checkedTrackColor = catColor.copy(alpha = 0.3f)),
+                            modifier = Modifier.scale(0.75f)
+                        )
+
+                        if (rule.isCustomLearned) {
+                            IconButton(
+                                onClick = { onDeleteRule(rule) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Supprimer la règle",
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddCustomRuleDialog(
+    initialRule: QualificationRule? = null,
+    onDismiss: () -> Unit,
+    onSaveRule: (QualificationRule) -> Unit
+) {
+    var ruleName by remember { mutableStateOf(initialRule?.name ?: "") }
+    var selectedCategory by remember { mutableStateOf(initialRule?.category ?: KmzNodeCategory.BOITIER) }
+    var selectedProperty by remember { mutableStateOf(initialRule?.targetProperty ?: RuleProperty.TYPE_FONC) }
+    var selectedOperator by remember { mutableStateOf(initialRule?.operator ?: RuleOperator.CONTAINS) }
+    var patternValue by remember { mutableStateOf(initialRule?.pattern ?: "") }
+    var weightValue by remember { mutableStateOf(initialRule?.weight ?: 80) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (initialRule == null) "Créer une règle de qualification" else "Éditer la règle",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = ruleName,
+                    onValueChange = { ruleName = it },
+                    label = { Text("Nom de la règle", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Text("Catégorie Ciblée :", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    KmzNodeCategory.values().filter { it != KmzNodeCategory.AUTRE }.forEach { cat ->
+                        val active = selectedCategory == cat
+                        val catColor = parseHexColor(cat.badgeColorHex)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (active) catColor else catColor.copy(alpha = 0.12f),
+                            modifier = Modifier.clickable { selectedCategory = cat }
+                        ) {
+                            Text(
+                                text = cat.label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (active) Color.White else catColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                Text("Propriété à Vérifier :", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    RuleProperty.values().forEach { prop ->
+                        val active = selectedProperty == prop
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (active) TelecomNavy else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable { selectedProperty = prop }
+                        ) {
+                            Text(
+                                text = prop.label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                Text("Condition :", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    RuleOperator.values().forEach { op ->
+                        val active = selectedOperator == op
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (active) TelecomCyan else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable { selectedOperator = op }
+                        ) {
+                            Text(
+                                text = op.label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = patternValue,
+                    onValueChange = { patternValue = it },
+                    label = { Text("Motif / Texte / Valeur", fontSize = 11.sp) },
+                    placeholder = { Text("Ex: CHAMBRE, APPUI, PBO...", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalName = ruleName.ifBlank { "Règle ${selectedCategory.label} (${selectedProperty.label})" }
+                    val newRule = QualificationRule(
+                        id = initialRule?.id ?: "CUSTOM_RULE_${System.currentTimeMillis()}",
+                        name = finalName,
+                        category = selectedCategory,
+                        targetProperty = selectedProperty,
+                        operator = selectedOperator,
+                        pattern = patternValue,
+                        weight = weightValue,
+                        isEnabled = true,
+                        isCustomLearned = true,
+                        description = "Règle créée manuellement"
+                    )
+                    onSaveRule(newRule)
+                },
+                enabled = patternValue.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy)
+            ) {
+                Text("Enregistrer & Appliquer", fontSize = 11.sp)
+            }
+        },
+        dismissButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Text("Annuler", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    )
+}
+
+@Composable
+private fun NodeCorrectionAndLearningDialog(
+    nodeItem: ClassifiedKmzNode,
+    onDismiss: () -> Unit,
+    onConfirmCorrection: (newCategory: KmzNodeCategory, learnRule: Boolean) -> Unit
+) {
+    var selectedCategory by remember { mutableStateOf(nodeItem.category) }
+    var shouldLearnRule by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Psychology, contentDescription = null, tint = TelecomNavy, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Correction & Apprentissage du Nœud", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("Nœud : ${nodeItem.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(
+                    text = "TYPE_FONC: ${nodeItem.typeFonc} • Réf: ${nodeItem.reference} • Dossier: ${nodeItem.rawNode.folderName}",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Sélectionnez la Vraie Catégorie FTTH :", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+
+                KmzNodeCategory.values().filter { it != KmzNodeCategory.AUTRE }.forEach { cat ->
+                    val active = selectedCategory == cat
+                    val catColor = parseHexColor(cat.badgeColorHex)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (active) catColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            .clickable { selectedCategory = cat }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = active,
+                            onClick = { selectedCategory = cat },
+                            colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = catColor)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = cat.label, fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = if (active) catColor else MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { shouldLearnRule = !shouldLearnRule }
+                        .padding(vertical = 4.dp)
+                ) {
+                    Checkbox(
+                        checked = shouldLearnRule,
+                        onCheckedChange = { shouldLearnRule = it }
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "🧠 Apprendre cette règle et l'appliquer à tous les nœuds similaires du projet !",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TelecomNavy
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirmCorrection(selectedCategory, shouldLearnRule) },
+                colors = ButtonDefaults.buttonColors(containerColor = TelecomNavy)
+            ) {
+                Text("Valider & Appliquer", fontSize = 11.sp)
+            }
+        },
+        dismissButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Text("Annuler", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    )
+}
+
 
